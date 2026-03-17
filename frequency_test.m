@@ -145,7 +145,7 @@ grid on; xlim([0.1 30]); ylim([-270 0]);
 subplot(2,2,2);
 semilogx(freq_range, G_xcdot_dB, 'b-', 'LineWidth', 2);
 xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-title('V_{cmd} \rightarrow \dot{x}_c [cm-s/V]', 'Interpreter', 'tex');
+title('V_cmd -> x_c_dot [cm-s/V]', 'Interpreter', 'none');
 grid on; xlim([0.1 30]);
 
 subplot(2,2,4);
@@ -230,7 +230,7 @@ subplot(2,2,1);
 semilogx(freq_range, G_xc_dB, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(test_freqs, sim_xc_dB, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
 xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-title('V_{cmd} \rightarrow x_c [cm-V]', 'Interpreter', 'tex');
+title('V_cmd -> x_c [cm/V]', 'Interpreter', 'none');
 legend('Analytical (linear)', 'Simulation (nonlinear)', 'Location', 'best');
 grid on; xlim([0.1 30]);
 
@@ -245,7 +245,7 @@ subplot(2,2,2);
 semilogx(freq_range, G_xcdot_dB, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(test_freqs, sim_xcdot_dB, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
 xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-title('V_{cmd} \rightarrow \dot{x}_c [cm-s/V]', 'Interpreter', 'tex');
+title('V_cmd -> x_c_dot [cm-s/V]', 'Interpreter', 'none');
 legend('Analytical (linear)', 'Simulation (nonlinear)', 'Location', 'best');
 grid on; xlim([0.1 30]);
 
@@ -255,7 +255,7 @@ semilogx(test_freqs, sim_xcdot_phase, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
 xlabel('Frequency [Hz]'); ylabel('Phase [deg]');
 grid on; xlim([0.1 30]); ylim([-180 0]);
 
-sgtitle(sprintf('Cart on Table: Model Frequency Response (A_{test}=%.1fV)', A_test), ...
+sgtitle(sprintf('Cart on Table: Model Frequency Response (A_test=%.1fV)', A_test), ...
     'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
 
 % Save simulation results for later comparison
@@ -325,24 +325,29 @@ set_param(mdl_freq, 'Solver', 'ode45', ...
     'RelTol', '1e-4', ...
     'AbsTol', '1e-6');
 
-% ---- CHIRP INPUT (From Workspace) ----
+% ---- CHIRP INPUT ----
 add_block('simulink/Sources/From Workspace', [mdl_freq '/Chirp_Vcmd'], ...
     'VariableName', 'chirp_input', ...
-    'SampleTime', '0', ...
-    'Interpolate', 'on', ...
     'Position', [50 150 150 190]);
 
-% ---- PLANT MODEL (S-Function) ----
-add_block('simulink/User-Defined Functions/Level-2 MATLAB S-Function', ...
-    [mdl_freq '/Cart_Plant'], ...
-    'FunctionName', 'cart_table_sfun', ...
-    'Position', [250 135 400 205]);
+% ---- AMPLIFIER GAIN (K_a) ----
+add_block('simulink/Math Operations/Gain', [mdl_freq '/Amp_Gain'], ...
+    'Gain', 'K_a', 'Position', [180 153 220 187]);
+
+% ---- VOLTAGE SATURATION (V_sat) ----
+add_block('simulink/Discontinuities/Saturation', [mdl_freq '/V_Sat'], ...
+    'UpperLimit', 'V_sat', 'LowerLimit', '-V_sat', ...
+    'Position', [240 153 285 187]);
+
+% ---- STATE-SPACE PLANT ----
+% Uses A_cart, B_cart from seesaw_params.m
+add_block('simulink/Continuous/State-Space', [mdl_freq '/Cart_SS'], ...
+    'A', 'A_cart', 'B', 'B_cart', 'C', 'C_cart', 'D', 'D_cart', ...
+    'Position', [310 135 430 205]);
 
 % ---- DEMUX ----
-% Output: [x_c, x_c_dot, i_m, V_m, F_c]
 add_block('simulink/Signal Routing/Demux', [mdl_freq '/Demux'], ...
-    'Outputs', '5', ...
-    'Position', [470 110 475 230]);
+    'Outputs', '2', 'Position', [470 145 475 195]);
 
 % ---- UNIT CONVERSIONS ----
 add_block('simulink/Math Operations/Gain', [mdl_freq '/m_to_cm'], ...
@@ -383,12 +388,17 @@ add_block('simulink/Sinks/To Workspace', [mdl_freq '/ToWS_sim_xcdot'], ...
     'Position', [620 155 690 175]);
 
 % ---- WIRING ----
-add_line(mdl_freq, 'Chirp_Vcmd/1', 'Cart_Plant/1', 'autorouting', 'smart');
+add_line(mdl_freq, 'Chirp_Vcmd/1', 'Amp_Gain/1', 'autorouting', 'smart');
+add_line(mdl_freq, 'Amp_Gain/1', 'V_Sat/1', 'autorouting', 'smart');
+add_line(mdl_freq, 'V_Sat/1', 'Cart_SS/1', 'autorouting', 'smart');
+add_line(mdl_freq, 'Cart_SS/1', 'Demux/1', 'autorouting', 'smart');
+
 add_line(mdl_freq, 'Chirp_Vcmd/1', 'V_cmd/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'Chirp_Vcmd/1', 'ToWS_Vcmd/1', 'autorouting', 'smart');
-add_line(mdl_freq, 'Cart_Plant/1', 'Demux/1', 'autorouting', 'smart');
+
 add_line(mdl_freq, 'Demux/1', 'm_to_cm/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'Demux/2', 'vel_to_cms/1', 'autorouting', 'smart');
+
 add_line(mdl_freq, 'm_to_cm/1', 'Sim Position [cm]/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'vel_to_cms/1', 'Sim Velocity [cm-s]/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'm_to_cm/1', 'ToWS_sim_xc/1', 'autorouting', 'smart');
@@ -407,11 +417,21 @@ end
 if quarc_available
     fprintf('  Adding QUARC hardware blocks...\n');
 
-    % QUARC solver override
+    % --- FORCE EXTERNAL MODE & LOGGING SETTINGS ---
+    set_param(mdl_freq, 'SimulationMode', 'external');
+    
+    % QUARC Target & Solver
+    set_param(mdl_freq, 'SystemTargetFile', 'quarc_win64.tlc');
     set_param(mdl_freq, 'SolverType', 'Fixed-step', ...
         'Solver', 'ode1', ...
         'FixedStep', num2str(Ts_quarc), ...
         'StopTime', num2str(chirp_duration));
+
+    % Enable MAT-file logging (This ensures data persists after STOP)
+    set_param(mdl_freq, 'RTWLogStorageType', 'RAM');
+    set_param(mdl_freq, 'SaveLog', 'on');
+    set_param(mdl_freq, 'SignalLogging', 'on');
+    set_param(mdl_freq, 'SaveFormat', 'Dataset'); % Modern standard
 
     try
         % HIL Initialize
@@ -468,7 +488,7 @@ if quarc_available
             'Position', [670 515 740 535]);
 
         % Wire QUARC blocks
-        add_line(mdl_freq, 'Chirp_Vcmd/1', 'Motor Command/1', 'autorouting', 'smart');
+        add_line(mdl_freq, 'V_Sat/1', 'Motor Command/1', 'autorouting', 'smart');
         add_line(mdl_freq, 'Encoder/1', 'Enc_to_m/1', 'autorouting', 'smart');
         add_line(mdl_freq, 'Enc_to_m/1', 'HW_to_cm/1', 'autorouting', 'smart');
         add_line(mdl_freq, 'Enc_to_m/1', 'Deriv_xc/1', 'autorouting', 'smart');
@@ -519,9 +539,27 @@ fprintf('  Total test duration: %.0f seconds\n', chirp_duration);
 
 fprintf('\n--- Processing Hardware Data ---\n');
 
-% Check if hardware data exists
+% Check if hardware data exists (try Workspace first, then Dataset)
 if ~exist('freq_hw_xc', 'var')
-    fprintf('  No hardware data found (freq_hw_xc not in workspace).\n');
+    % Check if it's buried in 'logsout' (Standard for modern Simulink logging)
+    if exist('logsout', 'var')
+        try
+            freq_hw_xc = logsout.get('freq_hw_xc').Values;
+            if exist('freq_hw_xcdot', 'var') == 0
+                try freq_hw_xcdot = logsout.get('freq_hw_xcdot').Values; catch, end
+            end
+            if exist('freq_Vcmd', 'var') == 0
+                try freq_Vcmd = logsout.get('freq_Vcmd').Values; catch, end
+            end
+            fprintf('  Data successfully extracted from "logsout" dataset.\n');
+        catch
+            fprintf('  Could not find signals in "logsout".\n');
+        end
+    end
+end
+
+if ~exist('freq_hw_xc', 'var')
+    fprintf('  No hardware data found (freq_hw_xc not in workspace or logsout).\n');
     fprintf('  Run the QUARC chirp test first, then re-run this section.\n');
     fprintf('  Showing simulation chirp response instead...\n');
 
