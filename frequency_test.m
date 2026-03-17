@@ -167,7 +167,7 @@ fprintf('\n--- Nonlinear Simulation Frequency Sweep ---\n');
 
 % Test frequencies [Hz]
 test_freqs = [0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0];
-A_test = 1.0;   % Input amplitude [V] — keep small for linearity
+A_test = 3.0;   % Input amplitude [V] — increased to overcome stiction
 
 % Preallocate results
 n_freqs = length(test_freqs);
@@ -286,7 +286,7 @@ fprintf('\n--- Building QUARC Chirp Test Model ---\n');
 
 mdl_freq = 'IP02_FreqTest';
 chirp_duration = 120;   % seconds
-A_chirp = 1.0;          % chirp amplitude [V]
+A_chirp = 3.0;          % chirp amplitude [V] — increased to overcome stiction
 f_chirp_start = 0.1;    % start frequency [Hz]
 f_chirp_end = 20.0;     % end frequency [Hz]
 Ts_quarc = 0.002;       % QUARC sample time [s]
@@ -478,14 +478,22 @@ if quarc_available
             'Position', [700 510 740 570]);
         set_param([mdl_freq '/Scope_Cmp_Vel'], 'Name', 'Sim vs HW Velocity [cm-s]');
 
-        % To Workspace (hardware data)
-        add_block('simulink/Sinks/To Workspace', [mdl_freq '/ToWS_hw_xc'], ...
-            'VariableName', 'freq_hw_xc', 'SaveFormat', 'Timeseries', ...
-            'Position', [600 460 670 480]);
+        % --- QUANSER TEMPLATE PATTERN: To Host File ---
+        % This is the most reliable way to log data in External Mode.
+        % It saves to a .mat file on the host PC in real-time.
+        add_block('simulink/Signal Routing/Mux', [mdl_freq '/Mux_Logging'], ...
+            'Inputs', '3', 'Position', [700 600 705 660]);
+        
+        add_block('quarc_library/Sinks/To Host/To Host File', [mdl_freq '/To_Host_File'], ...
+            'FileName', 'ip02_freq_data.mat', ...
+            'FileFormat', 'MAT-file', ...
+            'Position', [750 610 830 650]);
 
-        add_block('simulink/Sinks/To Workspace', [mdl_freq '/ToWS_hw_xcdot'], ...
-            'VariableName', 'freq_hw_xcdot', 'SaveFormat', 'Timeseries', ...
-            'Position', [670 515 740 535]);
+        % Wire to Mux: [V_cmd; hw_xc; hw_xcdot]
+        add_line(mdl_freq, 'Chirp_Vcmd/1',     'Mux_Logging/1', 'autorouting', 'smart');
+        add_line(mdl_freq, 'Enc_to_m/1',       'Mux_Logging/2', 'autorouting', 'smart');
+        add_line(mdl_freq, 'Deriv_xc/1',       'Mux_Logging/3', 'autorouting', 'smart');
+        add_line(mdl_freq, 'Mux_Logging/1',    'To_Host_File/1', 'autorouting', 'smart');
 
         % Wire QUARC blocks
         add_line(mdl_freq, 'V_Sat/1', 'Motor Command/1', 'autorouting', 'smart');
@@ -539,9 +547,22 @@ fprintf('  Total test duration: %.0f seconds\n', chirp_duration);
 
 fprintf('\n--- Processing Hardware Data ---\n');
 
-% Check if hardware data exists (try Workspace first, then Dataset)
+% Check if hardware data exists (Try Host File first, then Workspace/Dataset)
+if exist('ip02_freq_data.mat', 'file')
+    fprintf('  Found QUARC Host File (ip02_freq_data.mat). Loading...\n');
+    load('ip02_freq_data.mat'); % Loads variable 'ip02_freq_data'
+    if exist('ip02_freq_data', 'var')
+        % To Host File data structure: [time, v1, v2, v3]
+        t_hw = ip02_freq_data(1, :)';
+        Vcmd_hw = ip02_freq_data(2, :)';
+        xc_hw = ip02_freq_data(3, :)';      % Already in m
+        xcdot_hw = ip02_freq_data(4, :)';   % Already in m/s
+        freq_hw_xc = timeseries(xc_hw * 100, t_hw); % Convert back to cm for processing
+    end
+end
+
 if ~exist('freq_hw_xc', 'var')
-    % Check if it's buried in 'logsout' (Standard for modern Simulink logging)
+    % Fallback to logsout (standard Simulink dataset)
     if exist('logsout', 'var')
         try
             freq_hw_xc = logsout.get('freq_hw_xc').Values;
