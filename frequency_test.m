@@ -167,7 +167,7 @@ fprintf('\n--- Nonlinear Simulation Frequency Sweep ---\n');
 
 % Test frequencies [Hz]
 test_freqs = [0.1, 0.2, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0];
-A_test = 3.0;   % Input amplitude [V] — increased to overcome stiction
+A_test = 1.0;   % Input amplitude [V] — keep small for linearity (prevents virtual wall collision)
 
 % Preallocate results
 n_freqs = length(test_freqs);
