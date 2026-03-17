@@ -145,7 +145,7 @@ grid on; xlim([0.1 30]); ylim([-270 0]);
 subplot(2,2,2);
 semilogx(freq_range, G_xcdot_dB, 'b-', 'LineWidth', 2);
 xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-title('V_{cmd} \rightarrow x_c_{dot} [(cm/s)/V]');
+title('V_{cmd} \rightarrow \dot{x}_c [cm-s/V]', 'Interpreter', 'tex');
 grid on; xlim([0.1 30]);
 
 subplot(2,2,4);
@@ -154,7 +154,7 @@ xlabel('Frequency [Hz]'); ylabel('Phase [deg]');
 grid on; xlim([0.1 30]); ylim([-180 0]);
 
 sgtitle('Analytical Bode Plot: Cart on Flat Table (linearized)', ...
-    'FontSize', 14, 'FontWeight', 'bold');
+    'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
 
 %% =====================================================================
 %  SECTION 3: Nonlinear Simulation Frequency Sweep
@@ -230,7 +230,7 @@ subplot(2,2,1);
 semilogx(freq_range, G_xc_dB, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(test_freqs, sim_xc_dB, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
 xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-title('V_{cmd} \rightarrow x_c [cm/V]');
+title('V_{cmd} \rightarrow x_c [cm-V]', 'Interpreter', 'tex');
 legend('Analytical (linear)', 'Simulation (nonlinear)', 'Location', 'best');
 grid on; xlim([0.1 30]);
 
@@ -245,7 +245,7 @@ subplot(2,2,2);
 semilogx(freq_range, G_xcdot_dB, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(test_freqs, sim_xcdot_dB, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
 xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-title('V_{cmd} \rightarrow \dot{x}_c [(cm/s)/V]');
+title('V_{cmd} \rightarrow \dot{x}_c [cm-s/V]', 'Interpreter', 'tex');
 legend('Analytical (linear)', 'Simulation (nonlinear)', 'Location', 'best');
 grid on; xlim([0.1 30]);
 
@@ -256,7 +256,7 @@ xlabel('Frequency [Hz]'); ylabel('Phase [deg]');
 grid on; xlim([0.1 30]); ylim([-180 0]);
 
 sgtitle(sprintf('Cart on Table: Model Frequency Response (A_{test}=%.1fV)', A_test), ...
-    'FontSize', 14, 'FontWeight', 'bold');
+    'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
 
 % Save simulation results for later comparison
 sim_freq_results = struct();
@@ -357,7 +357,7 @@ add_block('simulink/Math Operations/Gain', [mdl_freq '/vel_to_cms'], ...
 add_block('simulink/Sinks/Scope', [mdl_freq '/Scope_Vcmd'], ...
     'NumInputPorts', '1', ...
     'Position', [700 35 740 65]);
-set_param([mdl_freq '/Scope_Vcmd'], 'Name', 'V_{cmd}');
+set_param([mdl_freq '/Scope_Vcmd'], 'Name', 'V_cmd');
 
 add_block('simulink/Sinks/Scope', [mdl_freq '/Scope_Pos'], ...
     'NumInputPorts', '1', ...
@@ -367,7 +367,7 @@ set_param([mdl_freq '/Scope_Pos'], 'Name', 'Sim Position [cm]');
 add_block('simulink/Sinks/Scope', [mdl_freq '/Scope_Vel'], ...
     'NumInputPorts', '1', ...
     'Position', [700 150 740 180]);
-set_param([mdl_freq '/Scope_Vel'], 'Name', 'Sim Velocity [cm/s]');
+set_param([mdl_freq '/Scope_Vel'], 'Name', 'Sim Velocity [cm-s]');
 
 % ---- TO WORKSPACE (simulation data) ----
 add_block('simulink/Sinks/To Workspace', [mdl_freq '/ToWS_Vcmd'], ...
@@ -384,13 +384,13 @@ add_block('simulink/Sinks/To Workspace', [mdl_freq '/ToWS_sim_xcdot'], ...
 
 % ---- WIRING ----
 add_line(mdl_freq, 'Chirp_Vcmd/1', 'Cart_Plant/1', 'autorouting', 'smart');
-add_line(mdl_freq, 'Chirp_Vcmd/1', 'V_{cmd}/1', 'autorouting', 'smart');
+add_line(mdl_freq, 'Chirp_Vcmd/1', 'V_cmd/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'Chirp_Vcmd/1', 'ToWS_Vcmd/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'Cart_Plant/1', 'Demux/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'Demux/1', 'm_to_cm/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'Demux/2', 'vel_to_cms/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'm_to_cm/1', 'Sim Position [cm]/1', 'autorouting', 'smart');
-add_line(mdl_freq, 'vel_to_cms/1', 'Sim Velocity [cm/s]/1', 'autorouting', 'smart');
+add_line(mdl_freq, 'vel_to_cms/1', 'Sim Velocity [cm-s]/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'm_to_cm/1', 'ToWS_sim_xc/1', 'autorouting', 'smart');
 add_line(mdl_freq, 'vel_to_cms/1', 'ToWS_sim_xcdot/1', 'autorouting', 'smart');
 
@@ -456,7 +456,7 @@ if quarc_available
         add_block('simulink/Sinks/Scope', [mdl_freq '/Scope_Cmp_Vel'], ...
             'NumInputPorts', '2', ...
             'Position', [700 510 740 570]);
-        set_param([mdl_freq '/Scope_Cmp_Vel'], 'Name', 'Sim vs HW Velocity [cm/s]');
+        set_param([mdl_freq '/Scope_Cmp_Vel'], 'Name', 'Sim vs HW Velocity [cm-s]');
 
         % To Workspace (hardware data)
         add_block('simulink/Sinks/To Workspace', [mdl_freq '/ToWS_hw_xc'], ...
@@ -474,9 +474,9 @@ if quarc_available
         add_line(mdl_freq, 'Enc_to_m/1', 'Deriv_xc/1', 'autorouting', 'smart');
         add_line(mdl_freq, 'Deriv_xc/1', 'HW_vel_to_cms/1', 'autorouting', 'smart');
         add_line(mdl_freq, 'HW_to_cm/1', 'Sim vs HW Position [cm]/2', 'autorouting', 'smart');
-        add_line(mdl_freq, 'HW_vel_to_cms/1', 'Sim vs HW Velocity [cm/s]/2', 'autorouting', 'smart');
+        add_line(mdl_freq, 'HW_vel_to_cms/1', 'Sim vs HW Velocity [cm-s]/2', 'autorouting', 'smart');
         add_line(mdl_freq, 'm_to_cm/1', 'Sim vs HW Position [cm]/1', 'autorouting', 'smart');
-        add_line(mdl_freq, 'vel_to_cms/1', 'Sim vs HW Velocity [cm/s]/1', 'autorouting', 'smart');
+        add_line(mdl_freq, 'vel_to_cms/1', 'Sim vs HW Velocity [cm-s]/1', 'autorouting', 'smart');
         add_line(mdl_freq, 'HW_to_cm/1', 'ToWS_hw_xc/1', 'autorouting', 'smart');
         add_line(mdl_freq, 'HW_vel_to_cms/1', 'ToWS_hw_xcdot/1', 'autorouting', 'smart');
 
