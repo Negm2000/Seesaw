@@ -408,9 +408,14 @@ if quarc_available
             'VariableName', 'hw_alpha', 'SaveFormat', 'Timeseries', ...
             'Position', [580 640 640 660]);
 
-        add_block('quarc_library/Sinks/To Host/To Host File', ...
+        hHostFile = add_block('quarc_library/Sinks/To Host/To Host File', ...
             [mdl2 '/To Host File'], ...
             'Position', [680 620 760 680]);
+        try
+            set_param(hHostFile, 'file_name', 'data.mat', 'file_format', 'MAT-file');
+        catch
+            try set_param(hHostFile, 'FileName', 'data.mat', 'FileFormat', 'MAT-file'); catch, end
+        end
 
         % Wire hardware blocks
         add_line(mdl2, 'V_Sat/1',           'Motor Command/1',           'autorouting', 'smart');

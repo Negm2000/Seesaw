@@ -418,20 +418,29 @@ if quarc_available
     fprintf('  Adding QUARC hardware blocks...\n');
 
     % --- FORCE EXTERNAL MODE & LOGGING SETTINGS ---
-    set_param(mdl_freq, 'SimulationMode', 'external');
+    try set_param(mdl_freq, 'SimulationMode', 'external'); catch, end
     
-    % QUARC Target & Solver
-    set_param(mdl_freq, 'SystemTargetFile', 'quarc_win64.tlc');
-    set_param(mdl_freq, 'SolverType', 'Fixed-step', ...
-        'Solver', 'ode1', ...
-        'FixedStep', num2str(Ts_quarc), ...
-        'StopTime', num2str(chirp_duration));
+    % QUARC Target (Try Win64, fallback to generic Windows target)
+    try 
+        set_param(mdl_freq, 'SystemTargetFile', 'quarc_win64.tlc'); 
+    catch 
+        try set_param(mdl_freq, 'SystemTargetFile', 'quarc_windows.tlc'); catch, end
+    end
+    
+    % Solver settings
+    try
+        set_param(mdl_freq, 'SolverType', 'Fixed-step', ...
+            'Solver', 'ode1', ...
+            'FixedStep', num2str(Ts_quarc), ...
+            'StopTime', num2str(chirp_duration));
+    catch ME
+        fprintf('  Warning: Could not set solver (%s)\n', ME.message);
+    end
 
     % Enable MAT-file logging (This ensures data persists after STOP)
-    set_param(mdl_freq, 'RTWLogStorageType', 'RAM');
-    set_param(mdl_freq, 'SaveLog', 'on');
-    set_param(mdl_freq, 'SignalLogging', 'on');
-    set_param(mdl_freq, 'SaveFormat', 'Dataset'); % Modern standard
+    try set_param(mdl_freq, 'SaveLog', 'on'); catch, end
+    try set_param(mdl_freq, 'SignalLogging', 'on'); catch, end
+    try set_param(mdl_freq, 'SaveFormat', 'Dataset'); catch, end
 
     try
         % HIL Initialize
@@ -581,72 +590,11 @@ end
 
 if ~exist('freq_hw_xc', 'var')
     fprintf('  No hardware data found (freq_hw_xc not in workspace or logsout).\n');
-    fprintf('  Run the QUARC chirp test first, then re-run this section.\n');
-    fprintf('  Showing simulation chirp response instead...\n');
-
-    % Run simulation chirp response for preview
-    fprintf('  Running simulation with chirp input...\n');
-    sim_chirp_fn = @(t) A_chirp * sin(2*pi * f_chirp_start * chirp_duration / log_ratio ...
-        * ((f_chirp_end/f_chirp_start).^(t/chirp_duration) - 1));
-
-    ode_fn = @(t, x) cart_ode_freq(t, x, sim_chirp_fn, p_ode);
-    [t_chirp_sim, x_chirp_sim] = ode45(ode_fn, [0 chirp_duration], [0; 0], opts);
-
-    % Compute frequency response from chirp via FFT
-    % Resample to uniform time grid
-    t_uniform = (0:Ts_quarc:chirp_duration)';
-    xc_uniform = interp1(t_chirp_sim, x_chirp_sim(:,1), t_uniform);
-    xcdot_uniform = interp1(t_chirp_sim, x_chirp_sim(:,2), t_uniform);
-    Vcmd_uniform = arrayfun(sim_chirp_fn, t_uniform);
-
-    [sim_chirp_freq, sim_chirp_xc_H, sim_chirp_xcdot_H] = ...
-        compute_frf(t_uniform, Vcmd_uniform, xc_uniform, xcdot_uniform, Ts_quarc);
-
-    % Plot chirp Bode overlay
-    figure('Name', 'Bode Comparison: Analytical + Sim Sweep + Sim Chirp', ...
-        'Position', [150 100 1000 700]);
-
-    % Position magnitude
-    subplot(2,2,1);
-    semilogx(freq_range, G_xc_dB, 'b-', 'LineWidth', 1.5); hold on;
-    semilogx(test_freqs, sim_xc_dB, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
-    semilogx(sim_chirp_freq, 20*log10(abs(sim_chirp_xc_H)*100), 'g-', 'LineWidth', 1);
-    xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-    title('V_{cmd} \rightarrow x_c [cm/V]');
-    legend('Analytical', 'Sim (sine)', 'Sim (chirp)', 'Location', 'best');
-    grid on; xlim([0.1 30]);
-
-    % Position phase
-    subplot(2,2,3);
-    semilogx(freq_range, G_xc_phase, 'b-', 'LineWidth', 1.5); hold on;
-    semilogx(test_freqs, sim_xc_phase, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
-    semilogx(sim_chirp_freq, angle(sim_chirp_xc_H)*180/pi, 'g-', 'LineWidth', 1);
-    xlabel('Frequency [Hz]'); ylabel('Phase [deg]');
-    grid on; xlim([0.1 30]); ylim([-270 0]);
-
-    % Velocity magnitude
-    subplot(2,2,2);
-    semilogx(freq_range, G_xcdot_dB, 'b-', 'LineWidth', 1.5); hold on;
-    semilogx(test_freqs, sim_xcdot_dB, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
-    semilogx(sim_chirp_freq, 20*log10(abs(sim_chirp_xcdot_H)*100), 'g-', 'LineWidth', 1);
-    xlabel('Frequency [Hz]'); ylabel('Magnitude [dB]');
-    title('V_{cmd} \rightarrow \dot{x}_c [(cm/s)/V]');
-    legend('Analytical', 'Sim (sine)', 'Sim (chirp)', 'Location', 'best');
-    grid on; xlim([0.1 30]);
-
-    % Velocity phase
-    subplot(2,2,4);
-    semilogx(freq_range, G_xcdot_phase, 'b-', 'LineWidth', 1.5); hold on;
-    semilogx(test_freqs, sim_xcdot_phase, 'ro', 'MarkerSize', 8, 'LineWidth', 2);
-    semilogx(sim_chirp_freq, angle(sim_chirp_xcdot_H)*180/pi, 'g-', 'LineWidth', 1);
-    xlabel('Frequency [Hz]'); ylabel('Phase [deg]');
-    grid on; xlim([0.1 30]); ylim([-180 0]);
-
-    sgtitle('Model Frequency Response (no hardware data yet)', ...
-        'FontSize', 14, 'FontWeight', 'bold');
-
+    fprintf('  Model generation complete. Run the QUARC chirp test on hardware,\n');
+    fprintf('  then re-run Section 5 of this script to process the results.\n');
+    return; % Stop script here to avoid errors and save time
 else
-    fprintf('  Hardware data found! Processing...\n');
+    fprintf('  Hardware data loaded. Generating comparison Bode plots...\n');
 
     % Extract timeseries data
     t_hw = freq_hw_xc.Time;
@@ -781,7 +729,7 @@ end
 %  =====================================================================
 
 % --- Configuration ---
-tune_eta_g = false;   % Set true to also tune gearbox efficiency
+tune_eta_g = true;    % Set true to also tune gearbox efficiency
 t_skip = 2.0;         % Skip first N seconds (transient settling) [s]
 
 fprintf('\n========================================\n');

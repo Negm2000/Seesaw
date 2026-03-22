@@ -84,10 +84,10 @@ end
 %% ---- Parameter Tuning Guide ----
 fprintf('\n--- Parameter Tuning Guide ---\n');
 fprintf('If simulation lags behind hardware:\n');
-fprintf('  -> Reduce B_cart_mech (less friction)\n');
-fprintf('  -> Currently B_cart_mech = %.2f N*s/m\n', B_cart_mech);
+fprintf('  -> Reduce B_eq (less friction)\n');
+fprintf('  -> Currently B_eq = %.2f N*s/m\n', B_eq);
 fprintf('\nIf simulation leads hardware:\n');
-fprintf('  -> Increase B_cart_mech (more friction)\n');
+fprintf('  -> Increase B_eq (more friction)\n');
 fprintf('\nIf seesaw angle is off:\n');
 fprintf('  -> Adjust B_SW (seesaw pivot friction)\n');
 fprintf('  -> Currently B_SW = %.4f N*m*s/rad\n', B_SW);
