@@ -19,11 +19,14 @@ G_xc_dB = 20*log10(squeeze(mag)*100);
 G_xc_phase = squeeze(phase);
 
 % --- LOAD HARDWARE DATA ---
-if exist('data.mat', 'file')
-    fprintf('Loading hardware data (data.mat)...\n');
-    load('data.mat'); 
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+data_file = fullfile(SEESAW_ROOT, 'data', 'data.mat');
+
+if exist(data_file, 'file')
+    fprintf('Loading hardware data (data/data.mat)...\n');
+    load(data_file); 
     % ... check for variable names
-    vars = who('-file', 'data.mat');
+    vars = who('-file', data_file);
     if ismember('ip02_freq_data', vars)
         % Using the data directly
     elseif ismember('data', vars)
@@ -41,7 +44,7 @@ if exist('data.mat', 'file')
         error('Data file found but required variable not found inside.');
     end
 else
-    error('Hardware data file (data.mat) not found. Run the SLX first.');
+    error('Hardware data file (data/data.mat) not found. Run the SLX first.');
 end
 
 % --- PLOT COMPARISON (UNTUNED) ---
@@ -60,15 +63,15 @@ sgtitle('Frequency Response Validation (UNTUNED)');
 % --- SECTION 6: AUTO-TUNE ---
 fprintf('\n--- Running Auto-Tune (fminsearch) ---\n');
 p_tune = struct('K_a',K_a, 'V_sat',V_sat, 'R_m',R_m, 'k_t',k_t, 'k_m',k_m, 'eta_m',eta_m, 'eta_g',eta_g, 'K_g',K_g, 'r_mp',r_mp, 'M_c',M_c);
-cost_fn = @(p) tune_cost(p, V_cmd_hw, t_hw, xc_hw, t_hw > 2.0, p_tune, true);
+cost_fn = @(p) tune_cost(p, V_cmd_hw, t_hw, xc_hw, t_hw > 2.0, p_tune, false);
 
-[x_opt, cost_opt] = fminsearch(cost_fn, [B_eq, eta_g]);
+[x_opt, cost_opt] = fminsearch(cost_fn, B_eq);
 B_eq_opt = x_opt(1);
-eta_g_opt = x_opt(2);
+eta_g_opt = eta_g;  % fixed at hardware spec
 
 fprintf('\nOPTIMIZED VALUES:\n');
 fprintf('  B_eq  = %.4f (was %.2f)\n', B_eq_opt, B_eq);
-fprintf('  eta_g = %.4f (was %.2f)\n', eta_g_opt, eta_g);
+fprintf('  eta_g = %.4f (fixed at hardware spec)\n', eta_g_opt);
 
 % --- PLOT COMPARISON (AFTER TUNING) ---
 % Re-calculate model with optimized parameters

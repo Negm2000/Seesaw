@@ -103,17 +103,21 @@ if quarc_available
     add_block('quarc_library/Data Acquisition/Generic/Configuration/HIL Initialize', [mdl_freq '/HIL Initialize'], 'Position', [50 350 134 425]);
     add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Write Analog', [mdl_freq '/Motor Command'], 'Position', [300 360 385 422]);
     add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Read Encoder', [mdl_freq '/Encoder'], 'Position', [300 450 385 512]);
-    add_block('simulink/Math Operations/Gain', [mdl_freq '/Enc_to_m'], 'Gain', 'K_ec * r_pp', 'Position', [430 465 480 495]);
+    add_block('simulink/Math Operations/Gain', [mdl_freq '/Enc_to_m'], 'Gain', 'K_ec', 'Position', [430 465 480 495]);
     add_block('simulink/Continuous/Derivative', [mdl_freq '/Deriv_xc'], 'Position', [520 515 560 545]);
     add_block('simulink/Signal Routing/Mux', [mdl_freq '/Mux_Logging'], 'Inputs', '3', 'Position', [700 600 705 660]);
     
     hBlock = add_block('quarc_library/Sinks/To Host/To Host File', [mdl_freq '/To_Host_File'], ...
         'Position', [750 610 830 650]);
+    
+    if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+    data_path = fullfile(SEESAW_ROOT, 'data', 'data.mat');
+
     try
-        set_param(hBlock, 'file_name', 'data.mat', 'file_format', 'MAT-file');
+        set_param(hBlock, 'file_name', data_path, 'file_format', 'MAT-file');
     catch
         % Fallback for different QUARC versions
-        try set_param(hBlock, 'FileName', 'data.mat', 'FileFormat', 'MAT-file'); catch, end
+        try set_param(hBlock, 'FileName', data_path, 'FileFormat', 'MAT-file'); catch, end
     end
 
     add_line(mdl_freq, 'V_Sat/1', 'Motor Command/1', 'autorouting', 'smart');
@@ -125,5 +129,6 @@ if quarc_available
     add_line(mdl_freq, 'Mux_Logging/1', 'To_Host_File/1', 'autorouting', 'smart');
 end
 
-save_system(mdl_freq);
-fprintf('  Model ready: %s.slx\n', mdl_freq);
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+save_system(mdl_freq, fullfile(SEESAW_ROOT, 'models', [mdl_freq '.slx']));
+fprintf('  Model ready: models/%s.slx\n', mdl_freq);

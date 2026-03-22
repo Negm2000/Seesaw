@@ -10,7 +10,12 @@
 %    [3] VoltPAQ-X1 User Manual v1.1 (Quanser, 2013)
 %  -----------------------------------------------------------------------
 
-clear; clc;
+if exist('SEESAW_ROOT', 'var')
+    clearvars -except SEESAW_ROOT; 
+else
+    clear;
+end
+clc;
 fprintf('Loading Seesaw + IP02 system parameters...\n');
 
 %% ===== Physical Constants =====
@@ -54,8 +59,8 @@ T_c     = 0.814;            % Cart travel (usable) [m]
 x_c_max = T_c / 2;          % Max cart displacement from center [m]
 
 %% ===== IP02 Encoders [2] =====
-K_ec   = 2.275e-5;          % Cart encoder resolution [rad/count]
-% Cart position from encoder: x_c = K_ec * r_pp * counts
+K_ec   = 2.275e-5;          % Cart encoder resolution [m/count] (IP02 Manual Table 3.1)
+% Cart position from encoder: x_c = K_ec * counts
 
 %% ===== SEESAW-E Module [1] =====
 M_SW    = 3.6;              % Mass of one SEESAW-E + one IP02 track [kg]
@@ -203,7 +208,7 @@ end
 
 %% ===== Sensor Calibration =====
 % Cart position from encoder counts:
-%   x_c [m] = (encoder_counts * K_ec) * r_pp
+%   x_c [m] = encoder_counts * K_ec
 % Seesaw angle from encoder counts:
 %   alpha [rad] = (encoder_counts * K_E_SW) / K_gs
 %   (The gear ratio K_gs is between pivot and encoder shaft)

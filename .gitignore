@@ -1,0 +1,19 @@
+# MATLAB/Simulink artifacts
+*.asv
+*.autosave
+*.mex*
+*.prj
+slprj/
+*.slxc
+*.sim
+*.cache
+*.jdb
+
+# Data files (keep the directory but ignore content if it's large/generated)
+# data/*.mat
+# !data/.keep
+
+# Trash
+*.bak
+*.tmp
+*.log

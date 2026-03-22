@@ -183,7 +183,7 @@ if quarc_available
             'Position', [300 430 385 492]);
 
         add_block('simulink/Math Operations/Gain', [mdl1 '/Enc_to_m'], ...
-            'Gain',     'K_ec * r_pp', ...
+            'Gain',     'K_ec', ...
             'Position', [430 445 480 475]);
 
         add_block('simulink/Math Operations/Gain', [mdl1 '/HW_m_to_cm'], ...
@@ -214,8 +214,12 @@ if quarc_available
     end
 end
 
-save_system(mdl1, fullfile(pwd, [mdl1 '.slx']));
-fprintf('  Phase 1 model saved: %s.slx\n', mdl1);
+if ~exist('SEESAW_ROOT', 'var')
+    [curr_path, ~, ~] = fileparts(mfilename('fullpath'));
+    SEESAW_ROOT = fileparts(curr_path); 
+end
+save_system(mdl1, fullfile(SEESAW_ROOT, 'models', [mdl1 '.slx']));
+fprintf('  Phase 1 model saved: models/%s.slx\n', mdl1);
 
 %% =====================================================================
 %  PHASE 2: Cart on Seesaw  (4-state State-Space, linearised)
@@ -376,7 +380,7 @@ if quarc_available
             'Position', [300 490 385 552]);
 
         add_block('simulink/Math Operations/Gain', [mdl2 '/Enc_Cart_to_m'], ...
-            'Gain',     'K_ec * r_pp', ...
+            'Gain',     'K_ec', ...
             'Position', [430 495 480 525]);
 
         add_block('simulink/Math Operations/Gain', [mdl2 '/Enc_Seesaw_to_rad'], ...
@@ -411,10 +415,13 @@ if quarc_available
         hHostFile = add_block('quarc_library/Sinks/To Host/To Host File', ...
             [mdl2 '/To Host File'], ...
             'Position', [680 620 760 680]);
+        
+        data_path = fullfile(SEESAW_ROOT, 'data', 'data.mat');
+        
         try
-            set_param(hHostFile, 'file_name', 'data.mat', 'file_format', 'MAT-file');
+            set_param(hHostFile, 'file_name', data_path, 'file_format', 'MAT-file');
         catch
-            try set_param(hHostFile, 'FileName', 'data.mat', 'FileFormat', 'MAT-file'); catch, end
+            try set_param(hHostFile, 'FileName', data_path, 'FileFormat', 'MAT-file'); catch, end
         end
 
         % Wire hardware blocks
@@ -436,8 +443,12 @@ if quarc_available
     end
 end
 
-save_system(mdl2, fullfile(pwd, [mdl2 '.slx']));
-fprintf('  Phase 2 model saved: %s.slx\n', mdl2);
+if ~exist('SEESAW_ROOT', 'var')
+    [curr_path, ~, ~] = fileparts(mfilename('fullpath'));
+    SEESAW_ROOT = fileparts(curr_path); 
+end
+save_system(mdl2, fullfile(SEESAW_ROOT, 'models', [mdl2 '.slx']));
+fprintf('  Phase 2 model saved: models/%s.slx\n', mdl2);
 
 %% =====================================================================
 %  SUMMARY
@@ -467,7 +478,9 @@ if quarc_available
     fprintf('   5. QUARC | Build (Ctrl+B)\n');
     fprintf('   6. QUARC | Connect (Ctrl+T)\n');
     fprintf('   7. QUARC | Start\n');
-    fprintf('   8. Compare "Sim vs HW" scopes, then tune B_eq and B_SW\n\n');
+    fprintf('   8. Wait 120 seconds or until finished\n');
+    fprintf('   9. QUARC | Stop\n');
+    fprintf('  10. Run Sections 5 & 6 of frequency_test.m to compare\n\n');
     fprintf('  QUARC blocks (matching Seesaw_Template.slx):\n');
     fprintf('   - HIL Initialize:  q2_usb board 0\n');
     fprintf('   - Motor Command:   HIL Write Analog ch0 (DAQ --> VoltPAQ --> motor)\n');

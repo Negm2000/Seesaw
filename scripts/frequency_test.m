@@ -460,7 +460,7 @@ if quarc_available
 
         % Encoder to cart position [m]
         add_block('simulink/Math Operations/Gain', [mdl_freq '/Enc_to_m'], ...
-            'Gain', 'K_ec * r_pp', ...
+            'Gain', 'K_ec', ...
             'Position', [430 465 480 495]);
 
         % Hardware position to cm
@@ -493,8 +493,11 @@ if quarc_available
         add_block('simulink/Signal Routing/Mux', [mdl_freq '/Mux_Logging'], ...
             'Inputs', '3', 'Position', [700 600 705 660]);
         
+        if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+        data_path = fullfile(SEESAW_ROOT, 'data', 'ip02_freq_data.mat');
+
         add_block('quarc_library/Sinks/To Host/To Host File', [mdl_freq '/To_Host_File'], ...
-            'FileName', 'ip02_freq_data.mat', ...
+            'FileName', data_path, ...
             'FileFormat', 'MAT-file', ...
             'Position', [750 610 830 650]);
 
@@ -526,8 +529,9 @@ else
     fprintf('  Re-run on lab PC to add hardware blocks.\n');
 end
 
-save_system(mdl_freq, fullfile(pwd, [mdl_freq '.slx']));
-fprintf('  Model saved: %s.slx\n', mdl_freq);
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+save_system(mdl_freq, fullfile(SEESAW_ROOT, 'models', [mdl_freq '.slx']));
+fprintf('  Model saved: models/%s.slx\n', mdl_freq);
 
 % Print hardware test instructions
 fprintf('\n========================================\n');
@@ -558,7 +562,7 @@ fprintf('\n--- Processing Hardware Data ---\n');
 
 % Check if hardware data exists (Try Host File first, then Workspace/Dataset)
 if exist('ip02_freq_data.mat', 'file')
-    fprintf('  Found QUARC Host File (ip02_freq_data.mat). Loading...\n');
+    fprintf('  Found QUARC Host File (data/ip02_freq_data.mat). Loading...\n');
     load('ip02_freq_data.mat'); % Loads variable 'ip02_freq_data'
     if exist('ip02_freq_data', 'var')
         % To Host File data structure: [time, v1, v2, v3]
