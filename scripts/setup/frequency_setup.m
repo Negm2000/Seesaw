@@ -110,7 +110,7 @@ if quarc_available
     hBlock = add_block('quarc_library/Sinks/To Host/To Host File', [mdl_freq '/To_Host_File'], ...
         'Position', [750 610 830 650]);
     
-    if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+    if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(fileparts(fileparts(mfilename('fullpath')))); end
     data_path = fullfile(SEESAW_ROOT, 'data', 'data.mat');
 
     try
@@ -129,6 +129,6 @@ if quarc_available
     add_line(mdl_freq, 'Mux_Logging/1', 'To_Host_File/1', 'autorouting', 'smart');
 end
 
-if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(fileparts(fileparts(mfilename('fullpath')))); end
 save_system(mdl_freq, fullfile(SEESAW_ROOT, 'models', [mdl_freq '.slx']));
 fprintf('  Model ready: models/%s.slx\n', mdl_freq);

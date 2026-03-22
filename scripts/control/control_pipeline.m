@@ -17,7 +17,7 @@
 %  Pull in tuned B_eq, both state-space models, and derived scalars.
 
 if ~exist('SEESAW_ROOT', 'var')
-    SEESAW_ROOT = fileparts(fileparts(mfilename('fullpath')));
+    SEESAW_ROOT = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 end
 tp = fullfile(SEESAW_ROOT, 'data', 'tuned_params.mat');
 if ~exist(tp, 'file')

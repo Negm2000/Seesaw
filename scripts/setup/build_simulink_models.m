@@ -216,7 +216,7 @@ end
 
 if ~exist('SEESAW_ROOT', 'var')
     [curr_path, ~, ~] = fileparts(mfilename('fullpath'));
-    SEESAW_ROOT = fileparts(curr_path); 
+    SEESAW_ROOT = fileparts(fileparts(curr_path)); 
 end
 save_system(mdl1, fullfile(SEESAW_ROOT, 'models', [mdl1 '.slx']));
 fprintf('  Phase 1 model saved: models/%s.slx\n', mdl1);
@@ -445,7 +445,7 @@ end
 
 if ~exist('SEESAW_ROOT', 'var')
     [curr_path, ~, ~] = fileparts(mfilename('fullpath'));
-    SEESAW_ROOT = fileparts(curr_path); 
+    SEESAW_ROOT = fileparts(fileparts(curr_path)); 
 end
 save_system(mdl2, fullfile(SEESAW_ROOT, 'models', [mdl2 '.slx']));
 fprintf('  Phase 2 model saved: models/%s.slx\n', mdl2);

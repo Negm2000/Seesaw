@@ -66,7 +66,7 @@ fprintf('========================================\n');
 %  Load the frequency sweep data collected from QUARC.
 %  Plot raw time traces to sanity-check before analysis.
 
-if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(SEESAW_ROOT); end
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
 data_file = fullfile(SEESAW_ROOT, 'data', 'data.mat');
 
 if ~exist(data_file, 'file')
@@ -298,7 +298,7 @@ else
 end
 
 % Save tuned parameters
-if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(SEESAW_ROOT); end
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
 save_file = fullfile(SEESAW_ROOT, 'data', 'tuned_params.mat');
 save(save_file, 'B_eq', 'B_eq_nominal', 'B_total', 'alpha_f', 'B_emf', ...
      'eta_g', 'A_cart', 'B_cart', 'C_cart', 'D_cart', ...

@@ -15,8 +15,8 @@ subfolders = {'data', 'docs', 'models', 'scripts', 'src'};
 for i = 1:length(subfolders)
     folder_path = fullfile(root_dir, subfolders{i});
     if exist(folder_path, 'dir')
-        addpath(folder_path);
-        fprintf('  Added to path: %s\n', subfolders{i});
+        addpath(genpath(folder_path));
+        fprintf('  Added to path recursively: %s\n', subfolders{i});
     end
 end
 

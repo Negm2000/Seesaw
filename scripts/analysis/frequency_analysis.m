@@ -19,7 +19,7 @@ G_xc_dB = 20*log10(squeeze(mag)*100);
 G_xc_phase = squeeze(phase);
 
 % --- LOAD HARDWARE DATA ---
-if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(fileparts(fileparts(mfilename('fullpath')))); end
 data_file = fullfile(SEESAW_ROOT, 'data', 'data.mat');
 
 if exist(data_file, 'file')
