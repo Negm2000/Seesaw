@@ -98,7 +98,25 @@
   %%  Never use let-\p directly inside \node[...] at ... (invalid).
   %%──────────────────────────────────────────────────────────────────────────
   \begin{scope}[on background layer]
-    % Loop boundary boxes removed to avoid visual interference with signal lines
+
+    %% ── Outer loop ──────────────────────────────────────────────────────────
+    \draw[dashed, gray!55, rounded corners=6pt, line width=0.8pt]
+      let \p1 = (So.north west), \p2 = (tap), \p3 = (fbX)
+      in (\x1-8pt, \y3-9pt) rectangle (\x2+8pt, \y1+8pt);
+
+    \node[gray!62, font=\small\itshape, anchor=south west]
+      at ($(So.north west)+(-5pt, 5pt)$) {Outer loop};
+
+    %% ── Inner loop ──────────────────────────────────────────────────────────
+    \draw[dashed, blue!50, rounded corners=5pt, line width=0.8pt]
+      let \p1 = (Si.north west), \p2 = (tap), \p3 = (fbA)
+      in (\x1-6pt, \y3-7pt) rectangle (\x2+6pt, \y1+6pt);
+
+    %% Label at bottom-right of inner box — use \path with node
+    \path let \p1 = (tap), \p2 = (fbA)
+      in node[blue!58, font=\small\itshape, anchor=north east]
+         at (\x1+5pt, \y2-6pt) {Inner loop};
+
   \end{scope}
 
 \end{tikzpicture}
