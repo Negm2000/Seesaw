@@ -1,7 +1,7 @@
 # Quanser IP02 + SEESAW-E — MATLAB/QUARC Project
 
-This repo models, identifies, and controls the Quanser IP02 cart + SEESAW-E seesaw
-system. The workflow has three phases: **modeling → system identification → control**.
+This repo models, identifies, and controls the Quanser IP02 cart + SEESAW-E seesaw system.
+The workflow has three phases: **modeling → system identification → control**.
 
 ---
 
@@ -16,49 +16,177 @@ Run this every time you open MATLAB before doing anything else:
 
 ---
 
-## The Pipeline (in order)
+## The Pipeline
+
+```mermaid
+flowchart TD
+    A([startup.m]) --> B[seesaw_params.m]
+    B --> C[frequency_setup.m]
+    C --> D[(IP02_FreqTest.slx)]
+    D -->|collect hardware data| E[(data/data.mat)]
+    E --> F[modeling_pipeline.m\nsection by section]
+    F --> G[(data/tuned_params.mat)]
+    G --> H[control_pipeline.m\nsection by section]
+    H --> I[(data/controller.mat)]
+    I --> J[build_simulink_models.m]
+    J --> K[(Seesaw_Control.slx)]
+    K -->|QUARC External Mode| L([Hardware])
+
+    style D fill:#fff8e1
+    style E fill:#fff8e1
+    style G fill:#fff8e1
+    style I fill:#fff8e1
+    style K fill:#fff8e1
+    style L fill:#e8f5e9
+    style A fill:#e8f5e9
+```
+
+The two pipeline scripts (`modeling_pipeline.m` and `control_pipeline.m`) are
+written **section by section** — run each `%%` block with `Ctrl+Enter` and read
+the console output before moving to the next.
+
+---
+
+## Physical System
 
 ```
-seesaw_params
-     │
-     ▼
-frequency_setup         ← builds IP02_FreqTest.slx (chirp excitation model)
-     │
-     │  [collect hardware data → data/data.mat]
-     ▼
-modeling_pipeline       ← FRF comparison, auto-tunes B_eq, saves tuned_params.mat
-     │
-     ▼
-control_pipeline        ← designs Lead + PI cascade controller, saves controller.mat
-     │
-     ▼
-build_simulink_models   ← builds Seesaw_Control.slx (closed-loop, ready for QUARC)
-     │
-     │  [deploy to hardware via QUARC External Mode]
-     ▼
-  done
+        Motor                    Pivot
+          │                        │
+    ┌─────▼──────────────────────┐ │
+    │  ←──── rack & pinion ────► │ │       ← Cart slides along the plank
+    │          CART               │◄┤
+    │       M_c = 0.38 kg        │ │       ← Plank tilts about pivot
+    └────────────────────────────┘ │
+                                   │
+              D_T = 0.125 m ───────┤
+              D_C = 0.058 m ──── CoG
+
+    Plank mass M_SW = 3.6 kg
+    Max tilt ±11.5° (hard stops)
 ```
 
-Each pipeline script is written in notebook style — run it **section by section**
-with `Ctrl+Enter` in the MATLAB Editor, reading the console output at each step.
+**Why it's unstable:** when the seesaw tilts, gravity accelerates the cart *further*
+in the same direction — positive feedback. The linearised model has a right-half-plane
+pole at ≈ +2.15 rad/s. The cart also has a free-drift integrator (no restoring force
+at zero angle). Both must be handled by the controller.
+
+---
+
+## State-Space Model
+
+```mermaid
+flowchart LR
+    subgraph input[" "]
+        Vm(["V_m\n(motor voltage)"])
+    end
+
+    subgraph ss["4-State Linear Model  ẋ = A·x + B·Vm"]
+        direction TB
+        x1["① x_c\ncart position [m]"]
+        x2["② ẋ_c\ncart velocity [m/s]"]
+        x3["③ α\nseesaw angle [rad]"]
+        x4["④ α̇\nseesaw rate [rad/s]"]
+    end
+
+    subgraph plants["SISO Plants extracted for design"]
+        Gxc["G_xc = sys(1,1)\nV_m → x_c  (integrator)"]
+        Ga["G_α = sys(3,1)\nV_m → α  (unstable, RHP pole)"]
+    end
+
+    Vm --> ss
+    x1 --> Gxc
+    x3 --> Ga
+
+    style x3 fill:#ffebee
+    style Ga fill:#ffebee
+```
+
+> **Critical:** output index `3` = alpha, NOT `2`. Our state ordering
+> `[x_c, ẋ_c, α, α̇]` differs from the Quanser reference manual
+> `[x_c, θ, ẋ_c, θ̇]`. Using the wrong index extracts the wrong signal silently.
+
+---
+
+## Control Architecture
+
+```mermaid
+flowchart LR
+    ref(["x_c_ref = 0\n(cart reference)"])
+
+    ref --> So(("Σ"))
+    So -->|x_c_err| Co["C_outer\nPI: K·(s+ωᵢ)/s\n\ncart centering\n(slow)"]
+    Co -->|α_ref| Si(("Σ"))
+    Si -->|α_err| Ci["C_inner\nLead: Kc·(s+zc)/(s+pc)\n\nangle stabilisation\n(fast)"]
+    Ci --> Sat["Sat\n±22 V"]
+    Sat -->|V_m| Plant["Seesaw Plant\nSS 4×4"]
+
+    Plant -->|"x_c  (encoder ch0 × K_ec)"| So
+    Plant -->|"α    (encoder ch1 × K_E_SW/K_gs)"| Si
+
+    So:::summer
+    Si:::summer
+    classDef summer fill:#e8eaf6,stroke:#3949ab
+
+    style Co fill:#e3f2fd
+    style Ci fill:#e3f2fd
+    style Plant fill:#fff3e0
+    style Sat fill:#fce4ec
+```
+
+**Design rationale:**
+
+| Loop | Compensator | Target crossover | Key constraint |
+|------|-------------|-----------------|----------------|
+| Inner | Lead `Kc(s+zc)/(s+pc)` | `ωc ≈ 5.5 × p_u` | Must cross over before RHP pole destabilises |
+| Outer | PI `K(s+ωi)/s` | `ωc_outer = ωc / 10` | Must be 10× slower than inner (cascade separation) |
+
+**Nyquist requirement:** `G_α` has 1 open-loop RHP pole (P=1) → the loop gain
+`L(s) = C_inner · G_α` must make exactly **1 counter-clockwise encirclement of −1**.
+Standard gain/phase margins apply as usual once this is satisfied.
 
 ---
 
 ## Key Technical Facts
 
-These are critical — getting them wrong will break the model silently.
-
 | Item | Value | Notes |
 |------|-------|-------|
-| **State ordering** | `[x_c, x_c_dot, alpha, alpha_dot]` | Differs from Quanser ref (`[x_c, theta, x_c_dot, theta_dot]`) |
-| **Cart encoder gain** | `K_ec = 2.275e-5 m/count` | Already a *linear* conversion (m, not rad) — do not multiply by `r_pp` again |
+| **State ordering** | `[x_c, ẋ_c, α, α̇]` | Differs from Quanser ref `[x_c, θ, ẋ_c, θ̇]` |
+| **Cart encoder gain** | `K_ec = 2.275e-5 m/count` | Already a *linear* conversion — do not multiply by `r_pp` again |
 | **Seesaw encoder gain** | `K_E_SW / K_gs` rad/count | Gear ratio K_gs = 3 between pivot and encoder shaft |
-| **Tuned parameter** | `B_eq` only | Cart friction [N·s/m]. `eta_g` is fixed at 0.90 (hardware spec, not tuned) |
+| **Tuned parameter** | `B_eq` only | Cart friction [N·s/m]; `eta_g` fixed at 0.90 (hardware spec) |
 | **Motor model** | Reduced (`L_m = 0`) | `L_m/R_m = 69 µs` — negligible vs mechanical time constants |
-| **Back-EMF** | Embedded in `F_c` | Not added separately to `B_eq`; `B_total = B_eq + B_emf` |
-| **Open-loop instability** | RHP pole ≈ +2.15 rad/s | Gravity drives seesaw unstable; cart also has a free-drift integrator |
-| **Control architecture** | Cascade (not LQR) | Inner loop: Lead on `alpha`; Outer loop: PI on `x_c` |
-| **Voltage limit** | ±22 V | VoltPAQ-X1 hard saturation; enforced in every Simulink model |
+| **Back-EMF damping** | Embedded in `F_c` | Not added to `B_eq`; `B_total = B_eq + B_emf` |
+| **Voltage limit** | ±22 V | VoltPAQ-X1 hard saturation; enforced in every model |
+
+---
+
+## File Map
+
+```mermaid
+flowchart TD
+    sp[seesaw_params.m\nconfig/] -->|A_sw B_sw A_cart B_cart| fs
+    sp -->|A_sw B_sw A_cart B_cart| bsm
+
+    fs[frequency_setup.m\nsetup/] -->|builds| ft[(IP02_FreqTest.slx)]
+    ft -->|hardware run| dm[(data.mat\ndata/)]
+
+    dm --> mp[modeling_pipeline.m\nmodeling/]
+    sp --> mp
+    mp -->|tuned B_eq, rebuilt SS| tp[(tuned_params.mat\ndata/)]
+
+    tp --> cp[control_pipeline.m\ncontrol/]
+    cp -->|C_inner C_outer gains| cm[(controller.mat\ndata/)]
+
+    cm --> bsm[build_simulink_models.m\nsetup/]
+    bsm --> m1[(IP02_CartOnTable.slx)]
+    bsm --> m2[(Seesaw_Full.slx)]
+    bsm --> m3[(Seesaw_Control.slx ✓)]
+
+    style m3 fill:#e8f5e9,stroke:#388e3c
+    style tp fill:#fff8e1
+    style cm fill:#fff8e1
+    style dm fill:#fff8e1
+```
 
 ---
 
@@ -76,103 +204,87 @@ to locate files without hardcoded paths).
 
 **`seesaw_params.m`** — Central parameter hub. Must be run before anything else.
 
-- Loads all hardware constants from Quanser manuals (masses, motor, gearbox, encoder gains, seesaw geometry)
-- Computes derived quantities: `J_pivot`, `alpha_f`, `B_emf`, `B_total`
-- Builds **Phase 1** state-space matrices (`A_cart`, `B_cart`, `C_cart`, `D_cart`) — 2-state cart-only model
-- Builds **Phase 2** state-space matrices (`A_sw`, `B_sw`, `C_sw`, `D_sw`) — 4-state coupled seesaw model
-- Prints open-loop eigenvalues; warns if unstable (expected for the seesaw)
+- All hardware constants from Quanser manuals (masses, motor, gearbox, encoders, geometry)
+- Computes `J_pivot`, `alpha_f`, `B_emf`, `B_total`
+- Builds Phase 1 SS matrices (`A_cart`, `B_cart`, `C_cart`, `D_cart`) — 2-state cart only
+- Builds Phase 2 SS matrices (`A_sw`, `B_sw`, `C_sw`, `D_sw`) — 4-state coupled seesaw
+- Prints eigenvalues; warns if unstable (expected for the full seesaw)
 
 ---
 
 ### `scripts/setup/`
 
-**`frequency_setup.m`** — Builds `IP02_FreqTest.slx` programmatically.
+**`frequency_setup.m`** — Builds `IP02_FreqTest.slx`.
 
-Chirp (swept-sine) excitation model used during system identification. Logs motor
-voltage and encoder data to `data/data.mat`. Called automatically by Section 3 of
+Chirp (swept-sine) excitation model for system identification. Logs motor voltage
+and encoder data to `data/data.mat`. Called automatically by Section 3 of
 `modeling_pipeline.m`, but can be run standalone.
 
 **`build_simulink_models.m`** — Builds all three Simulink models from MATLAB code.
 
-Run after `seesaw_params` (and `control_pipeline` for Phase 3):
-
 | Phase | Model | Purpose |
 |-------|-------|---------|
-| 1 | `IP02_CartOnTable.slx` | Cart-only open-loop (for table-top ID) |
-| 2 | `Seesaw_Full.slx` | Full seesaw open-loop (for FRF collection) |
-| 3 | `Seesaw_Control.slx` | **Closed-loop cascade controller** (deploy to hardware) |
+| 1 | `IP02_CartOnTable.slx` | Cart-only open-loop (table-top ID) |
+| 2 | `Seesaw_Full.slx` | Full seesaw open-loop (FRF collection) |
+| 3 | `Seesaw_Control.slx` | **Closed-loop cascade controller** ← deploy this |
 
-Phase 3 is skipped automatically if `controller.mat` does not exist yet.
-When QUARC is detected, hardware I/O blocks (HIL Initialize, HIL Write Analog,
-HIL Read Encoder) are added; otherwise a simulation-only plant-in-loop variant
-is built instead.
+Phase 3 skips automatically if `controller.mat` does not exist. With QUARC
+detected: adds HIL Initialize, HIL Write Analog, HIL Read Encoder blocks.
+Without QUARC: builds a simulation-only plant-in-loop variant for testing.
 
 ---
 
 ### `scripts/modeling/`
 
-**`modeling_pipeline.m`** — Master system identification notebook. **Run section by section.**
+**`modeling_pipeline.m`** — Master system identification notebook. Run section by section.
 
-| Section | What it does |
-|---------|-------------|
+| § | What it does |
+|---|-------------|
 | 1 | Load `seesaw_params` |
 | 2 | Analytical Bode plot of untuned model |
 | 3 | Build `IP02_FreqTest.slx` via `frequency_setup.m` |
-| 4 | Load & sanity-check hardware data from `data/data.mat` |
-| 5 | Overlay untuned model FRF vs hardware FRF (Welch H1 estimator) |
-| 6 | Auto-tune `B_eq` (single-variable `fminsearch`; `eta_g` locked at 0.90) |
+| 4 | Load & sanity-check `data/data.mat` |
+| 5 | Overlay untuned FRF vs hardware (Welch H1 estimator) |
+| 6 | Auto-tune `B_eq` — single-variable `fminsearch`, `eta_g` locked at 0.90 |
 | 7 | Rebuild `A_cart` / `A_sw` with tuned `B_eq` |
-| 8 | FRF overlay tuned model vs hardware (should match) |
+| 8 | FRF overlay tuned vs hardware (should match) |
 | 9 | Time-domain `lsim` vs hardware overlay |
-| 10 | Print summary, save `data/tuned_params.mat` |
+| 10 | Save `data/tuned_params.mat` |
 
-**`cart_on_table_model.m`** — Standalone Phase 1 nonlinear ODE simulation (`ode45`).
-Reference for the cart dynamics; not part of the main pipeline.
+**`cart_on_table_model.m`** — Standalone Phase 1 nonlinear ODE sim (`ode45`). Reference only.
 
-**`seesaw_nonlinear_model.m`** — Standalone full seesaw nonlinear ODE simulation.
-Useful to quantify linearisation error; not part of the main pipeline.
+**`seesaw_nonlinear_model.m`** — Standalone full seesaw nonlinear ODE sim. Quantifies
+linearisation error. Reference only.
 
 ---
 
 ### `scripts/analysis/`
 
-**`frequency_analysis.m`** — Standalone B_eq autotuner. Superseded by Sections 6–8
-of `modeling_pipeline.m` but kept as a reference tool.
+**`frequency_analysis.m`** — Standalone `B_eq` autotuner. Superseded by §6–8 of
+`modeling_pipeline.m`; kept as a reference tool.
 
-**`validate_against_hardware.m`** — Standalone time-domain overlay tool.
-Superseded by Section 9 of `modeling_pipeline.m` but kept as a reference tool.
+**`validate_against_hardware.m`** — Standalone time-domain overlay. Superseded by
+§9 of `modeling_pipeline.m`; kept as a reference tool.
 
 ---
 
 ### `scripts/control/`
 
-**`control_pipeline.m`** — Classical frequency-domain controller design notebook.
-**Requires `data/tuned_params.mat`** (run `modeling_pipeline.m` first).
-**Run section by section.**
+**`control_pipeline.m`** — Classical frequency-domain controller design. Requires
+`data/tuned_params.mat`. Run section by section.
 
-| Section | What it does |
-|---------|-------------|
+| § | What it does |
+|---|-------------|
 | 1 | Load tuned model; override `B_eq` from `tuned_params.mat` |
 | 2 | Extract SISO plants: `G_alpha = sys_full(3,1)`, `G_xc = sys_full(1,1)` |
-| 3 | Bode + pole-zero plots of both plants |
-| 4 | Design inner-loop **Lead compensator** for `alpha` stabilisation |
-| 5 | Nyquist + Bode margins (P=1 RHP pole → need 1 CCW encirclement of −1) |
-| 6 | Inner closed-loop poles, step response, overshoot/settling check |
-| 7 | Derive outer-loop plant; design **PI compensator** for cart centering |
-| 8 | Augmented state-space simulation: 4.5° disturbance recovery |
+| 3 | Bode + pole-zero maps of both plants |
+| 4 | Design inner Lead compensator (zero at 0.85·p_u, 55° max phase lead) |
+| 5 | Nyquist + margins (P=1 → need 1 CCW encirclement of −1) |
+| 6 | Inner CL poles, step response, overshoot/settling |
+| 7 | Outer loop plant derivation + PI design |
+| 8 | Augmented SS simulation — 4.5° disturbance recovery |
 | 9 | Voltage saturation check (must stay within ±22 V) |
-| 10 | Print summary; save `data/controller.mat` |
-
-**Controller architecture:**
-
-```
-x_c_ref ──►[Σ]──► C_outer(PI) ──►[Σ]──► C_inner(Lead) ──► Sat(±22V) ──► Motor
-               ▲(−)                   ▲(−)
-               │ x_c                  │ alpha
-```
-
-Inner loop crossover ≈ 5.5 × p_unstable rad/s. Outer loop ≈ 10× slower
-than inner (cascade separation). Lead zero placed at 0.85 × p_unstable.
+| 10 | Save `data/controller.mat` |
 
 ---
 
@@ -180,8 +292,8 @@ than inner (cascade separation). Lead zero placed at 0.85 × p_unstable.
 
 | File | Created by | Contents |
 |------|-----------|----------|
-| `data.mat` | QUARC hardware run | Raw encoder + voltage time series from chirp experiment |
-| `tuned_params.mat` | `modeling_pipeline.m` §10 | Tuned `B_eq`, rebuilt `A_sw`/`A_cart`, all SS matrices |
+| `data.mat` | QUARC hardware run | Raw encoder + voltage time series from chirp test |
+| `tuned_params.mat` | `modeling_pipeline.m` §10 | Tuned `B_eq`, rebuilt SS matrices |
 | `controller.mat` | `control_pipeline.m` §10 | `C_inner`, `C_outer` TF objects + gain scalars |
 
 ---
@@ -193,37 +305,33 @@ than inner (cascade separation). Lead zero placed at 0.85 × p_unstable.
 | `IP02_FreqTest.slx` | `frequency_setup.m` | Chirp excitation for system ID |
 | `IP02_CartOnTable.slx` | `build_simulink_models.m` | Phase 1 open-loop cart |
 | `Seesaw_Full.slx` | `build_simulink_models.m` | Phase 2 open-loop seesaw |
-| `Seesaw_Control.slx` | `build_simulink_models.m` | **Phase 3 closed-loop (deploy this)** |
+| `Seesaw_Control.slx` | `build_simulink_models.m` | **Phase 3 closed-loop — deploy this** |
 
-All models are built programmatically — do not edit the `.slx` files by hand,
-as they will be overwritten next time the build script runs.
+All models are built programmatically — do not hand-edit the `.slx` files.
 
 ---
 
 ## S-Functions (`src/`)
 
-`cart_table_sfun.m` and `seesaw_plant_sfun.m` are Level-2 S-Functions that
-implement the plant dynamics directly in MATLAB code. These are **legacy/reference
-only** — the main pipeline uses standard Simulink State-Space blocks (no TLC files
-required, QUARC compatible). The S-functions are kept if you want to experiment
-with nonlinear dynamics inside Simulink.
+`cart_table_sfun.m` and `seesaw_plant_sfun.m` implement plant dynamics as Level-2
+S-Functions. **Legacy/reference only** — the main pipeline uses standard State-Space
+blocks (QUARC-compatible, no TLC files required). Kept for nonlinear Simulink experiments.
 
 ---
 
-## Hardware Startup Checklist (QUARC)
+## Hardware Startup Checklist
 
-1. `startup` then `seesaw_params` in MATLAB
-2. Connect Q2-USB to PC
+1. `startup` → `seesaw_params` in MATLAB
+2. Connect Q2-USB
 3. Power on VoltPAQ-X1 — **set Gain switch to 1×**
-4. Open the model in Simulink
-5. Set Simulation Mode to **External**
-6. QUARC → Build (`Ctrl+B`) → Connect (`Ctrl+T`) → Start
-7. **For `Seesaw_Control.slx`: hold the seesaw level by hand before starting, release gently after clicking Start**
-8. Watch the Voltage scope — if it's rail-to-rail (±22 V), stop and reduce gains
+4. Open model in Simulink → set mode to **External**
+5. QUARC → Build (`Ctrl+B`) → Connect (`Ctrl+T`) → Start
+6. **`Seesaw_Control.slx` only:** hold seesaw level by hand → Start → release gently
+7. Watch Voltage scope — if rail-to-rail (±22 V), **Stop** and reduce gains
 
 ---
 
-## Other Directories
+## Other
 
-- **`docs/`** — Hardware manuals, lab reports, and Quanser reference documents
+- **`docs/`** — Hardware manuals, reports, Quanser reference documents
 - **`slprj/`** — Auto-generated Simulink/QUARC C-code cache; safe to ignore

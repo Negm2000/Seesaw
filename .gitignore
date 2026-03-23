@@ -13,7 +13,11 @@ slprj/
 # data/*.mat
 # !data/.keep
 
+# Local environments
+.claude/
+
 # Trash
 *.bak
 *.tmp
 *.log
+.claude/settings.local.json
