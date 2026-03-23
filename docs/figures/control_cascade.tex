@@ -113,8 +113,9 @@
       let \p1 = (Si.north west), \p2 = (tap), \p3 = (fbA)
       in (\x1-15pt, \y3-16pt) rectangle (\x2+15pt, \y1+16pt);
 
-    \node[blue!42, font=\small\itshape, anchor=south west]
-         at ($(Si.north west)+(-12pt, 16pt)$) {Inner loop};
+    \path let \p1 = (Si.north west), \p3 = (fbA)
+      in node[blue!42, font=\small\itshape, anchor=south west]
+         at (\x1-12pt, \y3-14pt) {Inner loop};
 
   \end{scope}
 
