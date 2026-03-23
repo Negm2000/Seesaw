@@ -99,23 +99,22 @@
   %%──────────────────────────────────────────────────────────────────────────
   \begin{scope}[on background layer]
 
-    %% ── Outer loop ──────────────────────────────────────────────────────────
-    \draw[dashed, gray!55, rounded corners=6pt, line width=0.8pt]
+    %% ── Outer loop (Cascaded Control Boundary) ──────────────────────────────
+    %% Increase padding to avoid intersecting signal labels and nodes
+    \draw[dash pattern=on 4pt off 3pt, gray!30, rounded corners=12pt, line width=0.5pt]
       let \p1 = (So.north west), \p2 = (tap), \p3 = (fbX)
-      in (\x1-8pt, \y3-9pt) rectangle (\x2+8pt, \y1+8pt);
+      in (\x1-22pt, \y3-25pt) rectangle (\x2+24pt, \y1+24pt);
 
-    \node[gray!62, font=\small\itshape, anchor=south west]
-      at ($(So.north west)+(-5pt, 5pt)$) {Outer loop};
+    \node[gray!50, font=\small\itshape, anchor=south west]
+      at ($(So.north west)+(-19pt, 24pt)$) {Outer loop};
 
-    %% ── Inner loop ──────────────────────────────────────────────────────────
-    \draw[dashed, blue!50, rounded corners=5pt, line width=0.8pt]
+    %% ── Inner loop (Stability Loop Boundary) ────────────────────────────────
+    \draw[dash pattern=on 3pt off 3pt, blue!22, rounded corners=10pt, line width=0.5pt]
       let \p1 = (Si.north west), \p2 = (tap), \p3 = (fbA)
-      in (\x1-6pt, \y3-7pt) rectangle (\x2+6pt, \y1+6pt);
+      in (\x1-15pt, \y3-16pt) rectangle (\x2+15pt, \y1+16pt);
 
-    %% Label at bottom-right of inner box — use \path with node
-    \path let \p1 = (tap), \p2 = (fbA)
-      in node[blue!58, font=\small\itshape, anchor=north east]
-         at (\x1+5pt, \y2-6pt) {Inner loop};
+    \node[blue!42, font=\small\itshape, anchor=south west]
+         at ($(Si.north west)+(-12pt, 16pt)$) {Inner loop};
 
   \end{scope}
 
