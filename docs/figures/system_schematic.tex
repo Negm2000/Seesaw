@@ -9,6 +9,8 @@
 
   \def\tilt{11}
   \def\halflen{5.2}
+  \def\trackY{0.55}  %% Distance from pivot to track surface
+  \def\cartH{0.8}    %% Height of cart
 
   %%──────────────────────────────────────────────────────────────────────────
   %%  GROUND + PIVOT SUPPORT
@@ -27,37 +29,46 @@
   \begin{scope}[rotate=\tilt]
 
     %% Beam (seesaw plank)
-    \draw[fill=gray!7, thick] (-\halflen, -0.10) rectangle (\halflen, 0.10);
+    \draw[fill=gray!7, thick] (-\halflen, {\trackY-0.4}) rectangle (\halflen, \trackY);
 
     %% Track surface
-    \draw[blue!25, thick] ({-\halflen+0.2}, 0.10) -- ({\halflen-0.2}, 0.10);
+    \draw[blue!25, thick] ({-\halflen+0.2}, \trackY) -- ({\halflen-0.2}, \trackY);
 
     %% Cart body
-    \draw[fill=blue!6, thick] (0.8, 0.10) rectangle (2.7, 0.82);
+    \pgfmathsetmacro{\cartTY}{\trackY+\cartH}
+    \draw[fill=blue!6, thick] (0.8, \trackY) rectangle (2.7, \cartTY);
 
     %% Motor symbol
-    \draw[fill=white, thick] (1.15, 0.38) circle (0.18);
-    \node[font=\tiny, rotate=\tilt] at (1.15, 0.38) {M};
+    \draw[fill=white, thick] (1.15, {\trackY+0.3}) circle (0.18);
+    \node[font=\tiny, rotate=\tilt] at (1.15, {\trackY+0.3}) {M};
 
     %% Cart label
-    \node[font=\small, rotate=\tilt] at (2.0, 0.48) {$M_c$};
+    \node[font=\small, rotate=\tilt] at (2.0, {\trackY+0.4}) {$M_c$};
 
     %% Rack (dashed line along track)
-    \draw[gray!40, densely dashed] ({-\halflen+0.5}, 0.18) -- ({\halflen-0.5}, 0.18);
+    \draw[gray!40, densely dashed] ({-\halflen+0.5}, {\trackY+0.05}) -- ({\halflen-0.5}, {\trackY+0.05});
 
     %% Cart travel arrows
-    \draw[<->, blue!50, semithick] (0.8, 0.90) -- (2.7, 0.90);
+    \draw[<->, blue!50, semithick] (0.8, {\cartTY+0.08}) -- (2.7, {\cartTY+0.08});
 
     %% x_c dimension (pivot to cart centre)
     \draw[<->, red!65, semithick]
-      (0, -0.35) -- node[below, font=\small, rotate=\tilt]{$x_c$} (1.75, -0.35);
+      (0, -0.6) -- node[below, font=\small, rotate=\tilt]{$x_c$} (1.75, -0.6);
 
     %% End-stop marks
-    \draw[red!35, thick] ({-\halflen+0.2}, 0.10) -- ({-\halflen+0.2}, 0.55);
-    \draw[red!35, thick] ({\halflen-0.2},  0.10) -- ({\halflen-0.2},  0.55);
+    \draw[red!35, thick] ({-\halflen+0.2}, \trackY) -- ({-\halflen+0.2}, {\trackY+0.45});
+    \draw[red!35, thick] ({\halflen-0.2},  \trackY) -- ({\halflen-0.2},  {\trackY+0.45});
 
     %% Plank label
-    \node[font=\small, rotate=\tilt, gray!55] at (-3.2, -0.35) {Seesaw plank};
+    \node[font=\small, rotate=\tilt, gray!55] at (-3.2, -0.6) {Seesaw plank};
+
+    %% CoG calculation (Cart Center)
+    \coordinate (CartCoG) at (1.75, {\trackY + \cartH/2});
+    \filldraw[red!80] (CartCoG) circle (1.5pt);
+
+    %% Dimensions D_T and D_C
+    \draw[<->, semithick] (-1.0, 0) -- node[left, font=\small, rotate=\tilt]{$D_T$} (-1.0, \trackY);
+    \draw[<->, semithick] (3.1, \trackY) -- node[right, font=\small, rotate=\tilt]{$D_C$} (3.1, {\trackY + \cartH/2});
 
   \end{scope}
 
@@ -74,18 +85,7 @@
   %%──────────────────────────────────────────────────────────────────────────
   %%  GRAVITY ARROW
   %%──────────────────────────────────────────────────────────────────────────
-  \pgfmathsetmacro{\gx}{1.75*cos(\tilt) - 1.1*sin(\tilt)}
-  \pgfmathsetmacro{\gy}{1.75*sin(\tilt) + 1.1*cos(\tilt)}
-  \draw[->, very thick, red!55]
-    ({\gx+0.25}, {\gy+0.45}) -- ++(0, -0.75)
-    node[right, font=\small]{$\vec{g}$};
-
-  %%──────────────────────────────────────────────────────────────────────────
-  %%  D_T DIMENSION  (pivot → track surface, shown beside pivot)
-  %%──────────────────────────────────────────────────────────────────────────
-  \draw[<->, semithick]
-    (-0.75, 0) -- node[left, font=\small]{$D_T$}
-    ({-0.75}, {0.10*cos(\tilt)});
+  \draw[->, very thick, red!55] (CartCoG) -- ++(0, -1.35) node[right, font=\small]{$M_c\vec{g}$};
 
   %%──────────────────────────────────────────────────────────────────────────
   %%  PARAMETER SUMMARY (bottom)
@@ -94,6 +94,7 @@
     {$M_{\mathrm{SW}} = 3.6\;\mathrm{kg}$\qquad
      $M_c = 0.38\;\mathrm{kg}$\qquad
      $D_T = 0.125\;\mathrm{m}$\qquad
+     $D_C = 0.058\;\mathrm{m}$\qquad
      $\alpha_{\max} = \pm 11.5^\circ$};
 
 \end{tikzpicture}
