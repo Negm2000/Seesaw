@@ -32,9 +32,6 @@ The seesaw is open-loop unstable: tilt → gravity accelerates the cart further 
 
 ![State-space model and SISO extraction](docs/figures/state_space.png)
 
-> **State ordering: `[x_c, ẋ_c, α, α̇]`** — differs from Quanser reference `[x_c, θ, ẋ_c, θ̇]`.
-> Index `3` = α, index `1` = x_c. Using the wrong index is silent.
-
 ---
 
 ## Control Architecture
