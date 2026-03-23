@@ -17,7 +17,7 @@ slprj/
 .claude/
 .vscode/
 
-# LaTeX artifacts
+# LaTeX build artifacts (keep .tex source + .png output only)
 *.aux
 *.log
 *.out
@@ -25,8 +25,8 @@ slprj/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+docs/figures/*.pdf
 
 # Trash
 *.bak
 *.tmp
-.claude/settings.local.json

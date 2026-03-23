@@ -18,52 +18,16 @@ Run this every time you open MATLAB before doing anything else:
 
 ## The Pipeline
 
-```mermaid
-flowchart TD
-    A([startup.m]) --> B[seesaw_params.m]
-    B --> C[frequency_setup.m]
-    C --> D[(IP02_FreqTest.slx)]
-    D -->|collect hardware data| E[(data/data.mat)]
-    E --> F[modeling_pipeline.m\nsection by section]
-    F --> G[(data/tuned_params.mat)]
-    G --> H[control_pipeline.m\nsection by section]
-    H --> I[(data/controller.mat)]
-    I --> J[build_simulink_models.m]
-    J --> K[(Seesaw_Control.slx)]
-    K -->|QUARC External Mode| L([Hardware])
+![Pipeline flowchart](docs/figures/pipeline.png)
 
-    style D fill:#fff8e1
-    style E fill:#fff8e1
-    style G fill:#fff8e1
-    style I fill:#fff8e1
-    style K fill:#fff8e1
-    style L fill:#e8f5e9
-    style A fill:#e8f5e9
-```
-
-The two pipeline scripts (`modeling_pipeline.m` and `control_pipeline.m`) are
-written **section by section** — run each `%%` block with `Ctrl+Enter` and read
-the console output before moving to the next.
+Run each pipeline script **section by section** — execute each `%%` block with
+`Ctrl+Enter` and read the console output before moving to the next.
 
 ---
 
 ## Physical System
 
-```
-        Motor                    Pivot
-          │                        │
-    ┌─────▼──────────────────────┐ │
-    │  ←──── rack & pinion ────► │ │       ← Cart slides along the plank
-    │          CART               │◄┤
-    │       M_c = 0.38 kg        │ │       ← Plank tilts about pivot
-    └────────────────────────────┘ │
-                                   │
-              D_T = 0.125 m ───────┤
-              D_C = 0.058 m ──── CoG
-
-    Plank mass M_SW = 3.6 kg
-    Max tilt ±11.5° (hard stops)
-```
+![Seesaw system schematic](docs/figures/system_schematic.png)
 
 **Why it's unstable:** when the seesaw tilts, gravity accelerates the cart *further*
 in the same direction — positive feedback. The linearised model has a right-half-plane
@@ -74,32 +38,7 @@ at zero angle). Both must be handled by the controller.
 
 ## State-Space Model
 
-```mermaid
-flowchart LR
-    subgraph input[" "]
-        Vm(["V_m\n(motor voltage)"])
-    end
-
-    subgraph ss["4-State Linear Model  ẋ = A·x + B·Vm"]
-        direction TB
-        x1["① x_c\ncart position [m]"]
-        x2["② ẋ_c\ncart velocity [m/s]"]
-        x3["③ α\nseesaw angle [rad]"]
-        x4["④ α̇\nseesaw rate [rad/s]"]
-    end
-
-    subgraph plants["SISO Plants extracted for design"]
-        Gxc["G_xc = sys(1,1)\nV_m → x_c  (integrator)"]
-        Ga["G_α = sys(3,1)\nV_m → α  (unstable, RHP pole)"]
-    end
-
-    Vm --> ss
-    x1 --> Gxc
-    x3 --> Ga
-
-    style x3 fill:#ffebee
-    style Ga fill:#ffebee
-```
+![State-space model and SISO extraction](docs/figures/state_space.png)
 
 > **Critical:** output index `3` = alpha, NOT `2`. Our state ordering
 > `[x_c, ẋ_c, α, α̇]` differs from the Quanser reference manual
@@ -138,36 +77,6 @@ Standard gain/phase margins apply as usual once this is satisfied.
 | **Motor model** | Reduced (`L_m = 0`) | `L_m/R_m = 69 µs` — negligible vs mechanical time constants |
 | **Back-EMF damping** | Embedded in `F_c` | Not added to `B_eq`; `B_total = B_eq + B_emf` |
 | **Voltage limit** | ±22 V | VoltPAQ-X1 hard saturation; enforced in every model |
-
----
-
-## File Map
-
-```mermaid
-flowchart TD
-    sp[seesaw_params.m\nconfig/] -->|A_sw B_sw A_cart B_cart| fs
-    sp -->|A_sw B_sw A_cart B_cart| bsm
-
-    fs[frequency_setup.m\nsetup/] -->|builds| ft[(IP02_FreqTest.slx)]
-    ft -->|hardware run| dm[(data.mat\ndata/)]
-
-    dm --> mp[modeling_pipeline.m\nmodeling/]
-    sp --> mp
-    mp -->|tuned B_eq, rebuilt SS| tp[(tuned_params.mat\ndata/)]
-
-    tp --> cp[control_pipeline.m\ncontrol/]
-    cp -->|C_inner C_outer gains| cm[(controller.mat\ndata/)]
-
-    cm --> bsm[build_simulink_models.m\nsetup/]
-    bsm --> m1[(IP02_CartOnTable.slx)]
-    bsm --> m2[(Seesaw_Full.slx)]
-    bsm --> m3[(Seesaw_Control.slx ✓)]
-
-    style m3 fill:#e8f5e9,stroke:#388e3c
-    style tp fill:#fff8e1
-    style cm fill:#fff8e1
-    style dm fill:#fff8e1
-```
 
 ---
 
