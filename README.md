@@ -109,29 +109,9 @@ flowchart LR
 
 ## Control Architecture
 
-```mermaid
-flowchart LR
-    ref(["x_c_ref = 0\n(cart reference)"])
+![Cascade control block diagram](docs/figures/control_cascade.png)
 
-    ref --> So(("Σ"))
-    So -->|x_c_err| Co["C_outer\nPI: K·(s+ωᵢ)/s\n\ncart centering\n(slow)"]
-    Co -->|α_ref| Si(("Σ"))
-    Si -->|α_err| Ci["C_inner\nLead: Kc·(s+zc)/(s+pc)\n\nangle stabilisation\n(fast)"]
-    Ci --> Sat["Sat\n±22 V"]
-    Sat -->|V_m| Plant["Seesaw Plant\nSS 4×4"]
-
-    Plant -->|"x_c  (encoder ch0 × K_ec)"| So
-    Plant -->|"α    (encoder ch1 × K_E_SW/K_gs)"| Si
-
-    So:::summer
-    Si:::summer
-    classDef summer fill:#e8eaf6,stroke:#3949ab
-
-    style Co fill:#e3f2fd
-    style Ci fill:#e3f2fd
-    style Plant fill:#fff3e0
-    style Sat fill:#fce4ec
-```
+> Source: [`docs/figures/control_cascade.tex`](docs/figures/control_cascade.tex) — compiled with `pdflatex`.
 
 **Design rationale:**
 

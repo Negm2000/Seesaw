@@ -13,11 +13,20 @@ slprj/
 # data/*.mat
 # !data/.keep
 
-# Local environments
+# Local environments / IDEs
 .claude/
+.vscode/
+
+# LaTeX artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
 
 # Trash
 *.bak
 *.tmp
-*.log
 .claude/settings.local.json

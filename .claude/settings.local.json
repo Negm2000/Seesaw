@@ -7,7 +7,13 @@
       "Bash(matlab -batch \"load_system\\(''Seesaw_Template''\\); blocks = find_system\\(''Seesaw_Template'', ''Type'', ''Block''\\); for i=1:length\\(blocks\\), bt = get_param\\(blocks{i}, ''BlockType''\\); fprintf\\(''%s  [%s]\\\\n'', blocks{i}, bt\\); end; close_system\\(''Seesaw_Template'', 0\\);\")",
       "Bash(matlab -batch \":*)",
       "mcp__MATLAB__run_matlab_file",
-      "mcp__mcp-registry__search_mcp_registry"
+      "mcp__mcp-registry__search_mcp_registry",
+      "Bash(pdflatex --version)",
+      "Bash(magick --version)",
+      "Bash(convert --version)",
+      "Bash(pdflatex -interaction=nonstopmode control_cascade.tex)",
+      "Bash(pdftoppm -r 300 -png control_cascade.pdf control_cascade)",
+      "Bash(ls control_cascade*.png)"
     ]
   }
 }
