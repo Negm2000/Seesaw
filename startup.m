@@ -23,5 +23,8 @@ end
 % Set the project root as a base workspace variable for scripts to use
 assignin('base', 'SEESAW_ROOT', root_dir);
 
-fprintf('>>> Seesaw project paths initialized successfully.\n');
+% Load system parameters
+seesaw_params;
+
+fprintf('>>> Seesaw project paths and parameters initialized successfully.\n');
 fprintf('    Project Root: %s\n\n', root_dir);
