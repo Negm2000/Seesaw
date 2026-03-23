@@ -72,9 +72,12 @@
     %% CoG symbol (Cart Center)
     \filldraw[red!80] (CartCoG) circle (1.5pt);
 
-    %% Dimensions D_T and D_C
-    \draw[<->, semithick] (-1.0, 0) -- node[left, font=\small, rotate=\tilt]{$D_T$} (-1.0, \trackY);
-    \draw[<->, semithick] (3.1, \trackY) -- node[right, font=\small, rotate=\tilt]{$D_C$} (3.1, {\trackY + \cartH/2});
+    %% Dimensions D_T and D_C with proper reference extensions
+    \draw[gray!70, densely dashed] (0, 0) -- (-1.3, 0);
+    \draw[<->, semithick] (-1.1, 0) -- node[anchor=east, font=\small, rotate=\tilt]{$D_T$} (-1.1, \trackY);
+
+    \draw[gray!70, densely dashed] (CartCoG) -- (3.3, {\trackY + \cartH/2});
+    \draw[<->, semithick] (3.1, \trackY) -- node[anchor=west, font=\small, rotate=\tilt]{$D_C$} (3.1, {\trackY + \cartH/2});
 
   \end{scope}
 
