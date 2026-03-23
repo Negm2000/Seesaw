@@ -127,40 +127,43 @@ fprintf('  [Phase 1] A_cart, B_cart, C_cart, D_cart computed.\n');
 % States: [x_c; x_c_dot; alpha; alpha_dot]
 % Output: [x_c; x_c_dot; alpha; alpha_dot]
 %
-% Equations of motion (Good ref, linearised, L_m=0):
+% Equations of motion (Quanser Seesaw Lab Guide, linearised about
+%   x_c=0, x_c_dot=0, alpha=0, alpha_dot=0, L_m=0):
 %
-%   (M_c + M_SW)*x_c_ddot + M_SW*D_T*alpha_ddot + B_total*x_c_dot
-%       = alpha_f * eta_m * V_m                         ... (Cart EOM)
+%   Cart EOM:
+%     M_c*x_c_ddot - M_c*D_T*alpha_ddot + B_total*x_c_dot + g*M_c*alpha
+%         = alpha_f * eta_m * V_m
 %
-%   (J_pivot + M_SW*D_T^2)*alpha_ddot
-%       + M_SW*D_T*x_c_ddot
-%       - M_SW*g*D_C*alpha + B_SW*alpha_dot
-%       = 0                                              ... (Seesaw EOM)
+%   Seesaw EOM:
+%     (J_pivot + M_c*D_T^2)*alpha_ddot - M_c*D_T*x_c_ddot
+%         + g*M_c*x_c - g*(M_c*D_T + M_SW*D_C)*alpha
+%         = -B_SW*alpha_dot
 %
-% Solve for [x_c_ddot; alpha_ddot] via inertia matrix inversion:
+% Solve for [x_c_ddot; alpha_ddot] via effective inertia matrix:
 %
-%   M_eff = [ M_c+M_SW,        M_SW*D_T       ]
-%           [ M_SW*D_T,  J_pivot+M_SW*D_T^2   ]
+%   M_eff = [ M_c,        -M_c*D_T            ]
+%           [ -M_c*D_T,    J_pivot+M_c*D_T^2  ]
 %
-%   rhs_x = alpha_f*eta_m*V_m  - B_total*x_c_dot
-%   rhs_a = M_SW*g*D_C*alpha   - B_SW*alpha_dot
+%   G_rhs (state [x_c; x_c_dot; alpha; alpha_dot]):
+%     row 1 (cart):   [0, -B_total, -g*M_c,                   0     ]
+%     row 2 (seesaw): [-g*M_c, 0,   g*(M_c*D_T+M_SW*D_C), -B_SW   ]
 %
-%   [x_c_ddot; alpha_ddot] = inv(M_eff) * [rhs_x; rhs_a]
+%   [x_c_ddot; alpha_ddot] = inv(M_eff) * G_rhs * z + inv(M_eff) * G_inp * V_m
 
-M_eff = [M_c + M_SW,           M_SW*D_T;
-         M_SW*D_T,    J_pivot + M_SW*D_T^2];
+M_eff = [M_c,          -M_c*D_T;
+         -M_c*D_T,      J_pivot + M_c*D_T^2];
 
 % Inverse of effective inertia matrix
 M_inv = inv(M_eff);
 
-% A matrix coefficients from linearised equations
+% G_rhs encodes the state-dependent (damping + gravity) right-hand sides.
 %   state vector: z = [x_c; x_c_dot; alpha; alpha_dot]
-%   rhs damping/stiffness terms (no V_m):
-%     x_c row  : -B_total in x_c_dot column
-%     alpha row:  M_SW*g*D_C in alpha column, -B_SW in alpha_dot column
+%   cart row   : gravity coupling -g*M_c in alpha column
+%   seesaw row : gravity coupling -g*M_c in x_c column;
+%                restoring moment g*(M_c*D_T + M_SW*D_C) in alpha column
 
-G_rhs = [0, -B_total,         0,           0;   % rhs of cart EOM  (vel-dep)
-         0,       0,   M_SW*g*D_C,    -B_SW];    % rhs of seesaw EOM (pos+vel-dep)
+G_rhs = [0, -B_total,  -g*M_c,                        0;   % cart EOM RHS
+         -g*M_c, 0,     g*(M_c*D_T + M_SW*D_C),  -B_SW];   % seesaw EOM RHS
 
 % Full A_sw (4x4):  state derivative = M_inv * G_rhs * z
 %   rows 1,3 (positions) are just velocities; rows 2,4 are accelerations
@@ -184,17 +187,19 @@ D_sw = zeros(4, 1);
 
 fprintf('  [Phase 2] A_sw, B_sw, C_sw, D_sw computed (linearised seesaw).\n');
 
-% Print eigenvalues so we can quickly check stability
+% Print eigenvalues and verify the expected RHP pole (~+2.24 rad/s)
 ev = eig(A_sw);
-fprintf('  Seesaw SS eigenvalues:\n');
+fprintf('  Seesaw SS eigenvalues (corrected linearisation):\n');
 for k = 1:length(ev)
-    if imag(ev(k)) ~= 0
+    if abs(imag(ev(k))) > 1e-10
         fprintf('    lambda_%d = %.4f %+.4fi\n', k, real(ev(k)), imag(ev(k)));
     else
         fprintf('    lambda_%d = %.4f\n', k, real(ev(k)));
     end
 end
-if any(real(ev) > 1e-6)
+rhp = ev(real(ev) > 1e-6);
+if ~isempty(rhp)
+    fprintf('  RHP pole: %.4f rad/s (expected ~+2.24 rad/s -- confirms correct linearisation).\n', max(real(rhp)));
     fprintf('  WARNING: open-loop seesaw is UNSTABLE (expected -- needs control).\n');
 end
 
