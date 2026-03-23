@@ -28,8 +28,13 @@
   %%──────────────────────────────────────────────────────────────────────────
   \begin{scope}[rotate=\tilt]
 
+    %% Bracket connecting beam to pivot (fills the visual gap)
+    \draw[fill=gray!30, thick] (-0.2, 0) -- (-0.2, {\trackY-0.4}) -- (0.2, {\trackY-0.4}) -- (0.2, 0) -- cycle;
+
     %% Beam (seesaw plank)
     \draw[fill=gray!7, thick] (-\halflen, {\trackY-0.4}) rectangle (\halflen, \trackY);
+    %% Plank label (centered vertically inside the beam)
+    \node[font=\small \itshape, rotate=\tilt, gray!70] at (-2.5, {\trackY-0.2}) {Seesaw plank};
 
     %% Track surface
     \draw[blue!25, thick] ({-\halflen+0.2}, \trackY) -- ({\halflen-0.2}, \trackY);
@@ -48,22 +53,23 @@
     %% Rack (dashed line along track)
     \draw[gray!40, densely dashed] ({-\halflen+0.5}, {\trackY+0.05}) -- ({\halflen-0.5}, {\trackY+0.05});
 
-    %% Cart travel arrows
-    \draw[<->, blue!50, semithick] (0.8, {\cartTY+0.08}) -- (2.7, {\cartTY+0.08});
+    %% Cart travel arrows (local motion reference)
+    \draw[<->, blue!20, semithick] (0.8, {\cartTY+0.08}) -- (2.7, {\cartTY+0.08});
 
-    %% x_c dimension (pivot to cart centre)
+    %% Center reference dashed lines for dimensions
+    \draw[gray!70, densely dashed] (0, 0) -- (0, {\cartTY+0.6});
+    \coordinate (CartCoG) at (1.75, {\trackY + \cartH/2});
+    \draw[gray!70, densely dashed] (1.75, {\trackY+\cartH/2}) -- (1.75, {\cartTY+0.6});
+
+    %% x_c dimension (pivot to cart centre, moved ABOVE the cart)
     \draw[<->, red!65, semithick]
-      (0, -0.6) -- node[below, font=\small, rotate=\tilt]{$x_c$} (1.75, -0.6);
+      (0, {\cartTY+0.4}) -- node[above, font=\small, rotate=\tilt]{$x_c$} (1.75, {\cartTY+0.4});
 
     %% End-stop marks
     \draw[red!35, thick] ({-\halflen+0.2}, \trackY) -- ({-\halflen+0.2}, {\trackY+0.45});
     \draw[red!35, thick] ({\halflen-0.2},  \trackY) -- ({\halflen-0.2},  {\trackY+0.45});
 
-    %% Plank label
-    \node[font=\small, rotate=\tilt, gray!55] at (-3.2, -0.6) {Seesaw plank};
-
-    %% CoG calculation (Cart Center)
-    \coordinate (CartCoG) at (1.75, {\trackY + \cartH/2});
+    %% CoG symbol (Cart Center)
     \filldraw[red!80] (CartCoG) circle (1.5pt);
 
     %% Dimensions D_T and D_C
