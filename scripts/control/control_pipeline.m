@@ -525,5 +525,5 @@ save(save_path, ...
     'L_inner', 'T_inner');
 
 fprintf('\n  Controller saved to: data/controller.mat\n');
-fprintf('  Next: deploy to Seesaw_Full.slx via build_simulink_models.m\n');
+fprintf('  Next: build_simulink_models → deploys Seesaw_Control.slx\n');
 fprintf('============================================================\n');

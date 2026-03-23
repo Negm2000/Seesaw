@@ -451,49 +451,326 @@ save_system(mdl2, fullfile(SEESAW_ROOT, 'models', [mdl2 '.slx']));
 fprintf('  Phase 2 model saved: models/%s.slx\n', mdl2);
 
 %% =====================================================================
+%  PHASE 3: Seesaw Closed-Loop Control  (Cascade: Lead + PI)
+%  States:  [x_c; x_c_dot; alpha; alpha_dot]   (same as Phase 2)
+%
+%  Architecture (runs on QUARC target at 500 Hz):
+%    x_c_ref ─►[Sum_outer]─► C_outer(PI) ─►[Sum_inner]─► C_inner(Lead) ─► Sat ─► Motor
+%                  ▲(−)                         ▲(−)
+%                  │ x_c (encoder ch0)          │ alpha (encoder ch1)
+%
+%  Requires: controller.mat from control_pipeline.m
+%  =====================================================================
+mdl3 = 'Seesaw_Control';
+fprintf('\n--- Building Phase 3: %s ---\n', mdl3);
+
+ctrl_path = fullfile(SEESAW_ROOT, 'data', 'controller.mat');
+if ~exist(ctrl_path, 'file')
+    fprintf('  controller.mat not found — skipping Phase 3.\n');
+    fprintf('  Run control_pipeline.m first, then re-run this script.\n');
+    phase3_built = false;
+else
+    phase3_built = true;
+    ctrl = load(ctrl_path);
+
+    % Extract TF coefficients for Simulink Transfer Fcn blocks
+    [Ci_num, Ci_den] = tfdata(ctrl.C_inner, 'v');
+    [Co_num, Co_den] = tfdata(ctrl.C_outer, 'v');
+
+    % Push to base workspace (Simulink reads from there)
+    assignin('base', 'Ci_num', Ci_num);
+    assignin('base', 'Ci_den', Ci_den);
+    assignin('base', 'Co_num', Co_num);
+    assignin('base', 'Co_den', Co_den);
+
+    fprintf('  C_inner (Lead): K_c=%.4f, z_c=%.3f, p_c=%.3f\n', ...
+        ctrl.K_c, ctrl.z_c, ctrl.p_c);
+    fprintf('  C_outer (PI):   K_outer=%.4f\n', ctrl.K_outer);
+
+    if bdIsLoaded(mdl3), close_system(mdl3, 0); end
+    new_system(mdl3);
+    open_system(mdl3);
+
+    % --- Solver ---
+    if quarc_available
+        set_param(mdl3, 'SolverType', 'Fixed-step', ...
+            'Solver',    'ode1', ...
+            'FixedStep', '0.002', ...
+            'StopTime',  'inf');
+    else
+        set_param(mdl3, 'Solver', 'ode45', ...
+            'StopTime', '20', ...
+            'MaxStep',  '1e-3', ...
+            'RelTol',   '1e-4', ...
+            'AbsTol',   '1e-6');
+    end
+
+    % ==================================================================
+    %  CONTROLLER CHAIN (identical for sim and hardware)
+    % ==================================================================
+
+    % ---- REFERENCE INPUT ----
+    % Cart position reference [m].
+    % Default: step from 0 → 0 (hold at center, test stabilisation only).
+    % For a 5 cm step test: change 'After' to '0.05'.
+    add_block('simulink/Sources/Step', [mdl3 '/x_c_ref'], ...
+        'Time',   '5', ...
+        'Before', '0', ...
+        'After',  '0', ...
+        'Position', [50 195 90 235]);
+
+    % ---- OUTER SUMMING JUNCTION (x_c_ref − x_c) ----
+    add_block('simulink/Math Operations/Sum', [mdl3 '/Sum_outer'], ...
+        'Inputs', '+-', ...
+        'Position', [160 200 180 220]);
+
+    % ---- C_outer: PI compensator ----
+    % C_outer(s) = K_outer * (s + omega_i) / s
+    % NOTE: integrator will wind up during voltage saturation.
+    %       For first tests this is acceptable. Add anti-windup later
+    %       if the cart drifts slowly after large disturbances.
+    add_block('simulink/Continuous/Transfer Fcn', [mdl3 '/C_outer'], ...
+        'Numerator',   'Co_num', ...
+        'Denominator', 'Co_den', ...
+        'Position', [230 190 360 230]);
+
+    % ---- INNER SUMMING JUNCTION (alpha_ref − alpha) ----
+    add_block('simulink/Math Operations/Sum', [mdl3 '/Sum_inner'], ...
+        'Inputs', '+-', ...
+        'Position', [420 200 440 220]);
+
+    % ---- C_inner: Lead compensator ----
+    % C_inner(s) = K_c * (s + z_c) / (s + p_c)
+    add_block('simulink/Continuous/Transfer Fcn', [mdl3 '/C_inner'], ...
+        'Numerator',   'Ci_num', ...
+        'Denominator', 'Ci_den', ...
+        'Position', [490 190 620 230]);
+
+    % ---- VOLTAGE SATURATION (±V_sat = ±22 V) ----
+    add_block('simulink/Discontinuities/Saturation', [mdl3 '/V_Sat'], ...
+        'UpperLimit', 'V_sat', ...
+        'LowerLimit', '-V_sat', ...
+        'Position', [670 198 720 222]);
+
+    % ==================================================================
+    %  DISPLAY: SCOPES + TO-WORKSPACE
+    % ==================================================================
+
+    % ---- Unit conversion gains for scopes ----
+    add_block('simulink/Math Operations/Gain', [mdl3 '/ref_m_to_cm'], ...
+        'Gain', '100', ...
+        'Position', [830 82 870 108]);
+
+    add_block('simulink/Math Operations/Gain', [mdl3 '/xc_m_to_cm'], ...
+        'Gain', '100', ...
+        'Position', [830 122 870 148]);
+
+    add_block('simulink/Math Operations/Gain', [mdl3 '/aref_to_deg'], ...
+        'Gain', '180/pi', ...
+        'Position', [830 192 870 218]);
+
+    add_block('simulink/Math Operations/Gain', [mdl3 '/alpha_to_deg'], ...
+        'Gain', '180/pi', ...
+        'Position', [830 232 870 258]);
+
+    % ---- Scopes ----
+    add_block('simulink/Sinks/Scope', [mdl3 '/Scope_Cart'], ...
+        'NumInputPorts', '2', ...
+        'Position', [940 90 980 140]);
+    set_param([mdl3 '/Scope_Cart'], 'Name', 'Cart [cm]');
+
+    add_block('simulink/Sinks/Scope', [mdl3 '/Scope_Angle'], ...
+        'NumInputPorts', '2', ...
+        'Position', [940 200 980 250]);
+    set_param([mdl3 '/Scope_Angle'], 'Name', 'Angle [deg]');
+
+    add_block('simulink/Sinks/Scope', [mdl3 '/Scope_Vm'], ...
+        'NumInputPorts', '1', ...
+        'Position', [940 300 980 330]);
+    set_param([mdl3 '/Scope_Vm'], 'Name', 'Voltage [V]');
+
+    % ---- To Workspace ----
+    add_block('simulink/Sinks/To Workspace', [mdl3 '/ToWS_xc'], ...
+        'VariableName', 'ctrl_xc', 'SaveFormat', 'Timeseries', ...
+        'Position', [940 355 1010 375]);
+
+    add_block('simulink/Sinks/To Workspace', [mdl3 '/ToWS_alpha'], ...
+        'VariableName', 'ctrl_alpha', 'SaveFormat', 'Timeseries', ...
+        'Position', [940 395 1010 415]);
+
+    add_block('simulink/Sinks/To Workspace', [mdl3 '/ToWS_Vm'], ...
+        'VariableName', 'ctrl_Vm', 'SaveFormat', 'Timeseries', ...
+        'Position', [940 435 1010 455]);
+
+    % ==================================================================
+    %  WIRING: CONTROLLER CHAIN (forward path)
+    % ==================================================================
+    add_line(mdl3, 'x_c_ref/1',  'Sum_outer/1', 'autorouting', 'smart');
+    add_line(mdl3, 'Sum_outer/1', 'C_outer/1',  'autorouting', 'smart');
+    add_line(mdl3, 'C_outer/1',  'Sum_inner/1', 'autorouting', 'smart');
+    add_line(mdl3, 'Sum_inner/1', 'C_inner/1',  'autorouting', 'smart');
+    add_line(mdl3, 'C_inner/1',  'V_Sat/1',     'autorouting', 'smart');
+
+    % Voltage → scope + workspace
+    add_line(mdl3, 'V_Sat/1', 'Voltage [V]/1', 'autorouting', 'smart');
+    add_line(mdl3, 'V_Sat/1', 'ToWS_Vm/1',     'autorouting', 'smart');
+
+    % Reference signals → display scopes
+    add_line(mdl3, 'x_c_ref/1', 'ref_m_to_cm/1',   'autorouting', 'smart');
+    add_line(mdl3, 'ref_m_to_cm/1', 'Cart [cm]/1',  'autorouting', 'smart');
+    add_line(mdl3, 'C_outer/1', 'aref_to_deg/1',    'autorouting', 'smart');
+    add_line(mdl3, 'aref_to_deg/1', 'Angle [deg]/1', 'autorouting', 'smart');
+
+    % ==================================================================
+    %  FEEDBACK PATH — hardware vs simulation
+    % ==================================================================
+    if quarc_available
+        % ============ QUARC HARDWARE I/O ============
+        fprintf('  Adding QUARC hardware blocks to %s...\n', mdl3);
+
+        try
+            % HIL Initialize (configures Q2-USB board)
+            add_block('quarc_library/Data Acquisition/Generic/Configuration/HIL Initialize', ...
+                [mdl3 '/HIL Initialize'], ...
+                'Position', [50 380 134 455]);
+
+            % Motor output: V_Sat → DAC channel 0 → VoltPAQ → motor
+            add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Write Analog', ...
+                [mdl3 '/Motor Command'], ...
+                'Position', [780 195 865 225]);
+
+            % Encoder input: ch0 = cart, ch1 = seesaw
+            add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Read Encoder', ...
+                [mdl3 '/Encoders'], ...
+                'Position', [50 500 135 560]);
+
+            % Encoder → physical units
+            add_block('simulink/Math Operations/Gain', [mdl3 '/Enc_to_xc'], ...
+                'Gain', 'K_ec', ...
+                'Position', [200 500 260 530]);
+
+            add_block('simulink/Math Operations/Gain', [mdl3 '/Enc_to_alpha'], ...
+                'Gain', 'K_E_SW / K_gs', ...
+                'Position', [200 550 260 580]);
+
+            % V_Sat → Motor Command
+            add_line(mdl3, 'V_Sat/1', 'Motor Command/1', 'autorouting', 'smart');
+
+            % Encoders → conversion gains
+            add_line(mdl3, 'Encoders/1', 'Enc_to_xc/1',    'autorouting', 'smart');
+            add_line(mdl3, 'Encoders/2', 'Enc_to_alpha/1',  'autorouting', 'smart');
+
+            % Feedback: encoder → summing junctions (negative inputs)
+            add_line(mdl3, 'Enc_to_xc/1',   'Sum_outer/2', 'autorouting', 'smart');
+            add_line(mdl3, 'Enc_to_alpha/1', 'Sum_inner/2', 'autorouting', 'smart');
+
+            % Feedback → display scopes (actual vs reference)
+            add_line(mdl3, 'Enc_to_xc/1',   'xc_m_to_cm/1',     'autorouting', 'smart');
+            add_line(mdl3, 'xc_m_to_cm/1',  'Cart [cm]/2',      'autorouting', 'smart');
+            add_line(mdl3, 'Enc_to_alpha/1', 'alpha_to_deg/1',   'autorouting', 'smart');
+            add_line(mdl3, 'alpha_to_deg/1', 'Angle [deg]/2',    'autorouting', 'smart');
+
+            % Feedback → To Workspace
+            add_line(mdl3, 'Enc_to_xc/1',   'ToWS_xc/1',    'autorouting', 'smart');
+            add_line(mdl3, 'Enc_to_alpha/1', 'ToWS_alpha/1', 'autorouting', 'smart');
+
+            fprintf('  QUARC hardware blocks wired successfully.\n');
+        catch ME
+            fprintf('  Warning: Could not add QUARC blocks: %s\n', ME.message);
+            fprintf('  Model will NOT work on hardware. Check QUARC installation.\n');
+        end
+    else
+        % ============ SIMULATION ONLY: plant in the loop ============
+        fprintf('  No QUARC — adding State-Space plant for closed-loop simulation.\n');
+
+        % State-Space plant (same A_sw, B_sw, C_sw, D_sw as Phase 2)
+        % Initial condition: tilted ~4.5° to test disturbance rejection
+        add_block('simulink/Continuous/State-Space', [mdl3 '/Plant_SS'], ...
+            'A', 'A_sw', 'B', 'B_sw', 'C', 'C_sw', 'D', 'D_sw', ...
+            'X0', '[0; 0; 0.08; 0]', ...
+            'Position', [780 175 890 255]);
+
+        % Demux: split [x_c; x_c_dot; alpha; alpha_dot]
+        add_block('simulink/Signal Routing/Demux', [mdl3 '/Demux_Plant'], ...
+            'Outputs', '4', ...
+            'Position', [920 165 925 265]);
+
+        % V_Sat → Plant → Demux
+        add_line(mdl3, 'V_Sat/1',      'Plant_SS/1',    'autorouting', 'smart');
+        add_line(mdl3, 'Plant_SS/1',   'Demux_Plant/1', 'autorouting', 'smart');
+
+        % Feedback: x_c (port 1) → Sum_outer, alpha (port 3) → Sum_inner
+        add_line(mdl3, 'Demux_Plant/1', 'Sum_outer/2', 'autorouting', 'smart');
+        add_line(mdl3, 'Demux_Plant/3', 'Sum_inner/2', 'autorouting', 'smart');
+
+        % Feedback → display scopes
+        add_line(mdl3, 'Demux_Plant/1', 'xc_m_to_cm/1',   'autorouting', 'smart');
+        add_line(mdl3, 'xc_m_to_cm/1',  'Cart [cm]/2',    'autorouting', 'smart');
+        add_line(mdl3, 'Demux_Plant/3', 'alpha_to_deg/1',  'autorouting', 'smart');
+        add_line(mdl3, 'alpha_to_deg/1', 'Angle [deg]/2',  'autorouting', 'smart');
+
+        % Feedback → To Workspace
+        add_line(mdl3, 'Demux_Plant/1', 'ToWS_xc/1',    'autorouting', 'smart');
+        add_line(mdl3, 'Demux_Plant/3', 'ToWS_alpha/1', 'autorouting', 'smart');
+
+        fprintf('  Simulation plant wired. IC = [0, 0, 4.5 deg, 0].\n');
+    end
+
+    save_system(mdl3, fullfile(SEESAW_ROOT, 'models', [mdl3 '.slx']));
+    fprintf('  Phase 3 model saved: models/%s.slx\n', mdl3);
+end
+
+%% =====================================================================
 %  SUMMARY
 %  =====================================================================
 fprintf('\n========================================\n');
 fprintf(' Models built successfully!\n');
 fprintf('========================================\n\n');
-fprintf(' Phase 1: %s.slx (Cart on Table)\n', mdl1);
-fprintf('   Signal chain:  Sine --> Gain(K_a) --> Sat(V_sat) --> SS(2x2)\n');
-fprintf('   States:        [x_c, x_c_dot]  (A_cart, B_cart, C_cart, D_cart)\n');
-fprintf('   Outputs:       x_c [m], x_c_dot [m/s]\n\n');
-fprintf(' Phase 2: %s.slx (Cart on Seesaw)\n', mdl2);
-fprintf('   Signal chain:  Sine --> Gain(K_a) --> Sat(V_sat) --> SS(4x4)\n');
-fprintf('   States:        [x_c, x_c_dot, alpha, alpha_dot]  (A_sw, B_sw, C_sw, D_sw)\n');
-fprintf('   Outputs:       x_c [m], x_c_dot [m/s], alpha [rad], alpha_dot [rad/s]\n\n');
-fprintf(' SIMULATION MODE:\n');
-fprintf('   1. Run seesaw_params.m\n');
-fprintf('   2. Open model, set mode to "Normal"\n');
-fprintf('   3. Click Run (Play button)\n');
-fprintf('   4. Check scopes and workspace variables\n\n');
-if quarc_available
-    fprintf(' HARDWARE VALIDATION MODE (QUARC):\n');
-    fprintf('   1. Run seesaw_params.m\n');
-    fprintf('   2. Connect Q2-USB, power on VoltPAQ (Gain switch = 1x)\n');
-    fprintf('   3. Solver: ode1, Ts=0.002s (500 Hz) -- already set\n');
-    fprintf('   4. Set SimulationMode to "External"\n');
-    fprintf('   5. QUARC | Build (Ctrl+B)\n');
-    fprintf('   6. QUARC | Connect (Ctrl+T)\n');
-    fprintf('   7. QUARC | Start\n');
-    fprintf('   8. Wait 120 seconds or until finished\n');
-    fprintf('   9. QUARC | Stop\n');
-    fprintf('  10. Run Sections 5 & 6 of frequency_test.m to compare\n\n');
-    fprintf('  QUARC blocks (matching Seesaw_Template.slx):\n');
-    fprintf('   - HIL Initialize:  q2_usb board 0\n');
-    fprintf('   - Motor Command:   HIL Write Analog ch0 (DAQ --> VoltPAQ --> motor)\n');
-    fprintf('   - Encoders:        HIL Read Encoder ch[0,1] (cart + seesaw)\n');
-    fprintf('   - To Host File:    data logging\n');
+
+fprintf(' Phase 1: %s.slx (Cart on Table — Open Loop)\n', mdl1);
+fprintf('   Sine --> Amp --> Sat --> SS(2x2) --> [x_c, x_c_dot]\n\n');
+
+fprintf(' Phase 2: %s.slx (Cart on Seesaw — Open Loop)\n', mdl2);
+fprintf('   Sine --> Amp --> Sat --> SS(4x4) --> [x_c, x_c_dot, alpha, alpha_dot]\n\n');
+
+if phase3_built
+    fprintf(' Phase 3: %s.slx (Seesaw — Closed-Loop Cascade Control)\n', mdl3);
+    fprintf('   x_c_ref --> [Sum] --> C_outer(PI) --> [Sum] --> C_inner(Lead) --> Sat --> Motor\n');
+    fprintf('                 ^(-)                      ^(-)\n');
+    fprintf('                 x_c (enc ch0)             alpha (enc ch1)\n\n');
 else
-    fprintf(' TO ADD HARDWARE LATER (when QUARC is installed):\n');
-    fprintf('   Re-run build_simulink_models.m with QUARC on the path.\n');
-    fprintf('   QUARC block paths (from Seesaw_Template.slx):\n');
-    fprintf('     quarc_library/Data Acquisition/Generic/Configuration/HIL Initialize\n');
-    fprintf('     quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Write Analog\n');
-    fprintf('     quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Read Encoder\n');
-    fprintf('     quarc_library/Sinks/To Host/To Host File\n');
-    fprintf('   Settings: ode1 fixed-step solver, Ts=0.002s, SimMode=External\n');
+    fprintf(' Phase 3: SKIPPED (controller.mat not found)\n\n');
+end
+
+fprintf(' SIMULATION MODE (Phase 1 & 2):\n');
+fprintf('   1. Run seesaw_params.m\n');
+fprintf('   2. Open model, set mode to "Normal", click Run\n\n');
+
+if quarc_available
+    fprintf(' HARDWARE MODE (QUARC External):\n');
+    fprintf('   Phases 1 & 2 (identification):\n');
+    fprintf('     1. seesaw_params\n');
+    fprintf('     2. Connect Q2-USB, power on VoltPAQ (switch = 1x)\n');
+    fprintf('     3. QUARC | Build | Connect | Start\n\n');
+    if phase3_built
+        fprintf('   Phase 3 (closed-loop control):\n');
+        fprintf('     1. seesaw_params\n');
+        fprintf('     2. load(''data/controller.mat'')  — pushes Ci/Co to workspace\n');
+        fprintf('     3. Connect Q2-USB, power on VoltPAQ (switch = 1x)\n');
+        fprintf('     4. QUARC | Build (Ctrl+B)\n');
+        fprintf('     5. QUARC | Connect (Ctrl+T)\n');
+        fprintf('     6. *** HOLD SEESAW LEVEL BY HAND ***\n');
+        fprintf('     7. QUARC | Start — release seesaw gently\n');
+        fprintf('     8. If it diverges: QUARC | Stop IMMEDIATELY\n\n');
+        fprintf('   SAFETY NOTES:\n');
+        fprintf('     - Voltage is hard-limited to +/- %.1f V by Saturation block\n', V_sat);
+        fprintf('     - The Step block defaults to x_c_ref = 0 (hold at center)\n');
+        fprintf('     - To test a 5 cm step: double-click Step block, set After = 0.05\n');
+        fprintf('     - If cart hits end-stops, STOP and reduce K_outer\n');
+        fprintf('     - Watch Voltage scope: if rail-to-rail, gains are too high\n\n');
+    end
+else
+    fprintf(' TO ADD HARDWARE LATER:\n');
+    fprintf('   Re-run build_simulink_models.m with QUARC on the path.\n\n');
 end
 fprintf('\n');
