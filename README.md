@@ -111,7 +111,8 @@ flowchart LR
 
 ![Cascade control block diagram](docs/figures/control_cascade.png)
 
-> Source: [`docs/figures/control_cascade.tex`](docs/figures/control_cascade.tex) — compiled with `pdflatex`.
+> Source: [`docs/figures/control_cascade.tex`](docs/figures/control_cascade.tex) — compiled with `pdflatex`.  
+> *Note: If the dashed boundary boxes appear to interfere with signal lines, re-compile the TeX source to apply the latest padding and style fixes.*
 
 **Design rationale:**
 
@@ -313,5 +314,6 @@ blocks (QUARC-compatible, no TLC files required). Kept for nonlinear Simulink ex
 
 ## Other
 
-- **`docs/`** — Hardware manuals, reports, Quanser reference documents
+- **`docs/`** — Hardware manuals, reports, and Quanser reference documents
+  - **`docs/figures/`** — Source and compiled images for this README (TeX → PDF → PNG)
 - **`slprj/`** — Auto-generated Simulink/QUARC C-code cache; safe to ignore
