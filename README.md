@@ -20,6 +20,8 @@ Run this every time you open MATLAB before doing anything else:
 
 ![Pipeline flowchart](docs/figures/pipeline.png)
 
+> Source: [`docs/figures/pipeline.tex`](docs/figures/pipeline.tex) — compiled with `pdflatex`.
+
 Run each pipeline script **section by section** — execute each `%%` block with
 `Ctrl+Enter` and read the console output before moving to the next.
 
@@ -28,6 +30,8 @@ Run each pipeline script **section by section** — execute each `%%` block with
 ## Physical System
 
 ![Seesaw system schematic](docs/figures/system_schematic.png)
+
+> Source: [`docs/figures/system_schematic.tex`](docs/figures/system_schematic.tex) — compiled with `pdflatex`.
 
 **Why it's unstable:** when the seesaw tilts, gravity accelerates the cart *further*
 in the same direction — positive feedback. The linearised model has a right-half-plane
@@ -39,6 +43,8 @@ at zero angle). Both must be handled by the controller.
 ## State-Space Model
 
 ![State-space model and SISO extraction](docs/figures/state_space.png)
+
+> Source: [`docs/figures/state_space.tex`](docs/figures/state_space.tex) — compiled with `pdflatex`.
 
 > **Critical:** output index `3` = alpha, NOT `2`. Our state ordering
 > `[x_c, ẋ_c, α, α̇]` differs from the Quanser reference manual
