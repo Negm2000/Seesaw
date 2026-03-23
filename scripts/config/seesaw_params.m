@@ -10,14 +10,6 @@
 %    [3] VoltPAQ-X1 User Manual v1.1 (Quanser, 2013)
 %  -----------------------------------------------------------------------
 
-if exist('SEESAW_ROOT', 'var')
-    clearvars -except SEESAW_ROOT; 
-else
-    clear;
-end
-clc;
-fprintf('Loading Seesaw + IP02 system parameters...\n');
-
 %% ===== Physical Constants =====
 g = 9.81;                   % Gravitational acceleration [m/s^2]
 
