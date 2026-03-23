@@ -49,14 +49,14 @@ The seesaw is open-loop unstable: tilt → gravity accelerates the cart further 
 
 ## Key Parameters
 
-| Item | Value | Notes |
-|------|-------|-------|
-| State ordering | `[x_c, ẋ_c, α, α̇]` | Differs from Quanser ref |
-| Cart encoder | `K_ec = 2.275e-5 m/count` | Linear conversion — do **not** multiply by `r_pp` again |
-| Seesaw encoder | `K_E_SW / K_gs` rad/count | `K_gs = 3` (gear ratio) |
-| Tuned parameter | `B_eq` only | `eta_g` fixed at 0.90 |
-| Motor model | Reduced (`L_m = 0`) | `L_m/R_m = 69 µs` — negligible |
-| Voltage limit | ±22 V | VoltPAQ-X1 saturation |
+| Parameter | Value |
+|-----------|-------|
+| State vector | `[x_c, ẋ_c, α, α̇]` |
+| Cart encoder gain | `K_ec = 2.275e-5 m/count` |
+| Seesaw encoder gain | `K_E_SW / K_gs` rad/count |
+| Identified parameter | `B_eq` — cart viscous friction [N·s/m] |
+| Motor model | Reduced order (`L_m = 0`) |
+| Amplifier saturation | ±22 V |
 
 ---
 
