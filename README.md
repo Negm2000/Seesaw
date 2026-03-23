@@ -50,8 +50,7 @@ at zero angle). Both must be handled by the controller.
 
 ![Cascade control block diagram](docs/figures/control_cascade.png)
 
-> Source: [`docs/figures/control_cascade.tex`](docs/figures/control_cascade.tex) — compiled with `pdflatex`.  
-> *Note: If the dashed boundary boxes appear to interfere with signal lines, re-compile the TeX source to apply the latest padding and style fixes.*
+> Source: [`docs/figures/control_cascade.tex`](docs/figures/control_cascade.tex) — compiled with `pdflatex`.
 
 **Design rationale:**
 
