@@ -23,9 +23,27 @@ tp = fullfile(SEESAW_ROOT, 'data', 'tuned_params.mat');
 if ~exist(tp, 'file')
     error('tuned_params.mat not found — run modeling_pipeline.m first.');
 end
-load(tp);           % loads A_sw, B_sw, C_sw, D_sw, B_eq, B_total, alpha_f, eta_g, ...
-seesaw_params;      % re-loads hardware constants (K_a, V_sat, M_c, etc.)
-B_eq = load(tp).B_eq;   % override seesaw_params nominal with tuned value
+seesaw_params;      % loads hardware constants (K_a, V_sat, M_c, etc.) + nominal SS models
+tuned = load(tp);   % loads tuned B_eq (and other saved quantities)
+B_eq = tuned.B_eq;  % override nominal with tuned value
+
+% Recompute derived damping and rebuild state-space with tuned B_eq
+B_emf   = alpha_f * K_g * k_m / r_mp;
+B_total = B_eq + B_emf;
+
+A_cart = [0, 1; 0, -B_total/M_c];
+B_cart = [0; alpha_f*eta_m/M_c];
+
+M_eff = [M_c,          -M_c*D_T;
+         -M_c*D_T,      J_pivot + M_c*D_T^2];
+M_inv = inv(M_eff);
+G_rhs = [0, -B_total,  -g*M_c,                        0;
+         -g*M_c, 0,     g*(M_c*D_T + M_SW*D_C),  -B_SW];
+A_sw = [0, 1, 0, 0; M_inv(1,:)*G_rhs; 0, 0, 0, 1; M_inv(2,:)*G_rhs];
+G_inp = [alpha_f*eta_m; 0];
+B_sw = [0; M_inv(1,:)*G_inp; 0; M_inv(2,:)*G_inp];
+C_sw = eye(4);
+D_sw = zeros(4,1);
 
 fprintf('\n=== State-Space Model (tuned, B_eq = %.3f N*s/m) ===\n', B_eq);
 fprintf('State ordering: [x_c,  x_c_dot,  alpha,  alpha_dot]\n');
@@ -87,7 +105,7 @@ bode(G_xc_r, omega); grid on;
 title('G_{xc}(s): V_m \rightarrow x_c');
 
 subplot(2,2,3);
-pzmap(G_alpha_r); grid on; zplane([], []);
+pzmap(G_alpha_r); grid on;
 title('Pole-Zero: G_\alpha');
 sgrid;
 
@@ -233,8 +251,12 @@ t_step = 0:0.01:5;
 [y_step, t_step] = step(T_inner, t_step);
 [~, idx_pk] = max(y_step);
 overshoot = (max(y_step) - y_step(end)) / y_step(end) * 100;
-idx_ss = find(abs(y_step - y_step(end)) < 0.02 * abs(y_step(end)), 1, 'first');
-t_settle = t_step(idx_ss);
+idx_outside = find(abs(y_step - y_step(end)) > 0.02 * abs(y_step(end)));
+if isempty(idx_outside)
+    t_settle = 0;
+else
+    t_settle = t_step(idx_outside(end) + 1);
+end
 
 fprintf('\n  Step response (inner loop, 2%% criterion):\n');
 fprintf('  Overshoot:    %.1f%%\n', overshoot);
@@ -483,8 +505,12 @@ post_dist = t_sim > 1.5;   % start looking after disturbance ends
 alpha_post = alpha_cl(post_dist);
 t_post     = t_sim(post_dist);
 ss_alpha   = alpha_post(end);
-idx_set    = find(abs(alpha_post - ss_alpha) < 0.02 * 11.5*pi/180, 1, 'first');
-t_settle_alpha = t_post(idx_set);
+idx_outside_a = find(abs(alpha_post - ss_alpha) > 0.02 * 11.5*pi/180);
+if isempty(idx_outside_a)
+    t_settle_alpha = t_post(1);
+else
+    t_settle_alpha = t_post(idx_outside_a(end) + 1);
+end
 
 % Max angle deviation
 max_alpha_deg = max(abs(alpha_cl(t_sim > 1.0))) * 180/pi;

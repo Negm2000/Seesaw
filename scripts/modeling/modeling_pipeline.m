@@ -28,7 +28,7 @@ s_tf = tf('s');
 G_xc    = K_a * alpha_f * eta_m / (M_c * s_tf^2 + B_total * s_tf);
 G_xcdot = K_a * alpha_f * eta_m / (M_c * s_tf + B_total);
 
-freq_range = logspace(-1, 1.5, 200);  % 0.1 to ~31 Hz
+freq_range = logspace(-1, log10(12), 200);  % 0.1 to 12 Hz
 [mag_an, phase_an] = bode(G_xc, 2*pi*freq_range);
 mag_an_dB   = 20*log10(squeeze(mag_an) * 100);  % convert m/V to cm/V
 phase_an_deg = squeeze(phase_an);
@@ -180,12 +180,13 @@ C_cart = eye(2);
 D_cart = zeros(2,1);
 
 % --- Phase 2: Cart on Seesaw (linearised) ---
-M_eff = [M_c + M_SW,        M_SW*D_T;
-         M_SW*D_T,  J_pivot + M_SW*D_T^2];
+% Must match seesaw_params.m linearisation exactly (Good ref, page 6).
+M_eff = [M_c,          -M_c*D_T;
+         -M_c*D_T,      J_pivot + M_c*D_T^2];
 M_inv = inv(M_eff);
 
-G_rhs = [0, -B_total,       0,        0;
-         0,       0,  M_SW*g*D_C, -B_SW];
+G_rhs = [0, -B_total,  -g*M_c,                        0;
+         -g*M_c, 0,     g*(M_c*D_T + M_SW*D_C),  -B_SW];
 
 A_sw = [0, 1, 0, 0;
         M_inv(1,:) * G_rhs;
@@ -334,7 +335,7 @@ function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
         Syu_xcdot = Syu_xcdot + Xcdot(1:n_seg/2+1) .* conj(U_h);
     end
 
-    valid = freq_fft >= 0.1 & freq_fft <= 25;
+    valid = freq_fft >= 0.1 & freq_fft <= 12;
     freq_out = freq_fft(valid)';
     H_xc     = Syu_xc(valid) ./ Suu(valid);
     H_xcdot  = Syu_xcdot(valid) ./ Suu(valid);

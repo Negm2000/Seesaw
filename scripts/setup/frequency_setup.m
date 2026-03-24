@@ -28,7 +28,7 @@ G_xc = K_a * alpha_f * eta_m / (M_c * s^2 + B_total * s);
 G_xcdot = K_a * alpha_f * eta_m / (M_c * s + B_total);
 
 % --- SECTION 2: Plot Analytical Bode ---
-freq_range = logspace(-1, 1.5, 200);   
+freq_range = logspace(-1, log10(12), 200);
 [mag, phase] = bode(G_xc, 2*pi*freq_range);
 G_xc_dB = 20*log10(squeeze(mag)*100);
 G_xc_phase = squeeze(phase);
@@ -47,7 +47,7 @@ mdl_freq = 'IP02_FreqTest';
 chirp_duration = 120;   % seconds
 A_chirp = 3.0;          % chirp amplitude [V]
 f_chirp_start = 0.1;    % start frequency [Hz]
-f_chirp_end = 20.0;     % end frequency [Hz]
+f_chirp_end = 12.0;     % end frequency [Hz] (>12 Hz the gears lack resolution)
 Ts_quarc = 0.002;       % QUARC sample time [s]
 
 % Generate logarithmic chirp signal for workspace
@@ -107,17 +107,25 @@ if quarc_available
     add_block('simulink/Continuous/Derivative', [mdl_freq '/Deriv_xc'], 'Position', [520 515 560 545]);
     add_block('simulink/Signal Routing/Mux', [mdl_freq '/Mux_Logging'], 'Inputs', '3', 'Position', [700 600 705 660]);
     
-    hBlock = add_block('quarc_library/Sinks/To Host/To Host File', [mdl_freq '/To_Host_File'], ...
+    blk_path = [mdl_freq '/To_Host_File'];
+    add_block('quarc_library/Sinks/To Host/To Host File', blk_path, ...
         'Position', [750 610 830 650]);
-    
-    if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(fileparts(fileparts(mfilename('fullpath')))); end
-    data_path = fullfile(SEESAW_ROOT, 'data', 'data.mat');
 
-    try
-        set_param(hBlock, 'file_name', data_path, 'file_format', 'MAT-file');
-    catch
-        % Fallback for different QUARC versions
-        try set_param(hBlock, 'FileName', data_path, 'FileFormat', 'MAT-file'); catch, end
+    if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(fileparts(fileparts(mfilename('fullpath')))); end
+    data_dir = fullfile(SEESAW_ROOT, 'data');
+    if ~exist(data_dir, 'dir'), mkdir(data_dir); end
+    data_path = fullfile(data_dir, 'data.mat');
+
+    % Try all known QUARC parameter name variants for the filename
+    param_set = false;
+    for fname = {'Filename', 'FileName', 'file_name'}
+        try
+            set_param(blk_path, fname{1}, data_path);
+            param_set = true; break;
+        catch, end
+    end
+    if ~param_set
+        warning('Could not set To Host File path — data.mat may save to working directory.\nMove it to data/ manually after the run.');
     end
 
     add_line(mdl_freq, 'V_Sat/1', 'Motor Command/1', 'autorouting', 'smart');

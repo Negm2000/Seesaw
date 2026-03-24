@@ -13,7 +13,7 @@ B_emf = alpha_f * K_g * k_m / r_mp;
 B_total = B_eq + B_emf;
 s = tf('s');
 G_xc = K_a * alpha_f * eta_m / (M_c * s^2 + B_total * s);
-freq_range = logspace(-1, 1.5, 200);   
+freq_range = logspace(-1, log10(12), 200);
 [mag, phase] = bode(G_xc, 2*pi*freq_range);
 G_xc_dB = 20*log10(squeeze(mag)*100);
 G_xc_phase = squeeze(phase);
@@ -24,15 +24,14 @@ data_file = fullfile(SEESAW_ROOT, 'data', 'data.mat');
 
 if exist(data_file, 'file')
     fprintf('Loading hardware data (data/data.mat)...\n');
-    load(data_file); 
-    % ... check for variable names
-    vars = who('-file', data_file);
+    loaded = load(data_file);
+    vars = fieldnames(loaded);
     if ismember('ip02_freq_data', vars)
-        % Using the data directly
+        ip02_freq_data = loaded.ip02_freq_data;
     elseif ismember('data', vars)
-        ip02_freq_data = data;
+        ip02_freq_data = loaded.data;
     end
-    
+
     if exist('ip02_freq_data', 'var')
         t_hw = ip02_freq_data(1, :)';
         V_cmd_hw = ip02_freq_data(2, :)';
@@ -114,7 +113,7 @@ function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
         Syu_xc = Syu_xc + Xc(1:n_seg/2+1) .* conj(U_h);
         Syu_xcdot = Syu_xcdot + Xcdot(1:n_seg/2+1) .* conj(U_h);
     end
-    valid = freq_fft >= 0.1 & freq_fft <= 25;
+    valid = freq_fft >= 0.1 & freq_fft <= 12;
     freq_out = freq_fft(valid)'; H_xc = Syu_xc(valid) ./ Suu(valid); H_xcdot = Syu_xcdot(valid) ./ Suu(valid);
 end
 

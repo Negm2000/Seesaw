@@ -30,3 +30,4 @@ docs/figures/*.pdf
 # Trash
 *.bak
 *.tmp
+*.txt
