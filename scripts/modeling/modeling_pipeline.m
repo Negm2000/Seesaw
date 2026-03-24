@@ -124,13 +124,13 @@ figure('Name', 'FRF: Model vs Hardware (Untuned)', 'Position', [100 100 1000 600
 subplot(2,1,1);
 semilogx(freq_range, mag_an_dB, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(hw_freq, 20*log10(abs(hw_H_xc)*100), 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Magnitude [dB cm/V]');
+grid on; ylabel('Magnitude [dB cm/V]'); xlim([f_chirp_start f_chirp_end]);
 title('V_{cmd} \rightarrow x_c');
 legend('Analytical (nominal)', 'Hardware', 'Location', 'best');
 subplot(2,1,2);
 semilogx(freq_range, phase_an_deg, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(hw_freq, unwrap(angle(hw_H_xc))*180/pi, 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
+grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]'); xlim([f_chirp_start f_chirp_end]);
 sgtitle(sprintf('Frequency Response — BEFORE Tuning (B_{eq} = %.1f)', B_eq));
 
 %% 6. AUTO-TUNE B_eq
@@ -229,13 +229,13 @@ subplot(2,1,1);
 semilogx(freq_range, mag_an_dB, 'b--', 'LineWidth', 1); hold on;
 semilogx(freq_range, mag_t_dB, 'g-', 'LineWidth', 2);
 semilogx(hw_freq, 20*log10(abs(hw_H_xc)*100), 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Magnitude [dB cm/V]');
+grid on; ylabel('Magnitude [dB cm/V]'); xlim([f_chirp_start f_chirp_end]);
 legend('Nominal', 'TUNED', 'Hardware', 'Location', 'best');
 subplot(2,1,2);
 semilogx(freq_range, phase_an_deg, 'b--', 'LineWidth', 1); hold on;
 semilogx(freq_range, phase_t_deg, 'g-', 'LineWidth', 2);
 semilogx(hw_freq, unwrap(angle(hw_H_xc))*180/pi, 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
+grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]'); xlim([f_chirp_start f_chirp_end]);
 sgtitle(sprintf('Frequency Response — AFTER Tuning (B_{eq} = %.2f \\rightarrow %.2f)', B_eq_nominal, B_eq));
 
 %% 9. TIME-DOMAIN VALIDATION
