@@ -31,3 +31,5 @@ docs/figures/*.pdf
 *.bak
 *.tmp
 *.txt
+IP02_FreqTest_quarc_win64/*
+IP02_FreqTest.rt-win64
