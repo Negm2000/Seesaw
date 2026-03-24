@@ -129,7 +129,7 @@ title('V_{cmd} \rightarrow x_c');
 legend('Analytical (nominal)', 'Hardware', 'Location', 'best');
 subplot(2,1,2);
 semilogx(freq_range, phase_an_deg, 'b-', 'LineWidth', 1.5); hold on;
-semilogx(hw_freq, angle(hw_H_xc)*180/pi, 'r-', 'LineWidth', 1.5);
+semilogx(hw_freq, unwrap(angle(hw_H_xc))*180/pi, 'r-', 'LineWidth', 1.5);
 grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
 sgtitle(sprintf('Frequency Response — BEFORE Tuning (B_{eq} = %.1f)', B_eq));
 
@@ -145,16 +145,19 @@ fprintf('  eta_g = %.2f (FIXED at hardware spec)\n', eta_g);
 p_tune = struct('K_a',K_a, 'V_sat',V_sat, 'R_m',R_m, 'k_t',k_t, ...
     'k_m',k_m, 'eta_m',eta_m, 'eta_g',eta_g, 'K_g',K_g, 'r_mp',r_mp, 'M_c',M_c);
 
-% Cost function: RMS position error (skip first 2s of transient)
+% Cost function: RMS velocity error (skip first 2s of transient)
+% Velocity is used because B_eq is a damping coefficient -- it directly
+% governs the velocity dynamics, and velocity is immune to DC drift from
+% static friction or track tilt that would bias a position-based cost.
 mask = t_hw > 2.0;
-cost_fn = @(B) tune_cost_Beq(B, V_cmd_hw, t_hw, xc_hw, mask, p_tune);
+cost_fn = @(B) tune_cost_Beq(B, V_cmd_hw, t_hw, xcdot_hw, mask, p_tune);
 
 opts = optimset('Display', 'iter', 'TolX', 1e-3, 'TolFun', 1e-6);
 [B_eq_opt, cost_opt] = fminsearch(cost_fn, B_eq, opts);
 
 fprintf('\n  RESULT: B_eq = %.4f N*s/m (was %.2f)\n', B_eq_opt, B_eq_nominal);
 fprintf('  Change: %+.1f%%\n', (B_eq_opt - B_eq_nominal)/B_eq_nominal * 100);
-fprintf('  RMS error: %.4f cm\n', cost_opt * 100);
+fprintf('  RMS velocity error: %.4f cm/s\n', cost_opt * 100);
 
 %% 7. APPLY TUNED PARAMETERS & REBUILD MODEL
 %  Overwrite B_eq with the tuned value, recompute all derived quantities,
@@ -165,9 +168,7 @@ fprintf('\n--- Applying Tuned Parameters ---\n');
 % Overwrite
 B_eq = B_eq_opt;
 
-% Recompute derived values
-alpha_f = (eta_g * K_g * k_t) / (R_m * r_mp);
-B_emf   = alpha_f * K_g * k_m / r_mp;
+% Recompute total damping (alpha_f and B_emf are constants -- not affected by B_eq)
 B_total = B_eq + B_emf;
 
 fprintf('  B_eq (tuned)  = %.4f N*s/m\n', B_eq);
@@ -233,7 +234,7 @@ legend('Nominal', 'TUNED', 'Hardware', 'Location', 'best');
 subplot(2,1,2);
 semilogx(freq_range, phase_an_deg, 'b--', 'LineWidth', 1); hold on;
 semilogx(freq_range, phase_t_deg, 'g-', 'LineWidth', 2);
-semilogx(hw_freq, angle(hw_H_xc)*180/pi, 'r-', 'LineWidth', 1.5);
+semilogx(hw_freq, unwrap(angle(hw_H_xc))*180/pi, 'r-', 'LineWidth', 1.5);
 grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
 sgtitle(sprintf('Frequency Response — AFTER Tuning (B_{eq} = %.2f \\rightarrow %.2f)', B_eq_nominal, B_eq));
 
@@ -243,7 +244,8 @@ sgtitle(sprintf('Frequency Response — AFTER Tuning (B_{eq} = %.2f \\rightarrow
 
 sys_tuned = ss(A_cart, B_cart, C_cart, D_cart);
 V_in = max(-V_sat, min(V_sat, K_a * V_cmd_hw));
-[y_sim, ~] = lsim(sys_tuned, V_in, t_hw);
+x0 = [xc_hw(1); xcdot_hw(1)];  % match hardware initial conditions
+[y_sim, ~] = lsim(sys_tuned, V_in, t_hw, x0);
 xc_sim = y_sim(:,1);  % position [m]
 
 err_cm = (xc_sim - xc_hw) * 100;
@@ -312,7 +314,14 @@ fprintf('============================================================\n');
 function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
 % COMPUTE_FRF  Welch's method FRF estimate (H1 estimator).
     N = length(t); Fs = 1/dt;
-    n_seg = 2048; win = hanning(n_seg);
+    % Choose n_seg to guarantee at least 0.05 Hz frequency resolution.
+    % Minimum n_seg = Fs/0.05 = 20*Fs; round up to next power of 2.
+    n_seg = 2^nextpow2(Fs / 0.05);
+    n_seg = min(n_seg, floor(N / 4));  % cap so we always have >= 4 segments
+    if N / (n_seg * 0.5) < 4
+        warning('compute_frf: fewer than 4 Welch segments available — FRF estimate may be noisy.');
+    end
+    win = hanning(n_seg);
     n_step = round(n_seg * 0.5);
     n_segs = floor((N - n_seg) / n_step);
     freq_fft = (0:n_seg/2) * Fs / n_seg;
@@ -341,11 +350,16 @@ function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
     H_xcdot  = Syu_xcdot(valid) ./ Suu(valid);
 end
 
-function cost = tune_cost_Beq(B_try, V_cmd, t, xc_hw, mask, p)
-% TUNE_COST_BEQ  RMS position error for a candidate B_eq value.
+function cost = tune_cost_Beq(B_try, V_cmd, t, xcdot_hw, mask, p)
+% TUNE_COST_BEQ  RMS velocity error for a candidate B_eq value.
+%   Velocity is used instead of position because:
+%   (a) B_eq is a damping coefficient that directly sets the velocity pole;
+%   (b) position integrates any DC drift (static friction, track tilt) that
+%       would bias the optimizer to compensate slope rather than damping.
     af    = (p.eta_g * p.K_g * p.k_t) / (p.R_m * p.r_mp);
     B_tot = B_try + af * p.K_g * p.k_m / p.r_mp;
-    sys   = ss([0, 1; 0, -B_tot/p.M_c], [0; af*p.eta_m/p.M_c], [1, 0], 0);
-    xc_sim = lsim(sys, max(-p.V_sat, min(p.V_sat, p.K_a*V_cmd)), t);
-    cost  = sqrt(mean((xc_sim(mask) - xc_hw(mask)).^2));
+    sys   = ss([0, 1; 0, -B_tot/p.M_c], [0; af*p.eta_m/p.M_c], [0, 1], 0);
+    x0    = [0; xcdot_hw(1)];  % states: [x_c; x_c_dot]; position irrelevant to velocity cost
+    xcdot_sim = lsim(sys, max(-p.V_sat, min(p.V_sat, p.K_a*V_cmd)), t, x0);
+    cost  = sqrt(mean((xcdot_sim(mask) - xcdot_hw(mask)).^2));
 end
