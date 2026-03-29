@@ -97,24 +97,21 @@ sgtitle('Frequency Response Validation (AFTER AUTO-TUNE)');
 
 % --- LOCAL FUNCTIONS ---
 function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
-    N = length(t); Fs = 1/dt;
-    n_seg = 2048; win = hanning(n_seg);
-    n_step = round(n_seg * 0.5); n_segs = floor((N - n_seg) / n_step);
-    freq_fft = (0:n_seg/2) * Fs / n_seg;
-    Suu = zeros(n_seg/2+1, 1); Syu_xc = zeros(n_seg/2+1, 1); Syu_xcdot = zeros(n_seg/2+1, 1);
-    for k = 0:n_segs-1
-        idx = k*n_step + (1:n_seg);
-        u_seg = (u(idx) - mean(u(idx))) .* win;
-        xc_seg = (xc(idx) - mean(xc(idx))) .* win;
-        xcdot_seg = (xcdot(idx) - mean(xcdot(idx))) .* win;
-        U = fft(u_seg); Xc = fft(xc_seg); Xcdot = fft(xcdot_seg);
-        U_h = U(1:n_seg/2+1);
-        Suu = Suu + abs(U_h).^2;
-        Syu_xc = Syu_xc + Xc(1:n_seg/2+1) .* conj(U_h);
-        Syu_xcdot = Syu_xcdot + Xcdot(1:n_seg/2+1) .* conj(U_h);
-    end
+% COMPUTE_FRF  Welch's method FRF estimate (H1 estimator).
+%   Uses MATLAB's tfestimate for robust cross-spectral estimation.
+%   Segment size is kept moderate (4096 samples) so that the chirp
+%   signal is approximately stationary within each window.
+    Fs = 1/dt;
+    n_seg = min(4096, 2^nextpow2(length(t)/8));  % >= 8 segments
+    n_seg = max(n_seg, 512);                       % floor for very short records
+
+    [H_xc_raw,    freq_fft] = tfestimate(u, xc,    hanning(n_seg), n_seg/2, n_seg, Fs);
+    [H_xcdot_raw, ~       ] = tfestimate(u, xcdot, hanning(n_seg), n_seg/2, n_seg, Fs);
+
     valid = freq_fft >= 0.1 & freq_fft <= 12;
-    freq_out = freq_fft(valid)'; H_xc = Syu_xc(valid) ./ Suu(valid); H_xcdot = Syu_xcdot(valid) ./ Suu(valid);
+    freq_out = freq_fft(valid);
+    H_xc     = H_xc_raw(valid);
+    H_xcdot  = H_xcdot_raw(valid);
 end
 
 function cost = tune_cost(params, V_cmd, t, xc_hw, idx, p, tune_eta)

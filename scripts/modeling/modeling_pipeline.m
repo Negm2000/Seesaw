@@ -316,41 +316,23 @@ fprintf('============================================================\n');
 
 function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
 % COMPUTE_FRF  Welch's method FRF estimate (H1 estimator).
-    N = length(t); Fs = 1/dt;
-    % Choose n_seg to guarantee at least 0.05 Hz frequency resolution.
-    % Minimum n_seg = Fs/0.05 = 20*Fs; round up to next power of 2.
-    n_seg = 2^nextpow2(Fs / 0.05);
-    n_seg = min(n_seg, floor(N / 4));  % cap so we always have >= 4 segments
-    if N / (n_seg * 0.5) < 4
-        warning('compute_frf: fewer than 4 Welch segments available — FRF estimate may be noisy.');
-    end
-    win = hanning(n_seg);
-    n_step = round(n_seg * 0.5);
-    n_segs = floor((N - n_seg) / n_step);
-    freq_fft = (0:n_seg/2) * Fs / n_seg;
+%   Uses MATLAB's tfestimate for robust cross-spectral estimation.
+%   Segment size is kept moderate (4096 samples) so that the chirp
+%   signal is approximately stationary within each window.  This avoids
+%   the old bug where huge windows caused the chirp to sweep across
+%   many bins, diluting Suu and poisoning the H1 estimator at high
+%   frequencies.
+    Fs = 1/dt;
+    n_seg = min(4096, 2^nextpow2(length(t)/8));  % ≥ 8 segments
+    n_seg = max(n_seg, 512);                       % floor for very short records
 
-    Suu = zeros(n_seg/2+1, 1);
-    Syu_xc = zeros(n_seg/2+1, 1);
-    Syu_xcdot = zeros(n_seg/2+1, 1);
-
-    for k = 0:n_segs-1
-        idx = k*n_step + (1:n_seg);
-        u_seg     = (u(idx) - mean(u(idx))) .* win;
-        xc_seg    = (xc(idx) - mean(xc(idx))) .* win;
-        xcdot_seg = (xcdot(idx) - mean(xcdot(idx))) .* win;
-
-        U = fft(u_seg);  Xc = fft(xc_seg);  Xcdot = fft(xcdot_seg);
-        U_h = U(1:n_seg/2+1);
-
-        Suu       = Suu + abs(U_h).^2;
-        Syu_xc    = Syu_xc + Xc(1:n_seg/2+1) .* conj(U_h);
-        Syu_xcdot = Syu_xcdot + Xcdot(1:n_seg/2+1) .* conj(U_h);
-    end
+    [H_xc_raw,    freq_fft] = tfestimate(u, xc,    hanning(n_seg), n_seg/2, n_seg, Fs);
+    [H_xcdot_raw, ~       ] = tfestimate(u, xcdot, hanning(n_seg), n_seg/2, n_seg, Fs);
 
     valid = freq_fft >= 0.1 & freq_fft <= 12;
-    freq_out = freq_fft(valid)';
-    H_xc     = Syu_xc(valid) ./ Suu(valid);
-    H_xcdot  = Syu_xcdot(valid) ./ Suu(valid);
+    freq_out = freq_fft(valid);
+    H_xc     = H_xc_raw(valid);
+    H_xcdot  = H_xcdot_raw(valid);
 end
 
 function cost = tune_cost_Beq(B_try, V_cmd, t, xcdot_hw, mask, p)

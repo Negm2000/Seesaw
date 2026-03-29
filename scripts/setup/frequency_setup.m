@@ -50,12 +50,12 @@ f_chirp_start = 0.1;    % start frequency [Hz]
 f_chirp_end = 12.0;     % end frequency [Hz] (>12 Hz the gears lack resolution)
 Ts_quarc = 0.002;       % QUARC sample time [s]
 
-% Generate logarithmic chirp signal for workspace
+% Generate LINEAR chirp signal for workspace
+% Linear chirp spends equal time per Hz (unlike log chirp which spends
+% equal time per decade).  This ensures the input has adequate spectral
+% energy at ALL frequencies so the Welch H1 estimator stays well-conditioned.
 t_chirp = (0:Ts_quarc:chirp_duration)';
-log_ratio = log(f_chirp_end / f_chirp_start);
-phase_chirp = 2*pi * f_chirp_start * chirp_duration / log_ratio ...
-    * ((f_chirp_end/f_chirp_start).^(t_chirp/chirp_duration) - 1);
-chirp_signal = A_chirp * sin(phase_chirp);
+chirp_signal = A_chirp * chirp(t_chirp, f_chirp_start, chirp_duration, f_chirp_end);
 
 assignin('base', 'chirp_input', timeseries(chirp_signal, t_chirp));
 assignin('base', 'chirp_duration', chirp_duration);
