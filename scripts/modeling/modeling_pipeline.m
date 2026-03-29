@@ -98,8 +98,11 @@ fprintf('  Duration: %.1f s | Fs: %.0f Hz | Samples: %d\n', t_hw(end), Fs_hw, le
 fprintf('  x_c range: [%.1f, %.1f] cm\n', min(xc_hw)*100, max(xc_hw)*100);
 
 % Sanity check: did the cart hit end-stops?
-if max(abs(xc_hw)) > x_c_max * 0.9
-    warning('Cart reached %.1f cm (track limit = %.1f cm). Data may be clipped!', max(abs(xc_hw))*100, x_c_max*100);
+% Use range of motion (max - min), not abs(x_c), because the encoder may be
+% zeroed at one end of the track rather than the centre.
+xc_range = max(xc_hw) - min(xc_hw);
+if xc_range > T_c * 0.9
+    warning('Cart travelled %.1f cm (track travel = %.1f cm). Data may be clipped!', xc_range*100, T_c*100);
 end
 
 figure('Name', 'Raw Hardware Data', 'Position', [100 100 1000 700]);

@@ -15,8 +15,8 @@ g = 9.81;                   % Gravitational acceleration [m/s^2]
 
 %% ===== VoltPAQ-X1 Amplifier [3] =====
 K_a   = 1;                  % Amplifier gain [V/V] -- SET SWITCH TO 1x!
-V_sat = 22.0;               % Amplifier output saturation under load [V]
-                             % (Manual: 22.3V at 2A, 20.8V at 4A)
+V_sat = 6.0;                % Motor nominal voltage limit [V] (IP02 Manual Table 3.1)
+                             % VoltPAQ can output up to 22V but motor is rated for 6V.
                              % NOTE: No current limiting circuit exists in this
                              % signal chain. VoltPAQ is a linear voltage amp
                              % (up to 4A continuous). Motor current is governed
