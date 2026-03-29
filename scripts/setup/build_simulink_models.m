@@ -451,41 +451,50 @@ save_system(mdl2, fullfile(SEESAW_ROOT, 'models', [mdl2 '.slx']));
 fprintf('  Phase 2 model saved: models/%s.slx\n', mdl2);
 
 %% =====================================================================
-%  PHASE 3: Seesaw Closed-Loop Control  (Cascade: Lead + PI)
+%  PHASE 3: Seesaw Closed-Loop Control  (Full State Feedback)
 %  States:  [x_c; x_c_dot; alpha; alpha_dot]   (same as Phase 2)
 %
-%  Architecture (runs on QUARC target at 500 Hz):
-%    x_c_ref ─►[Sum_outer]─► C_outer(PI) ─►[Sum_inner]─► C_inner(Lead) ─► Sat ─► Motor
-%                  ▲(−)                         ▲(−)
-%                  │ x_c (encoder ch0)          │ alpha (encoder ch1)
+%  Architecture:  u = -K * x  (pole placement, from control_pipeline.m)
 %
-%  Requires: controller.mat from control_pipeline.m
+%  Simulation mode:
+%    x_c_ref ──►[Sum_ref] ────────────────────────────────────────►[Mux_err]──► Gain(-K)
+%                  ▲(-)                                               ▲  ▲  ▲
+%                  │ x_c    x_c_dot    alpha    alpha_dot             │  │  │
+%                  └──────────────────────────────────────────────────-┘  │  │
+%                        (all 4 states from Plant_SS → Demux)            │  │
+%                                                                        ...
+%
+%  Hardware mode (QUARC at 500 Hz):
+%    Encoders ──► [K_ec] ──► x_c   ──► Dirty deriv ──► x_c_dot
+%             ──► [K_sw] ──► alpha ──► Dirty deriv ──► alpha_dot
+%    [Mux: x_c, x_c_dot, alpha, alpha_dot] ──► Gain(-K) ──► V_Sat ──► Motor
+%    Reference x_c_ref enters via (x_c_ref - x_c) replacing x_c in state vec.
+%
+%  Requires: controller_freq.mat from control_pipeline.m
 %  =====================================================================
-mdl3 = 'Seesaw_Control';
+mdl3 = 'Seesaw_StateFB';
 fprintf('\n--- Building Phase 3: %s ---\n', mdl3);
 
-ctrl_path = fullfile(SEESAW_ROOT, 'data', 'controller.mat');
+ctrl_path = fullfile(SEESAW_ROOT, 'data', 'controller_freq.mat');
 if ~exist(ctrl_path, 'file')
-    fprintf('  controller.mat not found — skipping Phase 3.\n');
+    fprintf('  controller_freq.mat not found — skipping Phase 3.\n');
     fprintf('  Run control_pipeline.m first, then re-run this script.\n');
     phase3_built = false;
 else
     phase3_built = true;
     ctrl = load(ctrl_path);
 
-    % Extract TF coefficients for Simulink Transfer Fcn blocks
-    [Ci_num, Ci_den] = tfdata(ctrl.C_inner, 'v');
-    [Co_num, Co_den] = tfdata(ctrl.C_outer, 'v');
+    % Push controller gains K to base workspace
+    assignin('base', 'K_fb', ctrl.K);
 
-    % Push to base workspace (Simulink reads from there)
-    assignin('base', 'Ci_num', Ci_num);
-    assignin('base', 'Ci_den', Ci_den);
-    assignin('base', 'Co_num', Co_num);
-    assignin('base', 'Co_den', Co_den);
+    % Derivative filter time constant for velocity estimation
+    tau_d = 0.01;   % 100 rad/s cutoff (~16 Hz) — safe for 500 Hz sample rate
+    assignin('base', 'tau_d', tau_d);
 
-    fprintf('  C_inner (Lead): K_c=%.4f, z_c=%.3f, p_c=%.3f\n', ...
-        ctrl.K_c, ctrl.z_c, ctrl.p_c);
-    fprintf('  C_outer (PI):   K_outer=%.4f\n', ctrl.K_outer);
+    fprintf('  State feedback gains loaded:\n');
+    fprintf('    K = [%.4f, %.4f, %.4f, %.4f]\n', ctrl.K);
+    fprintf('         k_xc    k_xcdot  k_alpha  k_alphadot\n');
+    fprintf('  Derivative filter: tau_d = %.3f s (cutoff %.0f rad/s)\n', tau_d, 1/tau_d);
 
     if bdIsLoaded(mdl3), close_system(mdl3, 0); end
     new_system(mdl3);
@@ -506,51 +515,53 @@ else
     end
 
     % ==================================================================
-    %  CONTROLLER CHAIN (identical for sim and hardware)
+    %  REFERENCE INPUT + ERROR COMPUTATION
     % ==================================================================
 
-    % ---- REFERENCE INPUT ----
-    % Cart position reference [m].
-    % Default: step from 0 → 0 (hold at center, test stabilisation only).
-    % For a 5 cm step test: change 'After' to '0.05'.
+    % ---- Cart position reference [m] ----
+    % Default: hold at center (x_c_ref = 0).
+    % For 5 cm step test: change 'After' to '0.05'.
     add_block('simulink/Sources/Step', [mdl3 '/x_c_ref'], ...
-        'Time',   '5', ...
+        'Time',   '2', ...
         'Before', '0', ...
         'After',  '0', ...
-        'Position', [50 195 90 235]);
+        'Position', [50 95 90 135]);
 
-    % ---- OUTER SUMMING JUNCTION (x_c_ref − x_c) ----
-    add_block('simulink/Math Operations/Sum', [mdl3 '/Sum_outer'], ...
+    % ---- SUMMING JUNCTION: e_xc = x_c_ref - x_c ----
+    % Replaces x_c in the state vector with position error.
+    % This ensures the controller drives the cart to the reference.
+    add_block('simulink/Math Operations/Sum', [mdl3 '/Sum_ref'], ...
         'Inputs', '+-', ...
-        'Position', [160 200 180 220]);
+        'Position', [160 100 180 120]);
 
-    % ---- C_outer: PI compensator ----
-    % C_outer(s) = K_outer * (s + omega_i) / s
-    % NOTE: integrator will wind up during voltage saturation.
-    %       For first tests this is acceptable. Add anti-windup later
-    %       if the cart drifts slowly after large disturbances.
-    add_block('simulink/Continuous/Transfer Fcn', [mdl3 '/C_outer'], ...
-        'Numerator',   'Co_num', ...
-        'Denominator', 'Co_den', ...
-        'Position', [230 190 360 230]);
+    % ==================================================================
+    %  STATE VECTOR MUX + CONTROL LAW: u = -K * [e_xc; xc_dot; alpha; a_dot]
+    % ==================================================================
 
-    % ---- INNER SUMMING JUNCTION (alpha_ref − alpha) ----
-    add_block('simulink/Math Operations/Sum', [mdl3 '/Sum_inner'], ...
-        'Inputs', '+-', ...
-        'Position', [420 200 440 220]);
+    % ---- Mux: assemble state error vector ----
+    %   Port 1: e_xc        (x_c_ref - x_c)
+    %   Port 2: x_c_dot     (velocity — zero reference assumed)
+    %   Port 3: alpha       (angle — zero reference assumed)
+    %   Port 4: alpha_dot   (angular rate)
+    add_block('simulink/Signal Routing/Mux', [mdl3 '/Mux_states'], ...
+        'Inputs', '4', ...
+        'Position', [290 70 295 200]);
 
-    % ---- C_inner: Lead compensator ----
-    % C_inner(s) = K_c * (s + z_c) / (s + p_c)
-    add_block('simulink/Continuous/Transfer Fcn', [mdl3 '/C_inner'], ...
-        'Numerator',   'Ci_num', ...
-        'Denominator', 'Ci_den', ...
-        'Position', [490 190 620 230]);
+    % ---- State feedback gain: u = -K * x_err ----
+    % Gain block with -K (1x4 vector), input = 4x1 muxed state error.
+    % Simulink Gain block with Multiplication = 'Vector*Matrix(u*K)'
+    % where u is 1x4 (transposed internally) and K is 1x4;
+    % Actually: input 4x1, Gain 1x4, Multiplication = 'Matrix(K*u)'.
+    add_block('simulink/Math Operations/Gain', [mdl3 '/Gain_K'], ...
+        'Gain', '-K_fb', ...
+        'Multiplication', 'Matrix(K*u)', ...
+        'Position', [350 115 440 155]);
 
-    % ---- VOLTAGE SATURATION (±V_sat = ±22 V) ----
+    % ---- VOLTAGE SATURATION (±V_sat) ----
     add_block('simulink/Discontinuities/Saturation', [mdl3 '/V_Sat'], ...
         'UpperLimit', 'V_sat', ...
         'LowerLimit', '-V_sat', ...
-        'Position', [670 198 720 222]);
+        'Position', [490 118 540 152]);
 
     % ==================================================================
     %  DISPLAY: SCOPES + TO-WORKSPACE
@@ -559,67 +570,63 @@ else
     % ---- Unit conversion gains for scopes ----
     add_block('simulink/Math Operations/Gain', [mdl3 '/ref_m_to_cm'], ...
         'Gain', '100', ...
-        'Position', [830 82 870 108]);
+        'Position', [730 52 770 78]);
 
     add_block('simulink/Math Operations/Gain', [mdl3 '/xc_m_to_cm'], ...
         'Gain', '100', ...
-        'Position', [830 122 870 148]);
-
-    add_block('simulink/Math Operations/Gain', [mdl3 '/aref_to_deg'], ...
-        'Gain', '180/pi', ...
-        'Position', [830 192 870 218]);
+        'Position', [730 92 770 118]);
 
     add_block('simulink/Math Operations/Gain', [mdl3 '/alpha_to_deg'], ...
         'Gain', '180/pi', ...
-        'Position', [830 232 870 258]);
+        'Position', [730 172 770 198]);
 
     % ---- Scopes ----
     add_block('simulink/Sinks/Scope', [mdl3 '/Scope_Cart'], ...
         'NumInputPorts', '2', ...
-        'Position', [940 90 980 140]);
+        'Position', [840 60 880 110]);
     set_param([mdl3 '/Scope_Cart'], 'Name', 'Cart [cm]');
 
     add_block('simulink/Sinks/Scope', [mdl3 '/Scope_Angle'], ...
-        'NumInputPorts', '2', ...
-        'Position', [940 200 980 250]);
+        'NumInputPorts', '1', ...
+        'Position', [840 170 880 200]);
     set_param([mdl3 '/Scope_Angle'], 'Name', 'Angle [deg]');
 
     add_block('simulink/Sinks/Scope', [mdl3 '/Scope_Vm'], ...
         'NumInputPorts', '1', ...
-        'Position', [940 300 980 330]);
+        'Position', [840 250 880 280]);
     set_param([mdl3 '/Scope_Vm'], 'Name', 'Voltage [V]');
 
     % ---- To Workspace ----
     add_block('simulink/Sinks/To Workspace', [mdl3 '/ToWS_xc'], ...
         'VariableName', 'ctrl_xc', 'SaveFormat', 'Timeseries', ...
-        'Position', [940 355 1010 375]);
+        'Position', [840 310 910 330]);
 
     add_block('simulink/Sinks/To Workspace', [mdl3 '/ToWS_alpha'], ...
         'VariableName', 'ctrl_alpha', 'SaveFormat', 'Timeseries', ...
-        'Position', [940 395 1010 415]);
+        'Position', [840 350 910 370]);
 
     add_block('simulink/Sinks/To Workspace', [mdl3 '/ToWS_Vm'], ...
         'VariableName', 'ctrl_Vm', 'SaveFormat', 'Timeseries', ...
-        'Position', [940 435 1010 455]);
+        'Position', [840 390 910 410]);
 
     % ==================================================================
     %  WIRING: CONTROLLER CHAIN (forward path)
     % ==================================================================
-    add_line(mdl3, 'x_c_ref/1',  'Sum_outer/1', 'autorouting', 'smart');
-    add_line(mdl3, 'Sum_outer/1', 'C_outer/1',  'autorouting', 'smart');
-    add_line(mdl3, 'C_outer/1',  'Sum_inner/1', 'autorouting', 'smart');
-    add_line(mdl3, 'Sum_inner/1', 'C_inner/1',  'autorouting', 'smart');
-    add_line(mdl3, 'C_inner/1',  'V_Sat/1',     'autorouting', 'smart');
+    % x_c_ref → Sum_ref (port +)
+    add_line(mdl3, 'x_c_ref/1',   'Sum_ref/1',    'autorouting', 'smart');
+    % Sum_ref → Mux port 1 (e_xc)
+    add_line(mdl3, 'Sum_ref/1',   'Mux_states/1', 'autorouting', 'smart');
+    % Mux → Gain(-K) → V_Sat
+    add_line(mdl3, 'Mux_states/1', 'Gain_K/1',    'autorouting', 'smart');
+    add_line(mdl3, 'Gain_K/1',    'V_Sat/1',      'autorouting', 'smart');
 
     % Voltage → scope + workspace
     add_line(mdl3, 'V_Sat/1', 'Voltage [V]/1', 'autorouting', 'smart');
     add_line(mdl3, 'V_Sat/1', 'ToWS_Vm/1',     'autorouting', 'smart');
 
-    % Reference signals → display scopes
-    add_line(mdl3, 'x_c_ref/1', 'ref_m_to_cm/1',   'autorouting', 'smart');
-    add_line(mdl3, 'ref_m_to_cm/1', 'Cart [cm]/1',  'autorouting', 'smart');
-    add_line(mdl3, 'C_outer/1', 'aref_to_deg/1',    'autorouting', 'smart');
-    add_line(mdl3, 'aref_to_deg/1', 'Angle [deg]/1', 'autorouting', 'smart');
+    % Reference → Cart scope port 1
+    add_line(mdl3, 'x_c_ref/1',     'ref_m_to_cm/1', 'autorouting', 'smart');
+    add_line(mdl3, 'ref_m_to_cm/1', 'Cart [cm]/1',   'autorouting', 'smart');
 
     % ==================================================================
     %  FEEDBACK PATH — hardware vs simulation
@@ -632,49 +639,73 @@ else
             % HIL Initialize (configures Q2-USB board)
             add_block('quarc_library/Data Acquisition/Generic/Configuration/HIL Initialize', ...
                 [mdl3 '/HIL Initialize'], ...
-                'Position', [50 380 134 455]);
+                'Position', [50 350 134 425]);
 
             % Motor output: V_Sat → DAC channel 0 → VoltPAQ → motor
             add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Write Analog', ...
                 [mdl3 '/Motor Command'], ...
-                'Position', [780 195 865 225]);
+                'Position', [600 118 685 152]);
 
             % Encoder input: ch0 = cart, ch1 = seesaw
             add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Read Encoder', ...
                 [mdl3 '/Encoders'], ...
-                'Position', [50 500 135 560]);
+                'Position', [50 450 135 510]);
 
-            % Encoder → physical units
+            % ---- Encoder → physical units ----
             add_block('simulink/Math Operations/Gain', [mdl3 '/Enc_to_xc'], ...
                 'Gain', 'K_ec', ...
-                'Position', [200 500 260 530]);
+                'Position', [200 455 260 485]);
 
             add_block('simulink/Math Operations/Gain', [mdl3 '/Enc_to_alpha'], ...
                 'Gain', 'K_E_SW / K_gs', ...
-                'Position', [200 550 260 580]);
+                'Position', [200 505 260 535]);
 
-            % V_Sat → Motor Command
+            % ---- Dirty derivative filters for velocity estimation ----
+            % x_c_dot ≈ s / (tau_d*s + 1) * x_c
+            add_block('simulink/Continuous/Transfer Fcn', [mdl3 '/Deriv_xc'], ...
+                'Numerator',   '[1, 0]', ...
+                'Denominator', '[tau_d, 1]', ...
+                'Position', [320 455 420 485]);
+
+            % alpha_dot ≈ s / (tau_d*s + 1) * alpha
+            add_block('simulink/Continuous/Transfer Fcn', [mdl3 '/Deriv_alpha'], ...
+                'Numerator',   '[1, 0]', ...
+                'Denominator', '[tau_d, 1]', ...
+                'Position', [320 505 420 535]);
+
+            % ---- Wiring: motor output ----
             add_line(mdl3, 'V_Sat/1', 'Motor Command/1', 'autorouting', 'smart');
 
-            % Encoders → conversion gains
+            % ---- Wiring: encoders → conversion gains ----
             add_line(mdl3, 'Encoders/1', 'Enc_to_xc/1',    'autorouting', 'smart');
             add_line(mdl3, 'Encoders/2', 'Enc_to_alpha/1',  'autorouting', 'smart');
 
-            % Feedback: encoder → summing junctions (negative inputs)
-            add_line(mdl3, 'Enc_to_xc/1',   'Sum_outer/2', 'autorouting', 'smart');
-            add_line(mdl3, 'Enc_to_alpha/1', 'Sum_inner/2', 'autorouting', 'smart');
+            % ---- Wiring: positions → dirty derivatives ----
+            add_line(mdl3, 'Enc_to_xc/1',    'Deriv_xc/1',    'autorouting', 'smart');
+            add_line(mdl3, 'Enc_to_alpha/1',  'Deriv_alpha/1', 'autorouting', 'smart');
 
-            % Feedback → display scopes (actual vs reference)
-            add_line(mdl3, 'Enc_to_xc/1',   'xc_m_to_cm/1',     'autorouting', 'smart');
-            add_line(mdl3, 'xc_m_to_cm/1',  'Cart [cm]/2',      'autorouting', 'smart');
-            add_line(mdl3, 'Enc_to_alpha/1', 'alpha_to_deg/1',   'autorouting', 'smart');
-            add_line(mdl3, 'alpha_to_deg/1', 'Angle [deg]/2',    'autorouting', 'smart');
+            % ---- Wiring: feedback → error / state mux ----
+            % x_c → Sum_ref port 2 (negative)
+            add_line(mdl3, 'Enc_to_xc/1',   'Sum_ref/2',     'autorouting', 'smart');
+            % x_c_dot → Mux port 2
+            add_line(mdl3, 'Deriv_xc/1',    'Mux_states/2',  'autorouting', 'smart');
+            % alpha → Mux port 3
+            add_line(mdl3, 'Enc_to_alpha/1', 'Mux_states/3', 'autorouting', 'smart');
+            % alpha_dot → Mux port 4
+            add_line(mdl3, 'Deriv_alpha/1',  'Mux_states/4', 'autorouting', 'smart');
 
-            % Feedback → To Workspace
-            add_line(mdl3, 'Enc_to_xc/1',   'ToWS_xc/1',    'autorouting', 'smart');
-            add_line(mdl3, 'Enc_to_alpha/1', 'ToWS_alpha/1', 'autorouting', 'smart');
+            % ---- Wiring: feedback → display scopes ----
+            add_line(mdl3, 'Enc_to_xc/1',    'xc_m_to_cm/1',   'autorouting', 'smart');
+            add_line(mdl3, 'xc_m_to_cm/1',   'Cart [cm]/2',    'autorouting', 'smart');
+            add_line(mdl3, 'Enc_to_alpha/1',  'alpha_to_deg/1', 'autorouting', 'smart');
+            add_line(mdl3, 'alpha_to_deg/1',  'Angle [deg]/1',  'autorouting', 'smart');
+
+            % ---- Wiring: feedback → To Workspace ----
+            add_line(mdl3, 'Enc_to_xc/1',    'ToWS_xc/1',    'autorouting', 'smart');
+            add_line(mdl3, 'Enc_to_alpha/1',  'ToWS_alpha/1', 'autorouting', 'smart');
 
             fprintf('  QUARC hardware blocks wired successfully.\n');
+            fprintf('  Velocity estimation: dirty derivatives (tau=%.3f s)\n', tau_d);
         catch ME
             fprintf('  Warning: Could not add QUARC blocks: %s\n', ME.message);
             fprintf('  Model will NOT work on hardware. Check QUARC installation.\n');
@@ -688,28 +719,34 @@ else
         add_block('simulink/Continuous/State-Space', [mdl3 '/Plant_SS'], ...
             'A', 'A_sw', 'B', 'B_sw', 'C', 'C_sw', 'D', 'D_sw', ...
             'X0', '[0; 0; 0.08; 0]', ...
-            'Position', [780 175 890 255]);
+            'Position', [600 65 710 215]);
 
         % Demux: split [x_c; x_c_dot; alpha; alpha_dot]
         add_block('simulink/Signal Routing/Demux', [mdl3 '/Demux_Plant'], ...
             'Outputs', '4', ...
-            'Position', [920 165 925 265]);
+            'Position', [740 65 745 215]);
 
         % V_Sat → Plant → Demux
-        add_line(mdl3, 'V_Sat/1',      'Plant_SS/1',    'autorouting', 'smart');
-        add_line(mdl3, 'Plant_SS/1',   'Demux_Plant/1', 'autorouting', 'smart');
+        add_line(mdl3, 'V_Sat/1',    'Plant_SS/1',    'autorouting', 'smart');
+        add_line(mdl3, 'Plant_SS/1', 'Demux_Plant/1', 'autorouting', 'smart');
 
-        % Feedback: x_c (port 1) → Sum_outer, alpha (port 3) → Sum_inner
-        add_line(mdl3, 'Demux_Plant/1', 'Sum_outer/2', 'autorouting', 'smart');
-        add_line(mdl3, 'Demux_Plant/3', 'Sum_inner/2', 'autorouting', 'smart');
+        % ---- Feedback: states → error / state mux ----
+        % x_c (port 1) → Sum_ref port 2 (negative)
+        add_line(mdl3, 'Demux_Plant/1', 'Sum_ref/2',     'autorouting', 'smart');
+        % x_c_dot (port 2) → Mux port 2
+        add_line(mdl3, 'Demux_Plant/2', 'Mux_states/2', 'autorouting', 'smart');
+        % alpha (port 3) → Mux port 3
+        add_line(mdl3, 'Demux_Plant/3', 'Mux_states/3', 'autorouting', 'smart');
+        % alpha_dot (port 4) → Mux port 4
+        add_line(mdl3, 'Demux_Plant/4', 'Mux_states/4', 'autorouting', 'smart');
 
-        % Feedback → display scopes
+        % ---- Feedback → display scopes ----
         add_line(mdl3, 'Demux_Plant/1', 'xc_m_to_cm/1',   'autorouting', 'smart');
         add_line(mdl3, 'xc_m_to_cm/1',  'Cart [cm]/2',    'autorouting', 'smart');
         add_line(mdl3, 'Demux_Plant/3', 'alpha_to_deg/1',  'autorouting', 'smart');
-        add_line(mdl3, 'alpha_to_deg/1', 'Angle [deg]/2',  'autorouting', 'smart');
+        add_line(mdl3, 'alpha_to_deg/1', 'Angle [deg]/1',  'autorouting', 'smart');
 
-        % Feedback → To Workspace
+        % ---- Feedback → To Workspace ----
         add_line(mdl3, 'Demux_Plant/1', 'ToWS_xc/1',    'autorouting', 'smart');
         add_line(mdl3, 'Demux_Plant/3', 'ToWS_alpha/1', 'autorouting', 'smart');
 
@@ -734,12 +771,12 @@ fprintf(' Phase 2: %s.slx (Cart on Seesaw — Open Loop)\n', mdl2);
 fprintf('   Sine --> Amp --> Sat --> SS(4x4) --> [x_c, x_c_dot, alpha, alpha_dot]\n\n');
 
 if phase3_built
-    fprintf(' Phase 3: %s.slx (Seesaw — Closed-Loop Cascade Control)\n', mdl3);
-    fprintf('   x_c_ref --> [Sum] --> C_outer(PI) --> [Sum] --> C_inner(Lead) --> Sat --> Motor\n');
-    fprintf('                 ^(-)                      ^(-)\n');
-    fprintf('                 x_c (enc ch0)             alpha (enc ch1)\n\n');
+    fprintf(' Phase 3: %s.slx (Seesaw — Full State Feedback Control)\n', mdl3);
+    fprintf('   u = -K * [e_xc, x_c_dot, alpha, alpha_dot]\n');
+    fprintf('   K = [%.3f, %.3f, %.3f, %.3f]\n', ctrl.K);
+    fprintf('   e_xc = x_c_ref - x_c (position tracking error)\n\n');
 else
-    fprintf(' Phase 3: SKIPPED (controller.mat not found)\n\n');
+    fprintf(' Phase 3: SKIPPED (controller_freq.mat not found)\n\n');
 end
 
 fprintf(' SIMULATION MODE (Phase 1 & 2):\n');
@@ -753,21 +790,20 @@ if quarc_available
     fprintf('     2. Connect Q2-USB, power on VoltPAQ (switch = 1x)\n');
     fprintf('     3. QUARC | Build | Connect | Start\n\n');
     if phase3_built
-        fprintf('   Phase 3 (closed-loop control):\n');
-        fprintf('     1. seesaw_params\n');
-        fprintf('     2. load(''data/controller.mat'')  — pushes Ci/Co to workspace\n');
-        fprintf('     3. Connect Q2-USB, power on VoltPAQ (switch = 1x)\n');
-        fprintf('     4. QUARC | Build (Ctrl+B)\n');
-        fprintf('     5. QUARC | Connect (Ctrl+T)\n');
-        fprintf('     6. *** HOLD SEESAW LEVEL BY HAND ***\n');
-        fprintf('     7. QUARC | Start — release seesaw gently\n');
-        fprintf('     8. If it diverges: QUARC | Stop IMMEDIATELY\n\n');
+        fprintf('   Phase 3 (state feedback control):\n');
+        fprintf('     1. seesaw_params; control_pipeline;\n');
+        fprintf('     2. Connect Q2-USB, power on VoltPAQ (switch = 1x)\n');
+        fprintf('     3. QUARC | Build (Ctrl+B)\n');
+        fprintf('     4. QUARC | Connect (Ctrl+T)\n');
+        fprintf('     5. *** HOLD SEESAW LEVEL BY HAND ***\n');
+        fprintf('     6. QUARC | Start — release seesaw gently\n');
+        fprintf('     7. If it diverges: QUARC | Stop IMMEDIATELY\n\n');
         fprintf('   SAFETY NOTES:\n');
         fprintf('     - Voltage is hard-limited to +/- %.1f V by Saturation block\n', V_sat);
-        fprintf('     - The Step block defaults to x_c_ref = 0 (hold at center)\n');
-        fprintf('     - To test a 5 cm step: double-click Step block, set After = 0.05\n');
-        fprintf('     - If cart hits end-stops, STOP and reduce K_outer\n');
-        fprintf('     - Watch Voltage scope: if rail-to-rail, gains are too high\n\n');
+        fprintf('     - Step block defaults to x_c_ref = 0 (hold at center)\n');
+        fprintf('     - Velocities estimated via dirty derivative (tau=%.3f s)\n', tau_d);
+        fprintf('     - If cart hits end-stops, STOP and retune poles in control_pipeline\n');
+        fprintf('     - Watch Voltage scope: if rail-to-rail, reduce wn_dom\n\n');
     end
 else
     fprintf(' TO ADD HARDWARE LATER:\n');
