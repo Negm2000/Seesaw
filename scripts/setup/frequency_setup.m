@@ -44,7 +44,8 @@ sgtitle('Analytical Model Prediction');
 fprintf('\n--- Building QUARC Chirp Test Model ---\n');
 
 mdl_freq = 'IP02_FreqTest';
-chirp_duration = 120;   % seconds
+chirp_duration = 60;    % seconds (60 s is plenty for linear chirp — gives ≥14
+                        % Welch segments at n_seg=4096/Fs=500)
 A_chirp = 3.0;          % chirp amplitude [V]
 f_chirp_start = 0.1;    % start frequency [Hz]
 f_chirp_end = 12.0;     % end frequency [Hz] (>12 Hz the gears lack resolution)
@@ -104,7 +105,14 @@ if quarc_available
     add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Write Analog', [mdl_freq '/Motor Command'], 'Position', [300 360 385 422]);
     add_block('quarc_library/Data Acquisition/Generic/Immediate I//O/HIL Read Encoder', [mdl_freq '/Encoder'], 'Position', [300 450 385 512]);
     add_block('simulink/Math Operations/Gain', [mdl_freq '/Enc_to_m'], 'Gain', 'K_ec', 'Position', [430 465 480 495]);
-    add_block('simulink/Continuous/Derivative', [mdl_freq '/Deriv_xc'], 'Position', [520 515 560 545]);
+    % Dirty derivative for velocity: s / (tau_d*s + 1), tau_d = 0.01 s
+    % A pure Derivative block amplifies encoder quantization noise,
+    % corrupting the velocity channel used for B_eq auto-tuning.
+    tau_d_freq = 0.01;  % 100 rad/s cutoff
+    assignin('base', 'tau_d_freq', tau_d_freq);
+    add_block('simulink/Continuous/Transfer Fcn', [mdl_freq '/Deriv_xc'], ...
+        'Numerator', '[1, 0]', 'Denominator', '[tau_d_freq, 1]', ...
+        'Position', [520 515 600 545]);
     add_block('simulink/Signal Routing/Mux', [mdl_freq '/Mux_Logging'], 'Inputs', '3', 'Position', [700 600 705 660]);
     
     blk_path = [mdl_freq '/To_Host_File'];

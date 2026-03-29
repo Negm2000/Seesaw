@@ -28,7 +28,7 @@ s_tf = tf('s');
 G_xc    = K_a * alpha_f * eta_m / (M_c * s_tf^2 + B_total * s_tf);
 G_xcdot = K_a * alpha_f * eta_m / (M_c * s_tf + B_total);
 
-freq_range = logspace(-1, log10(12), 200);  % 0.1 to 12 Hz
+freq_range = logspace(log10(f_chirp_start), log10(f_chirp_end), 200);
 [mag_an, phase_an] = bode(G_xc, 2*pi*freq_range);
 mag_an_dB   = 20*log10(squeeze(mag_an) * 100);  % convert m/V to cm/V
 phase_an_deg = squeeze(phase_an);
@@ -323,13 +323,16 @@ function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
 %   many bins, diluting Suu and poisoning the H1 estimator at high
 %   frequencies.
     Fs = 1/dt;
-    n_seg = min(4096, 2^nextpow2(length(t)/8));  % ≥ 8 segments
+    n_seg = min(4096, 2^nextpow2(length(t)/8));  % >= 8 segments
     n_seg = max(n_seg, 512);                       % floor for very short records
 
     [H_xc_raw,    freq_fft] = tfestimate(u, xc,    hanning(n_seg), n_seg/2, n_seg, Fs);
     [H_xcdot_raw, ~       ] = tfestimate(u, xcdot, hanning(n_seg), n_seg/2, n_seg, Fs);
 
-    valid = freq_fft >= 0.1 & freq_fft <= 12;
+    % Use chirp range from workspace; fall back to defaults if absent
+    try f_lo = evalin('base','f_chirp_start'); catch, f_lo = 0.1;  end
+    try f_hi = evalin('base','f_chirp_end');   catch, f_hi = 12.0; end
+    valid = freq_fft >= f_lo & freq_fft <= f_hi;
     freq_out = freq_fft(valid);
     H_xc     = H_xc_raw(valid);
     H_xcdot  = H_xcdot_raw(valid);

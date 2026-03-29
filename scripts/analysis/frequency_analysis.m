@@ -108,7 +108,10 @@ function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
     [H_xc_raw,    freq_fft] = tfestimate(u, xc,    hanning(n_seg), n_seg/2, n_seg, Fs);
     [H_xcdot_raw, ~       ] = tfestimate(u, xcdot, hanning(n_seg), n_seg/2, n_seg, Fs);
 
-    valid = freq_fft >= 0.1 & freq_fft <= 12;
+    % Use chirp range from workspace; fall back to defaults if absent
+    try f_lo = evalin('base','f_chirp_start'); catch, f_lo = 0.1;  end
+    try f_hi = evalin('base','f_chirp_end');   catch, f_hi = 12.0; end
+    valid = freq_fft >= f_lo & freq_fft <= f_hi;
     freq_out = freq_fft(valid);
     H_xc     = H_xc_raw(valid);
     H_xcdot  = H_xcdot_raw(valid);
