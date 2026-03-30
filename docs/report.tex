@@ -1,0 +1,119 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+\geometry{margin=1in}
+
+\title{Seesaw Control System: State-Feedback Pipeline Results}
+\author{Seesaw Control Pipeline}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This report summarizes the design and validation of a state-feedback controller for the Quanser IP02 + SEESAW-E system. The objective is to stabilize the seesaw angle $\alpha$ and maintain the cart position $x_c$ at the center of the track.
+
+The system is modeled in state-space as:
+\begin{equation}
+    \dot{\mathbf{x}} = \mathbf{A}\mathbf{x} + \mathbf{B}u
+\end{equation}
+where the state vector is defined as $\mathbf{x} = [x_c, \dot{x}_c, \alpha, \dot{\alpha}]^T$. Here, $x_c$ and $\alpha$ are the cart position and seesaw tilt angle, respectively, while $\dot{x}_c$ and $\dot{\alpha}$ are their rates. The input $u$ is the motor voltage $V_m$.
+
+\subsection{State Selection and Stability}
+The open-loop system is inherently unstable due to the gravitational moment acting on the seesaw. The plant possesses an unstable pole at approximately $+2.61$ rad/s (0.42 Hz) and an integrator at the origin due to the cart displacement. For successful balance, the open-loop unstable pole must be moved deep into the left-half s-plane (LHP).
+
+\section{Control Design}
+The controller uses full-state feedback:
+\begin{equation}
+    u = -\mathbf{K}\mathbf{x}
+\end{equation}
+where $\mathbf{K}$ is designed using pole placement.
+
+\subsection{Design Criteria: Performance and Robustness}
+The desired closed-loop poles were selected using the following criteria:
+\begin{itemize}
+    \item \textbf{Dominant Behavior}: A complex conjugate pair at $\omega_n = 3.0$ rad/s with $\zeta = 0.7$ provides a balance between fast response and acceptable overshoot.
+    \item \textbf{Cart Centering}: A real pole at $-2.5$ rad/s ensures the cart returns to center without excessive oscillation.
+    \item \textbf{Noise Rejection}: A fast real pole at $-20$ rad/s is placed near the electrical motor pole to minimize high-frequency voltage chatter.
+\end{itemize}
+These poles ensure a predicted 2\% settling time of $< 2$ s.
+
+\subsection{Final Gains}
+The calculated state-feedback gains are:
+\begin{table}[H]
+    \centering
+    \begin{tabular}{l l r}
+        \toprule
+        Parameter & Description & Value \\
+        \midrule
+        $k_{xc}$ & Cart position gain (V/m) & 62.234 \\
+        $k_{\dot{x}c}$ & Cart velocity gain (V/(m/s)) & -0.668 \\
+        $k_{\alpha}$ & Seesaw angle gain (V/rad) & -62.878 \\
+        $k_{\dot{\alpha}}$ & Seesaw angular velocity gain (V/(rad/s)) & -24.139 \\
+        \bottomrule
+    \end{tabular}
+    \caption{State-Feedback Gains}
+\end{table}
+
+\section{Frequency-Domain Analysis: Loop Transfer Function}
+Since the system is SIMO (one input, four outputs), traditional Bode analysis is not directly applicable. However, by considering the loop transfer function at the plant input, we can reduce the 4-state feedback to a Single-Input Single-Output (SISO) equivalent $L(s)$:
+\begin{equation}
+    L(s) = \mathbf{K}(s\mathbf{I}-\mathbf{A})^{-1}\mathbf{B}
+\end{equation}
+This transfer function represents the entire feedback loop's gain and phase characteristics, allowing us to evaluate the phase and gain margins directly.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/loop_analysis.png}
+    \caption{Bode, Nyquist, and Root Locus of the Loop Transfer Function $L(s)$.}
+    \label{fig:loop}
+\end{figure}
+
+The stability margins obtained are:
+\begin{itemize}
+    \item \textbf{Phase Margin (PM):} 30.9$^\circ$ at 4.83 rad/s.
+    \item \textbf{Gain Margin (GM):} -6.5 dB at 1.56 rad/s. 
+\end{itemize}
+Note: For an open-loop unstable plant, the negative gain margin in decibels indicates the distance to the critical point in the Nyquist plot required for stability.
+
+\section{Simulation Results}
+The closed-loop system was tested against a 4.5$^\circ$ initial tilt to simulate a disturbance rejection scenario.
+
+\subsection{MATLAB ODE Simulation}
+Figure \ref{fig:dist} shows the system response to the initial tilt. The controller successfully stabilizes the system within approximately 2 seconds, and the motor voltage remains within the safety limit of $\pm 6$ V.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/disturbance_response.png}
+    \caption{Clossed-loop response to a 4.5$^\circ$ initial tilt (MATLAB ODE).}
+    \label{fig:dist}
+\end{figure}
+
+\subsection{Repeated Disturbance Test}
+To simulate a real-world operating environment, a series of angular velocity pulses were applied. Figure \ref{fig:rep} demonstrates consistent rejection across multiple disturbances.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/repeated_disturbance.png}
+    \caption{Repeated disturbance rejection test.}
+    \label{fig:rep}
+\end{figure}
+
+
+\section{Hardware Feasibility}
+The peak motor voltage predicted by simulation is \textbf{5.84 V}, which is well within the \textbf{6 V} saturation limit of the motor. The peak cart travel is also within limits, ensuring no hard-stop impacts during disturbance rejection.
+
+\section{Conclusion}
+The state-feedback pipeline has successfully produced a stabilizing controller for the Seesaw system. The design meets the performance requirements for settling time and robustness, and is ready for hardware deployment once the QUARC interface is connected.
+
+\end{document}

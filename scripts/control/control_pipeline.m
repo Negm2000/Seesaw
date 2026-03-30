@@ -225,6 +225,10 @@ grid on;
 
 sgtitle('Frequency-Domain Analysis of State Feedback Loop', 'FontWeight', 'bold');
 
+% --- Save Figure 1 ---
+if ~exist(fullfile(SEESAW_ROOT, 'docs', 'figures'), 'dir'), mkdir(fullfile(SEESAW_ROOT, 'docs', 'figures')); end
+exportgraphics(gcf, fullfile(SEESAW_ROOT, 'docs', 'figures', 'loop_analysis.png'), 'Resolution', 300);
+
 %% 5. PERFORMANCE TUNING
 %  -----------------------------------------------------------------------
 %  Adjust the desired poles from Section 3 and re-run to iterate.
@@ -298,6 +302,10 @@ grid on;
 
 sgtitle('Closed-Loop Response: 4.5° Initial Tilt (Pole Placement)', 'FontWeight', 'bold');
 
+% --- Save Figure 2 ---
+if ~exist(fullfile(SEESAW_ROOT, 'docs', 'figures'), 'dir'), mkdir(fullfile(SEESAW_ROOT, 'docs', 'figures')); end
+exportgraphics(gcf, fullfile(SEESAW_ROOT, 'docs', 'figures', 'disturbance_response.png'), 'Resolution', 300);
+
 %% 7. REPEATED DISTURBANCE TEST
 %  Pulse train: 4.5° taps every 4 seconds (matches Quanser guide setup).
 
@@ -318,10 +326,9 @@ for pt = pulse_times
     u_dist(t_sim2 >= pt & t_sim2 < pt + pulse_dur) = pulse_amp;
 end
 
-% Simulate with disturbance input
-A_cl_dist = A_cl;
-[t_out2, x_out2] = ode45(@(t,x) A_cl_dist*x + B_dist*interp1(t_sim2, u_dist, t, 'previous', 0), ...
-    t_sim2, zeros(4,1));
+% Simulate with disturbance input using lsim (more robust for pulses)
+sys_cl_dist = ss(A_cl, B_dist, eye(4), 0);
+[x_out2, t_out2] = lsim(sys_cl_dist, u_dist, t_sim2);
 u_out2 = -K * x_out2';
 
 figure('Name', 'Repeated Disturbance Test', 'Position', [150 80 900 700]);
@@ -345,6 +352,10 @@ yline(-V_sat, 'k--', '-V_{sat}');
 grid on;
 
 sgtitle('Repeated 4.5° Disturbance (every 4s)', 'FontWeight', 'bold');
+
+% --- Save Figure 3 ---
+if ~exist(fullfile(SEESAW_ROOT, 'docs', 'figures'), 'dir'), mkdir(fullfile(SEESAW_ROOT, 'docs', 'figures')); end
+exportgraphics(gcf, fullfile(SEESAW_ROOT, 'docs', 'figures', 'repeated_disturbance.png'), 'Resolution', 300);
 
 %% 8. VOLTAGE SATURATION & TRAVEL CHECK
 %  Check both the initial-tilt test (Section 6) and the repeated

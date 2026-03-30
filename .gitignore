@@ -8,8 +8,9 @@ slprj/
 *.sim
 *.cache
 *.jdb
+*.slx.autosave
 
-# Data files (keep the directory but ignore content if it's large/generated)
+# Data files
 # data/*.mat
 # !data/.keep
 
@@ -17,7 +18,7 @@ slprj/
 .claude/
 .vscode/
 
-# LaTeX build artifacts (keep .tex source + .png output only)
+# LaTeX build artifacts
 *.aux
 *.log
 *.out
@@ -25,11 +26,18 @@ slprj/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+*.blg
+*.bbl
+*.pdf
 docs/figures/*.pdf
 
-# Trash
-*.bak
-*.tmp
+# Project logs and temporary files
 *.txt
-IP02_FreqTest_quarc_win64/*
-IP02_FreqTest.rt-win64
+!README.md
+!qsg.txt
+!requirements.txt
+
+# QUARC build directories
+*_quarc_win64/
+*.rt-win64
+*.win64
