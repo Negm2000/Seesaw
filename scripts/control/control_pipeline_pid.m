@@ -1,15 +1,16 @@
 %% CONTROL PIPELINE — Quanser IP02 + SEESAW-E
 %  =====================================================================
-%  Parallel PID control design for seesaw balance control.
+%  Frequency-domain state-feedback design for seesaw balance control.
 %
-%  Architecture: Parallel PID   u = PID_cart(e_xc) + PD_alpha(alpha)
+%  Architecture: Full state feedback  u = -K * x
 %    Both encoders (cart position + seesaw angle) are used.
-%    PID blocks handle derivative filtering internally.
+%    Velocities are obtained via differentiating + filtering.
 %
-%  Design method: systune (structured H-infinity synthesis)
-%    1. Define tunable PID/PD blocks in the closed-loop interconnection
-%    2. Specify performance requirements (margins, tracking)
-%    3. systune jointly optimises all gains to meet specs
+%  Design method:
+%    1. Pole placement — choose desired CL pole locations
+%    2. Analyse the SIMO loop transfer function L(s) = K*(sI-A)^{-1}*B
+%       via Bode, Nyquist, root locus, and gain/phase margins
+%    3. Iterate on pole locations to satisfy performance specs
 %
 %  State convention (ours):  x = [x_c,  x_c_dot,  alpha,  alpha_dot]
 %  Good ref convention:       x = [x_c,  theta,    x_c_dot, theta_dot]
@@ -88,132 +89,86 @@ end
 fprintf('G_xc (V_m → x_c): poles      '); fprintf('%.3f  ', pole(G_xc)); fprintf('\n');
 fprintf('G_xc zeros:                   '); fprintf('%.3f  ', zero(G_xc)); fprintf('\n');
 
-%% 3. PARALLEL PID TUNING VIA SYSTUNE
-%  -----------------------------------------------------------------------
-%  Architecture:  u = PID_cart(x_c_ref - x_c) + PD_alpha(alpha)
-%
-%  Uses MATLAB systune (structured H-infinity synthesis) to jointly
-%  optimise all PID/PD gains.  This is the correct approach for a SIMO
-%  plant where cascaded / successive-loop-closure tuning cannot work:
-%  the single actuator serves both loops, so gains must be co-designed.
-%
-%  Tuning requirements:
-%    Hard — Stability margins:  PM >= 40 deg,  GM >= 6 dB
-%    Soft — Step tracking:  xc_ref -> xc  settles in ~2 s
+%% 3. POLE PLACEMENT DESIGN
 %  -----------------------------------------------------------------------
 
-fprintf('\n=== Parallel PID Tuning via systune (structured H-inf) ===\n');
+%% 3. PARALLEL PID DESIGN
+%  -----------------------------------------------------------------------
+%  Architecture:  u = PID_cart(e_xc) + PD_alpha(alpha)
+%
+%  Cart PID:   e_xc = x_c_ref - x_c
+%    u_cart  = Kp_c * e_xc + Ki_c * integral(e_xc) + Kd_c * d(e_xc)/dt
+%
+%  Alpha PD:   (alpha IS the error — positive alpha needs positive u
+%               to drive the cart toward the tilt for stabilisation)
+%    u_alpha = Kp_a * alpha + Kd_a * d(alpha)/dt
+%
+%  Total:  u = u_cart + u_alpha
+%
+%  Design via pole placement on the augmented 5-state system:
+%    x_aug = [x_c; x_c_dot; alpha; alpha_dot; xi]
+%    xi_dot = -x_c   (integrator of cart error when x_c_ref = 0)
+%
+%  The augmented gain K_aug maps to PID parameters:
+%    Kp_c = K_aug(1),  Kd_c = K_aug(2)
+%    Kp_a = -K_aug(3), Kd_a = -K_aug(4)
+%    Ki_c = -K_aug(5)
+%  -----------------------------------------------------------------------
 
-% ---- SIMO plant: V_m -> [x_c, alpha] ----
-G = ss(A_sw, B_sw, C_sw([1,3],:), D_sw([1,3],:));
-G.InputName  = 'Vm';
-G.OutputName = {'xc', 'alpha'};
+% Augmented plant: add integrator state xi for cart position error
+A_aug = [A_sw,        zeros(4,1);
+         -1, 0, 0, 0, 0];          % xi_dot = -x_c
+B_aug = [B_sw; 0];
 
-% ---- Tunable PID blocks ----
-%  Cart: filtered PID  (Kp + Ki/s + Kd*N*s/(s+N))
-C_cart = tunablePID('C_cart', 'pid');
-C_cart.InputName  = 'e_xc';
-C_cart.OutputName = 'u_cart';
+% Controllability of augmented system
+Co_aug = ctrb(A_aug, B_aug);
+fprintf('\nAugmented system controllability rank: %d / %d\n', rank(Co_aug), 5);
 
-%  Alpha: filtered PD  (Kp + Kd*N*s/(s+N))  — no integrator on angle
-C_alpha = tunablePID('C_alpha', 'pd');
-C_alpha.InputName  = 'alpha';      % direct positive feedback
-C_alpha.OutputName = 'u_alpha';
+% Desired closed-loop poles (5 total)
+wn_dom   = 3.0;     % dominant natural frequency [rad/s]
+zeta_dom = 0.7;     % dominant damping ratio
+p_dom = -zeta_dom * wn_dom + 1j * wn_dom * sqrt(1 - zeta_dom^2);
 
-%  Fix derivative filter at N = 100 rad/s for both blocks.
-%  This is an engineering choice (matches hardware sample rate);
-%  letting systune tune only the proportional/integral/derivative gains.
-N_filt = 100;
-C_cart.Tf.Value  = 1/N_filt;   C_cart.Tf.Free  = false;
-C_alpha.Tf.Value = 1/N_filt;   C_alpha.Tf.Free = false;
+p_desired = [p_dom;              % dominant complex pair (seesaw settling)
+             conj(p_dom);
+             -2.5;               % real pole: cart centering
+             -20;                % fast pole: motor dynamics
+             -1.5];              % integrator pole (slow, avoids windup)
 
-%  Bound gains to keep voltages within saturation limits.
-%  At 4.5° initial tilt (0.0785 rad), Kp_a*alpha_0 must stay under V_sat.
-%  Also enforce positive gains (stabilising sign convention).
-C_alpha.Kp.Minimum = 0;   C_alpha.Kp.Maximum = 80;
-C_alpha.Kd.Minimum = 0;   C_alpha.Kd.Maximum = 50;
-
-C_cart.Kp.Minimum  = 0;   C_cart.Kp.Maximum  = 100;
-C_cart.Ki.Minimum  = 0;   C_cart.Ki.Maximum  = 50;
-C_cart.Kd.Minimum  = 0;   C_cart.Kd.Maximum  = 20;
-
-% ---- Summation blocks ----
-Sum_err  = sumblk('e_xc = xc_ref - xc');
-Sum_ctrl = sumblk('Vm = u_cart + u_alpha');
-
-% ---- Build closed-loop interconnection (genss) ----
-CL0 = connect(G, C_cart, C_alpha, Sum_err, Sum_ctrl, ...
-              'xc_ref', {'xc', 'alpha'});
-
-% ---- Tuning requirements ----
-%  Hard:  closed-loop pole region — ensures stability with margin.
-%         MinDecay  = 0.5 rad/s  (all poles at least 0.5 left of j-axis)
-%         MinDamp   = 0.3        (oscillatory poles ≥ 30% damping)
-%         MaxFreq   = 200 rad/s  (allow room for the N=100 derivative filter)
-Req_poles = TuningGoal.Poles(0.5, 0.3, 200);
-
-%  Soft:  step tracking  xc_ref -> xc  (~4 s settling, relaxed for V_sat)
-Req_track = TuningGoal.StepTracking('xc_ref', 'xc', 4);
-
-% ---- Run systune ----
-rng(0);   % reproducibility
-opts = systuneOptions('RandomStart', 5, 'Display', 'iter');
-[CL, fSoft, gHard] = systune(CL0, Req_track, Req_poles, opts);
-
-fprintf('\nsystune result:  soft = %.4f,  hard = %.4f', fSoft, gHard);
-if gHard <= 1
-    fprintf('  (all hard constraints satisfied)\n');
-else
-    fprintf('  *** hard constraints violated ***\n');
-    warning('Pole region not fully achieved (gHard = %.3f > 1).', gHard);
+fprintf('\n=== Parallel PID Design (Pole Placement on Augmented System) ===\n');
+fprintf('Desired CL poles:\n');
+for k = 1:length(p_desired)
+    if imag(p_desired(k)) ~= 0 && imag(p_desired(k)) > 0
+        fprintf('  p_%d = %.4f ± %.4fi  (ω_n=%.1f, ζ=%.2f)\n', k, ...
+            real(p_desired(k)), abs(imag(p_desired(k))), abs(p_desired(k)), ...
+            -real(p_desired(k))/abs(p_desired(k)));
+    elseif imag(p_desired(k)) == 0
+        fprintf('  p_%d = %.4f\n', k, real(p_desired(k)));
+    end
 end
 
-% ---- Extract tuned gains ----
-C_cart_t  = getBlockValue(CL, 'C_cart');
-C_alpha_t = getBlockValue(CL, 'C_alpha');
+K_aug = place(A_aug, B_aug, p_desired);
 
-Kp_c = C_cart_t.Kp;
-Ki_c = C_cart_t.Ki;
-Kd_c = C_cart_t.Kd;
+% Extract PID gains (see sign convention in header)
+Kp_c =  K_aug(1);     % cart proportional
+Kd_c =  K_aug(2);     % cart derivative
+Kp_a = -K_aug(3);     % alpha proportional (sign flip: alpha IS the error)
+Kd_a = -K_aug(4);     % alpha derivative
+Ki_c = -K_aug(5);     % cart integral
 
-Kp_a = C_alpha_t.Kp;
-Kd_a = C_alpha_t.Kd;
-
-fprintf('\nPID Gains (systune):\n');
+fprintf('\nPID Gains:\n');
 fprintf('  Cart PID:    Kp_c = %+.4f   Ki_c = %+.4f   Kd_c = %+.4f\n', Kp_c, Ki_c, Kd_c);
 fprintf('  Alpha PD:    Kp_a = %+.4f   Kd_a = %+.4f\n', Kp_a, Kd_a);
-fprintf('  Derivative filter: N = %d rad/s (fixed)\n', N_filt);
+fprintf('  (K_aug = [%.4f, %.4f, %.4f, %.4f, %.4f])\n', K_aug);
 
-% ---- Controller state-space realisations (for simulation) ----
-%  The tuned PID/PD are transfer functions with internal states
-%  (integrator + derivative filter).  Simulations MUST use these,
-%  not a K_aug state-feedback approximation.
-[Ac_ctrl, Bc_ctrl, Cc_ctrl, Dc_ctrl] = ssdata(ss(C_cart_t));   % cart PID
-[Aa_ctrl, Ba_ctrl, Ca_ctrl, Da_ctrl] = ssdata(ss(C_alpha_t));  % alpha PD
-nc = size(Ac_ctrl, 1);   % number of cart-PID states
-na = size(Aa_ctrl, 1);   % number of alpha-PD states
-n_full = 4 + nc + na;    % full CL order
+% Derivative filter coefficient (for Simulink PID blocks & hardware)
+N_filt = 100;   % 100 rad/s cutoff (matches tau_d = 0.01 s)
+fprintf('  Derivative filter: N = %d rad/s (tau_d = %.3f s)\n', N_filt, 1/N_filt);
 
-fprintf('  Controller orders:  cart PID = %d states, alpha PD = %d states\n', nc, na);
-fprintf('  Full CL system order: %d\n', n_full);
-
-% Extraction helpers (from plant state xp)
-C_xc = [1 0 0 0];   % x_c  from xp
-C_al = [0 0 1 0];   % alpha from xp
-
-% ---- Build full CL state-space (for eigenvalue verification) ----
-%  State:  x_full = [xp(4); zc(nc); za(na)]
-%  xp_dot = A_sw*xp + B_sw*u
-%  zc_dot = Ac*zc + Bc*(-C_xc*xp)           (ref = 0)
-%  za_dot = Aa*za + Ba*(C_al*xp)
-%  u      = Cc*zc + Dc*(-C_xc*xp) + Ca*za + Da*(C_al*xp)
-
-A_cl_full = [A_sw + B_sw*(Dc_ctrl*(-C_xc) + Da_ctrl*C_al), B_sw*Cc_ctrl, B_sw*Ca_ctrl;
-             Bc_ctrl*(-C_xc),                               Ac_ctrl,      zeros(nc,na);
-             Ba_ctrl*C_al,                                   zeros(na,nc), Aa_ctrl];
-
-ev_cl = eig(A_cl_full);
-fprintf('\nClosed-loop poles (full %d-state system):\n', n_full);
+% Verify closed-loop eigenvalues
+A_aug_cl = A_aug - B_aug * K_aug;
+ev_cl = eig(A_aug_cl);
+fprintf('\nActual CL poles (verify = desired):\n');
 for k = 1:length(ev_cl)
     if abs(imag(ev_cl(k))) > 1e-6
         fprintf('  %.4f %+.4fi\n', real(ev_cl(k)), imag(ev_cl(k)));
@@ -223,37 +178,20 @@ for k = 1:length(ev_cl)
 end
 
 if any(real(ev_cl) > 1e-3)
-    error('Closed-loop is UNSTABLE — systune failed to stabilise the plant.');
+    error('Closed-loop is UNSTABLE. Adjust desired poles.');
 end
-
-% K_aug kept for backward compatibility (Simulink workspace, etc.)
-K_aug = [Kp_c, Kd_c, -Kp_a, -Kd_a, -Ki_c];
-A_aug = [A_sw, zeros(4,1); -1, 0, 0, 0, 0];
-B_aug = [B_sw; 0];
-A_aug_cl = A_aug - B_aug * K_aug;
 
 %% 4. LOOP TRANSFER FUNCTION ANALYSIS
 %  -----------------------------------------------------------------------
-%  Break the loop at the plant input Vm.
-%  L(s) = [PID_cart(-G_xc) + PD_alpha(G_alpha)]  (SISO at plant input)
+%  Break the loop at the plant input u.
+%  L(s) = K_aug * (sI - A_aug)^{-1} * B_aug
 %
-%  Built via `connect` to faithfully include derivative-filter dynamics.
+%  This is SISO and captures the full parallel PID + plant + integrator.
+%  Standard Bode, Nyquist, root locus, and margin analysis apply.
 %  -----------------------------------------------------------------------
 
-G_loop = ss(A_sw, B_sw, C_sw([1,3],:), D_sw([1,3],:));
-G_loop.InputName = 'Vm';  G_loop.OutputName = {'xc','alpha'};
-
-Cc_loop = ss(C_cart_t);   Cc_loop.InputName = 'e_xc';    Cc_loop.OutputName = 'u_cart';
-Ca_loop = ss(C_alpha_t);  Ca_loop.InputName = 'alpha';    Ca_loop.OutputName = 'u_alpha';
-
-Sum_neg  = sumblk('e_xc = -xc');          % ref = 0
-Sum_u    = sumblk('u_total = u_cart + u_alpha');
-
-L_sys = connect(G_loop, Cc_loop, Ca_loop, Sum_neg, Sum_u, 'Vm', 'u_total');
-% Negate: the physical loop closes as Vm = u_total (positive feedback at
-% the break point), but margin() assumes negative feedback.  L_nfb = -L
-% restores the standard convention: CL stable iff (1 + L_nfb) has no RHP zeros.
-L = -tf(L_sys);
+sys_loop = ss(A_aug, B_aug, K_aug, 0);
+L = tf(sys_loop);
 
 fprintf('\n=== Loop Transfer Function L(s) ===\n');
 fprintf('Poles: '); fprintf('%.4f  ', pole(L)); fprintf('\n');
@@ -327,15 +265,17 @@ exportgraphics(gcf, fullfile(SEESAW_ROOT, 'docs', 'figures', 'loop_analysis_pid.
 
 %% 5. PERFORMANCE TUNING
 %  -----------------------------------------------------------------------
-%  Tuning guide — adjust the TuningGoal requirements in section 3:
+%  Tuning guide for the parallel PID via pole locations:
 %
-%  To increase PM:       raise MinPM in TuningGoal.Margins (hard goal)
-%  To speed up settling: reduce reference-model time in StepTracking
-%  To limit voltage:     add TuningGoal.MaxLoopGain (roll-off constraint)
-%  To reduce chatter:    lower the derivative filter N_filt
-%  To improve centering: add TuningGoal.StepRejection at plant input
+%  To increase PM:       reduce ω_n (slower dominant poles)
+%  To reduce overshoot:  increase ζ
+%  To speed up settling: increase ω_n (watch PM and voltage)
+%  To improve centering: move the real pole at -2.5 further left
+%  To reduce cart drift: move integrator pole further left (more Ki)
+%  To reduce chatter:    move fast pole closer to origin (less Kd)
 %
-%  systune will jointly re-optimise all gains to meet the new specs.
+%  The fast pole (~-20) should stay moderate to avoid excessive voltage.
+%  The integrator pole (~-1.5) should stay slow to avoid oscillation.
 %  -----------------------------------------------------------------------
 
 fprintf('\n=== Performance Specs ===\n');
@@ -354,40 +294,32 @@ fprintf('  Crossover / p_unstable: %.1f×\n', wgc / p_unstable);
 
 %% 6. DISTURBANCE SIMULATION
 %  4.5° initial tilt — system must recover.
-%  Full CL state: [xp(4); zc(nc); za(na)]
-%  xp = plant states, zc/za = controller states (PID dynamics)
+%  Augmented state: [x_c, x_c_dot, alpha, alpha_dot, xi]
 
 T_sim = 10;
 dt    = 0.001;
 t_sim = (0:dt:T_sim)';
 
-% Initial condition: 4.5° seesaw tilt, controller states start at 0
-x0_full = zeros(n_full, 1);
-x0_full(3) = 4.5*pi/180;   % alpha IC
+% Initial condition: 4.5° seesaw tilt, integrator starts at 0
+x_aug0 = [0; 0; 4.5*pi/180; 0; 0];
 
+% Saturated ODE: x_dot = A_aug*x + B_aug * sat(-K_aug*x)
+% sat_v() is a clamping function to V_sat (6V)
 sat_v = @(v) sign(v) .* min(abs(v), V_sat);
+ode_sat = @(t, x) A_aug*x + B_aug * sat_v(-K_aug*x);
 
-% ODE with full PID dynamics + voltage saturation
-ode_pid = @(t, x) pid_cl_ode(x, A_sw, B_sw, ...
-    Ac_ctrl, Bc_ctrl, Cc_ctrl, Dc_ctrl, ...
-    Aa_ctrl, Ba_ctrl, Ca_ctrl, Da_ctrl, ...
-    C_xc, C_al, nc, sat_v, 0);
-
-[t_out, x_full_out] = ode45(ode_pid, t_sim, x0_full);
+% Simulate CL with saturation
+[t_out, x_aug_out] = ode45(ode_sat, t_sim, x_aug0);
 
 % Recover saturated control signal for plotting
 u_out = zeros(length(t_out), 1);
 for k = 1:length(t_out)
-    xp = x_full_out(k, 1:4)';
-    zc = x_full_out(k, 5:4+nc)';
-    za = x_full_out(k, 5+nc:end)';
-    u_dem = Cc_ctrl*zc + Dc_ctrl*(-C_xc*xp) + Ca_ctrl*za + Da_ctrl*(C_al*xp);
-    u_out(k) = sat_v(u_dem);
+    u_out(k) = sat_v(-K_aug * x_aug_out(k,:)');
 end
 
-xc_cl    = x_full_out(:,1) * 1000;    % [mm]
-alpha_cl = x_full_out(:,3) * 180/pi;  % [deg]
-Vm_cl    = u_out;                      % [V]
+xc_cl    = x_aug_out(:,1) * 1000;    % [mm]
+alpha_cl = x_aug_out(:,3) * 180/pi;  % [deg]
+Vm_cl    = u_out;                     % [V]
 
 figure('Name', 'Disturbance Response (Parallel PID)', 'Position', [100 100 900 700]);
 
@@ -424,6 +356,9 @@ T_sim2 = 20;
 t_sim2 = (0:dt:T_sim2)';
 n2 = length(t_sim2);
 
+B_dist_aug = zeros(5,1);
+B_dist_aug(4) = 1;   % disturbance enters alpha_dot
+
 u_dist = zeros(n2, 1);
 pulse_times = [1, 5, 9, 13, 17];
 pulse_dur   = 0.16;
@@ -432,21 +367,16 @@ for pt = pulse_times
     u_dist(t_sim2 >= pt & t_sim2 < pt + pulse_dur) = pulse_amp;
 end
 
-% Repeated disturbance simulation with full PID dynamics + saturation
-ode_dist_wrapper = @(t, x) pid_cl_ode(x, A_sw, B_sw, ...
-    Ac_ctrl, Bc_ctrl, Cc_ctrl, Dc_ctrl, ...
-    Aa_ctrl, Ba_ctrl, Ca_ctrl, Da_ctrl, ...
-    C_xc, C_al, nc, sat_v, interp1(t_sim2, u_dist, t, 'previous', 0));
-[t_out2, x_out2] = ode45(ode_dist_wrapper, t_sim2, zeros(n_full, 1));
+% Repeated disturbance simulation WITH SATURATION
+% Use ode45 with interp1 to handle the pulse disturbances
+ode_dist_sat = @(t, x) A_aug*x + B_aug * sat_v(-K_aug*x) + ...
+                       B_dist_aug * interp1(t_sim2, u_dist, t, 'previous', 0);
+[t_out2, x_out2] = ode45(ode_dist_sat, t_sim2, zeros(5,1));
 
 % Recover saturated control signal
 u_out2 = zeros(length(t_out2), 1);
 for k = 1:length(t_out2)
-    xp = x_out2(k, 1:4)';
-    zc = x_out2(k, 5:4+nc)';
-    za = x_out2(k, 5+nc:end)';
-    u_dem = Cc_ctrl*zc + Dc_ctrl*(-C_xc*xp) + Ca_ctrl*za + Da_ctrl*(C_al*xp);
-    u_out2(k) = sat_v(u_dem);
+    u_out2(k) = sat_v(-K_aug * x_out2(k,:)');
 end
 
 figure('Name', 'Repeated Disturbance Test (PID)', 'Position', [150 80 900 700]);
@@ -514,16 +444,10 @@ for i = 1:length(B_eq_test)
     B_sw_i = B_sw;  % B_sw doesn't depend on B_eq
     A_aug_i = [A_i, zeros(4,1); -1, 0, 0, 0, 0];
     B_aug_i = [B_sw_i; 0];
-    % Build full CL with varied plant, same tuned controllers
-    A_cl_i = [A_i + B_sw_i*(Dc_ctrl*(-C_xc) + Da_ctrl*C_al), B_sw_i*Cc_ctrl, B_sw_i*Ca_ctrl;
-              Bc_ctrl*(-C_xc),                                Ac_ctrl,         zeros(nc,na);
-              Ba_ctrl*C_al,                                   zeros(na,nc),    Aa_ctrl];
+    A_cl_i = A_aug_i - B_aug_i * K_aug;   % same K_aug, different plant
     ev_i = eig(A_cl_i);
     max_re = max(real(ev_i));
-    % Loop TF with varied plant
-    G_i = ss(A_i, B_sw_i, [C_xc; C_al], zeros(2,1));
-    G_i.InputName = 'Vm'; G_i.OutputName = {'xc','alpha'};
-    L_i = -tf(connect(G_i, Cc_loop, Ca_loop, Sum_neg, Sum_u, 'Vm', 'u_total'));
+    L_i = tf(ss(A_aug_i, B_aug_i, K_aug, 0));
     [Gm_i, Pm_i] = margin(L_i);
     stab_str = '';
     if max_re > 0.01, stab_str = '← UNSTABLE'; end
@@ -535,7 +459,7 @@ end
 %% 10. SUMMARY & SAVE
 
 % Settling time from simulation (2% of 4.5°)
-alpha_sim = x_full_out(:,3);
+alpha_sim = x_aug_out(:,3);
 band_2pct = 0.02 * 4.5 * pi/180;
 idx_settle = find(abs(alpha_sim) > band_2pct, 1, 'last');
 if ~isempty(idx_settle) && idx_settle < length(t_out)
@@ -552,18 +476,19 @@ fprintf('  PARALLEL PID CONTROL PIPELINE SUMMARY\n');
 fprintf('============================================================\n');
 fprintf('\n  DESIGN\n');
 fprintf('  ──────\n');
-fprintf('  Method:          systune (structured H-inf synthesis)\n');
-fprintf('  Architecture:    Parallel PID (both encoders, jointly tuned)\n');
+fprintf('  Method:          Pole placement on augmented system\n');
+fprintf('  Architecture:    Parallel PID (both encoders, NOT cascaded)\n');
 fprintf('  Cart PID gains:  Kp_c = %.3f, Ki_c = %.3f, Kd_c = %.3f\n', Kp_c, Ki_c, Kd_c);
 fprintf('  Alpha PD gains:  Kp_a = %.3f, Kd_a = %.3f\n', Kp_a, Kd_a);
-fprintf('  Deriv filter:    N = %d rad/s (fixed)\n', N_filt);
-fprintf('\n  CLOSED-LOOP POLES\n');
-fprintf('  ─────────────────\n');
-for k_s = 1:length(ev_cl)
-    if abs(imag(ev_cl(k_s))) > 1e-6 && imag(ev_cl(k_s)) > 0
-        fprintf('  p = %.4f ± %.4fi\n', real(ev_cl(k_s)), abs(imag(ev_cl(k_s))));
-    elseif imag(ev_cl(k_s)) == 0 || abs(imag(ev_cl(k_s))) <= 1e-6
-        fprintf('  p = %.4f\n', real(ev_cl(k_s)));
+fprintf('  Deriv filter:    N = %d rad/s\n', N_filt);
+fprintf('\n  DESIRED POLES\n');
+fprintf('  ─────────────\n');
+fprintf('  Dominant pair:   ω_n = %.1f rad/s, ζ = %.2f\n', wn_dom, zeta_dom);
+for k = 1:length(p_desired)
+    if imag(p_desired(k)) ~= 0 && imag(p_desired(k)) > 0
+        fprintf('  p = %.4f ± %.4fi\n', real(p_desired(k)), abs(imag(p_desired(k))));
+    elseif imag(p_desired(k)) == 0
+        fprintf('  p = %.4f\n', real(p_desired(k)));
     end
 end
 fprintf('\n  MARGINS\n');
@@ -581,7 +506,7 @@ fprintf('============================================================\n');
 % Save
 save_path = fullfile(SEESAW_ROOT, 'data', 'controller_pid.mat');
 save(save_path, 'Kp_c', 'Ki_c', 'Kd_c', 'Kp_a', 'Kd_a', 'N_filt', ...
-    'K_aug', ...
+    'K_aug', 'p_desired', 'wn_dom', 'zeta_dom', ...
     'Pm', 'Gm', 'wgc', 'wpc', 'A_sw', 'B_sw', 'C_sw', 'D_sw', ...
     'A_aug', 'A_aug_cl', 'p_unstable');
 fprintf('\n  Controller saved to: data/controller_pid.mat\n');
@@ -657,13 +582,7 @@ add_block('simulink/Sources/Step', [mdl '/x_c_ref'], ...
     'Time',   '2', ...
     'Before', '0', ...
     'After',  '0', ...
-    'Position', [20 95 60 135]);
-
-% Rate Limiter to prevent Derivative Kick on setpoint step
-add_block('simulink/Discontinuities/Rate Limiter', [mdl '/Rate_Limit_ref'], ...
-    'RisingSlewLimit', '0.2', ...
-    'FallingSlewLimit', '-0.2', ...
-    'Position', [90 95 120 135]);
+    'Position', [50 95 90 135]);
 
 % Alpha reference (always 0)
 add_block('simulink/Sources/Constant', [mdl '/alpha_ref'], ...
@@ -679,14 +598,12 @@ add_block('simulink/Math Operations/Sum', [mdl '/Sum_cart'], ...
     'Inputs', '+-', ...
     'Position', [160 100 180 120]);
 
-% PID block for cart (TrackingMode 'on' for Back-Calculation Anti-Windup)
+% PID block for cart (Kp_c + Ki_c/s + Kd_c*N/(1+N/s))
 add_block('simulink/Continuous/PID Controller', [mdl '/PID_Cart'], ...
     'P', 'Kp_c', ...
     'I', 'Ki_c', ...
     'D', 'Kd_c', ...
     'N', 'N_filt', ...
-    'TrackingMode', 'on', ...
-    'Kt', '100', ...
     'Position', [230 92 310 138]);
 
 % ==================================================================
@@ -694,6 +611,7 @@ add_block('simulink/Continuous/PID Controller', [mdl '/PID_Cart'], ...
 % ==================================================================
 
 % Sum: e_alpha = alpha_ref - (-alpha) = alpha  (error sign flip)
+% We negate alpha so that the PID block's internal (ref - input) = 0-(-alpha) = alpha
 add_block('simulink/Math Operations/Gain', [mdl '/Negate_alpha'], ...
     'Gain', '-1', ...
     'Position', [120 192 150 218]);
@@ -725,29 +643,17 @@ add_block('simulink/Discontinuities/Saturation', [mdl '/V_Sat'], ...
     'LowerLimit', '-V_sat', ...
     'Position', [470 138 520 162]);
 
-% Anti-Windup Tracking Signal Calculation
-% TR = V_Sat - u_alpha (what is left for cart PID after alpha uses its share)
-add_block('simulink/Math Operations/Subtract', [mdl '/AW_Tracking'], ...
-    'Inputs', '+-', ...
-    'Position', [230 20 250 50]);
-
 % ==================================================================
 %  WIRING: CONTROLLER FORWARD PATH
 % ==================================================================
-add_line(mdl, 'x_c_ref/1',     'Rate_Limit_ref/1', 'autorouting', 'smart');
-add_line(mdl, 'Rate_Limit_ref/1','Sum_cart/1',     'autorouting', 'smart');
-add_line(mdl, 'Sum_cart/1',    'PID_Cart/1',   'autorouting', 'smart');
-add_line(mdl, 'alpha_ref/1',   'Sum_alpha/1',  'autorouting', 'smart');
-add_line(mdl, 'Negate_alpha/1','Sum_alpha/2',  'autorouting', 'smart');
-add_line(mdl, 'Sum_alpha/1',   'PD_Alpha/1',   'autorouting', 'smart');
+add_line(mdl, 'x_c_ref/1',     'Sum_cart/1',   'autorouting', 'smart');
+add_line(mdl, 'Sum_cart/1',     'PID_Cart/1',   'autorouting', 'smart');
+add_line(mdl, 'alpha_ref/1',    'Sum_alpha/1',  'autorouting', 'smart');
+add_line(mdl, 'Negate_alpha/1', 'Sum_alpha/2',  'autorouting', 'smart');
+add_line(mdl, 'Sum_alpha/1',    'PD_Alpha/1',   'autorouting', 'smart');
 add_line(mdl, 'PID_Cart/1',    'Sum_PID/1',    'autorouting', 'smart');
 add_line(mdl, 'PD_Alpha/1',    'Sum_PID/2',    'autorouting', 'smart');
 add_line(mdl, 'Sum_PID/1',     'V_Sat/1',      'autorouting', 'smart');
-
-% Anti-windup feedback wiring
-add_line(mdl, 'V_Sat/1',       'AW_Tracking/1', 'autorouting', 'smart');  % + path
-add_line(mdl, 'PD_Alpha/1',    'AW_Tracking/2', 'autorouting', 'smart');  % - path
-add_line(mdl, 'AW_Tracking/1', 'PID_Cart/2',    'autorouting', 'smart');  % TR port
 
 % ==================================================================
 %  DISPLAY: SCOPES + TO-WORKSPACE
@@ -1040,37 +946,4 @@ else
     end
 
     fprintf('============================================================\n');
-end
-
-%% =====================================================================
-%  LOCAL FUNCTIONS
-%  =====================================================================
-
-function dx = pid_cl_ode(x, Ap, Bp, Ac, Bc, Cc, Dc, Aa, Ba, Ca, Da, ...
-                         Cxc, Cal, nc, sat_v, dist_alpha_dot)
-%PID_CL_ODE  Full closed-loop ODE with PID controller dynamics + saturation.
-%  State:  x = [xp(4); zc(nc); za(na)]
-%    xp  = plant states [x_c; x_c_dot; alpha; alpha_dot]
-%    zc  = cart PID controller states
-%    za  = alpha PD controller states
-%  dist_alpha_dot = external disturbance torque entering alpha_dot
-
-    xp = x(1:4);
-    zc = x(5:4+nc);
-    za = x(5+nc:end);
-
-    e_xc  = -Cxc * xp;       % cart error (ref = 0)
-    alpha =  Cal * xp;       % seesaw angle
-
-    % Controller outputs
-    u_cart  = Cc*zc + Dc*e_xc;
-    u_alpha = Ca*za + Da*alpha;
-    u = sat_v(u_cart + u_alpha);
-
-    % Dynamics
-    dxp = Ap*xp + Bp*u + [0; 0; 0; dist_alpha_dot];
-    dzc = Ac*zc + Bc*e_xc;
-    dza = Aa*za + Ba*alpha;
-
-    dx = [dxp; dzc; dza];
 end
