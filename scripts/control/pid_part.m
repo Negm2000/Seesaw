@@ -470,12 +470,12 @@ add_block('simulink/Sources/Step', [mdl '/x_c_ref'], ...
     'Time',   '2', ...
     'Before', '0', ...
     'After',  '0', ...
-    'Position', [50 95 90 135]);
+    'Position', [50 80 90 120]);
 
 % Alpha reference (always 0)
 add_block('simulink/Sources/Constant', [mdl '/alpha_ref'], ...
     'Value', '0', ...
-    'Position', [50 195 90 215]);
+    'Position', [50 250 90 270]);
 
 % ==================================================================
 %  CART PID CONTROLLER
@@ -484,7 +484,7 @@ add_block('simulink/Sources/Constant', [mdl '/alpha_ref'], ...
 % Sum: e_xc = x_c_ref - x_c
 add_block('simulink/Math Operations/Sum', [mdl '/Sum_cart'], ...
     'Inputs', '+-', ...
-    'Position', [160 100 180 120]);
+    'Position', [180 90 200 110]);
 
 % PID block for cart (Kp_c + Ki_c/s + Kd_c*N/(1+N/s))
 add_block('simulink/Continuous/PID Controller', [mdl '/PID_Cart'], ...
@@ -492,7 +492,7 @@ add_block('simulink/Continuous/PID Controller', [mdl '/PID_Cart'], ...
     'I', 'Ki_c', ...
     'D', 'Kd_c', ...
     'N', 'N_filt', ...
-    'Position', [230 92 310 138]);
+    'Position', [280 77 360 123]);
 
 % ==================================================================
 %  ALPHA PD CONTROLLER
@@ -502,11 +502,11 @@ add_block('simulink/Continuous/PID Controller', [mdl '/PID_Cart'], ...
 % We negate alpha so that the PID block's internal (ref - input) = 0-(-alpha) = alpha
 add_block('simulink/Math Operations/Gain', [mdl '/Negate_alpha'], ...
     'Gain', '-1', ...
-    'Position', [120 192 150 218]);
+    'Position', [130 247 160 273]);
 
 add_block('simulink/Math Operations/Sum', [mdl '/Sum_alpha'], ...
     'Inputs', '+-', ...
-    'Position', [190 195 210 215]);
+    'Position', [210 250 230 270]);
 
 % PD block for alpha (Kp_a + Kd_a*N/(1+N/s)), Ki = 0
 add_block('simulink/Continuous/PID Controller', [mdl '/PD_Alpha'], ...
@@ -514,7 +514,7 @@ add_block('simulink/Continuous/PID Controller', [mdl '/PD_Alpha'], ...
     'P', 'Kp_a', ...
     'D', 'Kd_a', ...
     'N', 'N_filt', ...
-    'Position', [250 187 330 233]);
+    'Position', [290 237 370 283]);
 
 % ==================================================================
 %  SUM PID OUTPUTS + SATURATION
@@ -523,61 +523,65 @@ add_block('simulink/Continuous/PID Controller', [mdl '/PD_Alpha'], ...
 % Sum: u = u_cart + u_alpha
 add_block('simulink/Math Operations/Sum', [mdl '/Sum_PID'], ...
     'Inputs', '++', ...
-    'Position', [400 140 420 160]);
+    'Position', [440 170 460 190]);
 
 % Voltage saturation (±V_sat)
 add_block('simulink/Discontinuities/Saturation', [mdl '/V_Sat'], ...
     'UpperLimit', 'V_sat', ...
     'LowerLimit', '-V_sat', ...
-    'Position', [470 138 520 162]);
+    'Position', [520 168 570 192]);
 
 % ==================================================================
 %  WIRING: CONTROLLER FORWARD PATH
 % ==================================================================
 add_line(mdl, 'x_c_ref/1',     'Sum_cart/1',   'autorouting', 'smart');
-add_line(mdl, 'Sum_cart/1',     'PID_Cart/1',   'autorouting', 'smart');
+h = add_line(mdl, 'Sum_cart/1', 'PID_Cart/1',   'autorouting', 'smart');
+set_param(h, 'Name', 'e_{xc}');
 add_line(mdl, 'alpha_ref/1',    'Sum_alpha/1',  'autorouting', 'smart');
 add_line(mdl, 'Negate_alpha/1', 'Sum_alpha/2',  'autorouting', 'smart');
-add_line(mdl, 'Sum_alpha/1',    'PD_Alpha/1',   'autorouting', 'smart');
-add_line(mdl, 'PID_Cart/1',    'Sum_PID/1',    'autorouting', 'smart');
-add_line(mdl, 'PD_Alpha/1',    'Sum_PID/2',    'autorouting', 'smart');
+h = add_line(mdl, 'Sum_alpha/1', 'PD_Alpha/1',  'autorouting', 'smart');
+set_param(h, 'Name', 'e_{\alpha}');
+h = add_line(mdl, 'PID_Cart/1', 'Sum_PID/1',   'autorouting', 'smart');
+set_param(h, 'Name', 'u_{cart}');
+h = add_line(mdl, 'PD_Alpha/1', 'Sum_PID/2',   'autorouting', 'smart');
+set_param(h, 'Name', 'u_{\alpha}');
 add_line(mdl, 'Sum_PID/1',     'V_Sat/1',      'autorouting', 'smart');
 
 % ==================================================================
 %  DISPLAY: SCOPES + TO-WORKSPACE
 % ==================================================================
 add_block('simulink/Math Operations/Gain', [mdl '/ref_m_to_cm'], ...
-    'Gain', '100', 'Position', [730 52 770 78]);
+    'Gain', '100', 'Position', [920 77 960 103]);
 
 add_block('simulink/Math Operations/Gain', [mdl '/xc_m_to_cm'], ...
-    'Gain', '100', 'Position', [730 92 770 118]);
+    'Gain', '100', 'Position', [920 127 960 153]);
 
 add_block('simulink/Math Operations/Gain', [mdl '/alpha_to_deg'], ...
-    'Gain', '180/pi', 'Position', [730 172 770 198]);
+    'Gain', '180/pi', 'Position', [920 217 960 243]);
 
 add_block('simulink/Sinks/Scope', [mdl '/Scope_Cart'], ...
-    'NumInputPorts', '2', 'Position', [840 60 880 110]);
+    'NumInputPorts', '2', 'Position', [1040 90 1080 140]);
 set_param([mdl '/Scope_Cart'], 'Name', 'Cart [cm]');
 
 add_block('simulink/Sinks/Scope', [mdl '/Scope_Angle'], ...
-    'NumInputPorts', '1', 'Position', [840 170 880 200]);
+    'NumInputPorts', '1', 'Position', [1040 217 1080 247]);
 set_param([mdl '/Scope_Angle'], 'Name', 'Angle [deg]');
 
 add_block('simulink/Sinks/Scope', [mdl '/Scope_Vm'], ...
-    'NumInputPorts', '1', 'Position', [840 250 880 280]);
+    'NumInputPorts', '1', 'Position', [1040 310 1080 340]);
 set_param([mdl '/Scope_Vm'], 'Name', 'Voltage [V]');
 
 add_block('simulink/Sinks/To Workspace', [mdl '/ToWS_xc'], ...
     'VariableName', 'ctrl_xc', 'SaveFormat', 'Timeseries', ...
-    'Position', [840 310 910 330]);
+    'Position', [1040 370 1110 390]);
 
 add_block('simulink/Sinks/To Workspace', [mdl '/ToWS_alpha'], ...
     'VariableName', 'ctrl_alpha', 'SaveFormat', 'Timeseries', ...
-    'Position', [840 350 910 370]);
+    'Position', [1040 405 1110 425]);
 
 add_block('simulink/Sinks/To Workspace', [mdl '/ToWS_Vm'], ...
     'VariableName', 'ctrl_Vm', 'SaveFormat', 'Timeseries', ...
-    'Position', [840 390 910 410]);
+    'Position', [1040 440 1110 460]);
 
 % Voltage → scope + workspace
 add_line(mdl, 'V_Sat/1', 'Voltage [V]/1', 'autorouting', 'smart');
@@ -647,19 +651,22 @@ else
     add_block('simulink/Continuous/State-Space', [mdl '/Plant_SS'], ...
         'A', 'A_sw', 'B', 'B_sw', 'C', 'C_sw', 'D', 'D_sw', ...
         'X0', '[0; 0; 0.08; 0]', ...
-        'Position', [600 65 710 215]);
+        'Position', [660 105 770 255]);
 
     % Demux: split [x_c; x_c_dot; alpha; alpha_dot]
     add_block('simulink/Signal Routing/Demux', [mdl '/Demux_Plant'], ...
-        'Outputs', '4', 'Position', [740 65 745 215]);
+        'Outputs', '4', 'Position', [840 105 845 255]);
 
     % V_Sat → Plant → Demux
-    add_line(mdl, 'V_Sat/1',    'Plant_SS/1',    'autorouting', 'smart');
+    h = add_line(mdl, 'V_Sat/1',    'Plant_SS/1',    'autorouting', 'smart');
+    set_param(h, 'Name', 'V_m');
     add_line(mdl, 'Plant_SS/1', 'Demux_Plant/1', 'autorouting', 'smart');
 
     % Feedback: x_c → cart PID error, alpha → alpha PD
-    add_line(mdl, 'Demux_Plant/1', 'Sum_cart/2',      'autorouting', 'smart');
-    add_line(mdl, 'Demux_Plant/3', 'Negate_alpha/1',  'autorouting', 'smart');
+    h = add_line(mdl, 'Demux_Plant/1', 'Sum_cart/2',      'autorouting', 'smart');
+    set_param(h, 'Name', 'x_c');
+    h = add_line(mdl, 'Demux_Plant/3', 'Negate_alpha/1',  'autorouting', 'smart');
+    set_param(h, 'Name', '\alpha');
 
     % Feedback → display scopes
     add_line(mdl, 'Demux_Plant/1', 'xc_m_to_cm/1',   'autorouting', 'smart');
