@@ -20,11 +20,12 @@
 %  The pipeline:
 %    §1  Load parameters & build plant TF
 %    §2  PID design via sisotool (interactive)
+%    §2b Voltage feasibility check (linear, post-tuning)
 %    §3  Loop analysis (Bode, Nyquist, margins)
-%    §4  Step response simulation (with saturation)
+%    §4  Step response simulation (with saturation + anti-windup)
 %    §5  Voltage & travel feasibility check
 %    §6  Sensitivity analysis
-%    §7  Build Simulink model: IP02_CartPID.slx
+%    §7  Build Simulink model: IP02_CartPID.slx (PID with anti-windup)
 %    §8  Hardware deployment (QUARC)
 %
 %  Prerequisites: Run startup.m (loads seesaw_params.m)
@@ -117,10 +118,65 @@ N_filt = 100;   % 100 rad/s cutoff (tau_d = 0.01 s)
 
 % --- Step 2a: Compute a starting-point PID with pidtune ---
 %  pidtune picks gains that give ~60 deg phase margin by default.
-%  This is just an initial guess — you will refine in sisotool.
+%  We then check if the resulting controller would saturate for a 5 cm step.
+%  If it does, we reduce the crossover frequency until peak voltage fits
+%  within V_sat.  This gives sisotool a feasible starting point.
 
 fprintf('  Computing initial PID gains with pidtune()...\n');
+
+x_c_ref_design = 0.05;  % design step size [m] — match §4
+
+% Helper: compute linear peak |V_m| for a given PID and step reference.
+%   V_m = C(s) / (1 + C(s)*G(s)) * ref   (sensitivity × C × ref)
+ref_to_Vm = @(C_pid) tf(C_pid) * feedback(1, tf(C_pid) * G_xc);
+check_Vpeak = @(C_pid) max(abs(step(ref_to_Vm(C_pid) * x_c_ref_design, 0:0.001:5)));
+
+% First try: unconstrained pidtune
 C_pid0 = pidtune(G_xc, 'PIDF');
+[~, ~, ~, wc0] = margin(C_pid0 * G_xc);
+Vpeak0 = check_Vpeak(C_pid0);
+
+fprintf('    Unconstrained pidtune:\n');
+fprintf('      Crossover freq: %.2f rad/s\n', wc0);
+fprintf('      Peak voltage (5cm step): %.2f V  (limit %.1f V)\n', Vpeak0, V_sat);
+
+if Vpeak0 > V_sat
+    % --- Voltage-aware tuning: binary search for max feasible wc ---
+    fprintf('\n    Peak voltage exceeds V_sat! Reducing bandwidth...\n');
+
+    wc_lo = 0.5;     % conservative lower bound [rad/s]
+    wc_hi = wc0;     % unconstrained upper bound
+    wc_best = wc_lo;
+
+    for iter = 1:20
+        wc_try = (wc_lo + wc_hi) / 2;
+        C_try = pidtune(G_xc, 'PIDF', wc_try);
+        Vp = check_Vpeak(C_try);
+
+        if Vp <= V_sat * 0.95   % 5% margin from saturation
+            wc_best = wc_try;
+            wc_lo = wc_try;     % can go faster
+        else
+            wc_hi = wc_try;     % too aggressive
+        end
+
+        if (wc_hi - wc_lo) < 0.1
+            break;
+        end
+    end
+
+    C_pid0 = pidtune(G_xc, 'PIDF', wc_best);
+    Vpeak_final = check_Vpeak(C_pid0);
+    [~, ~, ~, wc_final] = margin(C_pid0 * G_xc);
+
+    fprintf('    Voltage-constrained pidtune:\n');
+    fprintf('      Max feasible wc: %.2f rad/s  (was %.2f)\n', wc_final, wc0);
+    fprintf('      Peak voltage:    %.2f V  (limit %.1f V)\n', Vpeak_final, V_sat);
+    fprintf('      Bandwidth reduced by %.0f%% to respect V_sat.\n', ...
+        (1 - wc_final/wc0) * 100);
+else
+    fprintf('    OK: Within voltage limits.\n');
+end
 
 Kp0 = C_pid0.Kp;
 Ki0 = C_pid0.Ki;
@@ -128,7 +184,7 @@ Kd0 = C_pid0.Kd;
 Tf0 = C_pid0.Tf;    % filter time constant (= 1/N)
 N0  = 1 / Tf0;
 
-fprintf('    pidtune initial gains:\n');
+fprintf('\n    Starting-point PID gains:\n');
 fprintf('      Kp = %.4f\n', Kp0);
 fprintf('      Ki = %.4f\n', Ki0);
 fprintf('      Kd = %.4f\n', Kd0);
@@ -294,6 +350,57 @@ if any(real(ev_cl) > 1e-3)
     fprintf('  Re-run this section or manually adjust gains.\n');
 end
 
+%% 2b. VOLTAGE FEASIBILITY CHECK (post-tuning)
+%  -----------------------------------------------------------------------
+%  Quick linear step simulation to check if the tuned PID will saturate.
+%  This runs BEFORE the full nonlinear sim in §4 — it's a fast sanity
+%  check so you know immediately whether to re-tune.
+%  -----------------------------------------------------------------------
+
+fprintf('\n--- §2b: Voltage Feasibility (linear, pre-saturation) ---\n');
+
+% Closed-loop from reference to [x_c; x_c_dot; V_m]
+%   V_m = -K_aug * x_aug + Kp_cart * ref
+% For a unit step ref, the peak V_m tells us if we'll saturate.
+
+% Build CL system: ref → V_m
+%   x_dot = (A_aug - B_aug*K_aug)*x + B_aug*Kp_cart*ref
+%   V_m   = -K_aug*x + Kp_cart*ref
+B_ref = B_aug * Kp_cart;         % reference input matrix
+C_Vm  = -K_aug;                   % voltage output
+D_Vm  = Kp_cart;                  % direct feedthrough from ref
+sys_ref2Vm = ss(A_aug_cl, B_ref, C_Vm, D_Vm);
+
+% Simulate 5 cm step (same as §4)
+x_c_ref_check = 0.05;  % [m]
+t_check = linspace(0, 5, 2000)';
+[Vm_linear, ~] = step(sys_ref2Vm * x_c_ref_check, t_check);
+
+V_peak_linear = max(abs(Vm_linear));
+
+fprintf('  5 cm step — LINEAR peak voltage: %.2f V\n', V_peak_linear);
+fprintf('  Saturation limit:                %.1f V\n', V_sat);
+
+if V_peak_linear > V_sat
+    V_ratio = V_peak_linear / V_sat;
+    fprintf('\n  *** WARNING: Peak voltage is %.1fx the saturation limit! ***\n', V_ratio);
+    fprintf('  The controller WILL saturate. Consequences:\n');
+    fprintf('    - Slower response than the linear analysis predicts\n');
+    fprintf('    - Integrator windup → overshoot\n');
+    fprintf('    - Phase margin from §3 is NOT reliable during transients\n');
+    fprintf('\n  Options:\n');
+    fprintf('    1. Accept it (anti-windup in Simulink will help) — mild sat is OK\n');
+    fprintf('    2. Re-tune in sisotool: reduce bandwidth (lower crossover freq)\n');
+    fprintf('    3. Reduce step size (e.g., 2 cm instead of 5 cm)\n');
+    if V_ratio > 2.0
+        fprintf('\n  STRONG RECOMMENDATION: Re-tune. %.1fx saturation is excessive.\n', V_ratio);
+        fprintf('  In sisotool, drag the Bode gain curve down to reduce crossover.\n');
+    end
+else
+    margin_V = V_sat - V_peak_linear;
+    fprintf('  OK: %.2f V headroom — no saturation expected for 5 cm step.\n', margin_V);
+end
+
 %% 3. LOOP TRANSFER FUNCTION ANALYSIS
 %  -----------------------------------------------------------------------
 %  L(s) = K_aug * (sI - A_aug)^{-1} * B_aug
@@ -429,12 +536,22 @@ for k = 1:n_steps
 
     % PID control law: u = Kp*(ref - x_c) + Ki*xi + Kd*(0 - x_c_dot)
     e_k = r_k - x_aug(1);
-    u_k = sat_v(Kp_cart * e_k + Ki_cart * x_aug(3) + Kd_cart * (0 - x_aug(2)));
+    u_unsaturated = Kp_cart * e_k + Ki_cart * x_aug(3) + Kd_cart * (0 - x_aug(2));
+    u_k = sat_v(u_unsaturated);
     u_hist(k) = u_k;
 
     % State derivatives
     x_c_ddot = (-B_total * x_aug(2) + alpha_f * eta_m * u_k) / M_c;
-    xi_dot   = e_k;  % integrator of tracking error
+
+    % Anti-windup (clamping): freeze integrator when output is saturated
+    % AND the integrator would push it further into saturation.
+    is_saturated = (abs(u_unsaturated) > V_sat);
+    windup_direction = (sign(u_unsaturated) == sign(e_k));
+    if is_saturated && windup_direction
+        xi_dot = 0;   % clamp: don't accumulate more error
+    else
+        xi_dot = e_k;  % normal integration
+    end
 
     % Euler step
     x_aug(1) = x_aug(1) + dt * x_aug(2);
@@ -643,12 +760,15 @@ add_block('simulink/Math Operations/Sum', [mdl '/Sum_err'], ...
     'Inputs', '+-', ...
     'Position', [170 100 190 120]);
 
-% PID block (Kp + Ki/s + Kd*N/(1+N/s))
+% PID block (Kp + Ki/s + Kd*N/(1+N/s)) with anti-windup
 add_block('simulink/Continuous/PID Controller', [mdl '/PID_Cart'], ...
     'P', 'Kp_cart', ...
     'I', 'Ki_cart', ...
     'D', 'Kd_cart', ...
     'N', 'N_filt', ...
+    'AntiWindupMode',    'clamping', ...
+    'UpperSaturationLimit', 'V_sat', ...
+    'LowerSaturationLimit', '-V_sat', ...
     'Position', [260 87 350 133]);
 
 % ==================================================================
