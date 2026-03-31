@@ -86,18 +86,15 @@ The seesaw is open-loop unstable: tilt → gravity accelerates the cart further 
 | 6–8 | Auto-tune `B_eq` (`fminsearch`), rebuild, FRF overlay (tuned) |
 | 9–10 | `lsim` vs hardware, save `tuned_params.mat` |
 
-**`scripts/control/cart_pid_pipeline.m`** — **Cart-only PID control** (no seesaw). Cart mounted flat on table, single-loop position PID. Designs gains via pole placement, builds `IP02_CartPID.slx`, deploys to hardware.
+**`scripts/control/cart_pid_pipeline.m`** — **Cart-only PI position control** (no seesaw). Cart mounted flat on table, single-loop PI. 6V motor limit is a hard design constraint — `pidtune` bandwidth is auto-constrained so peak voltage stays within V_sat. `sisotool` opens for interactive refinement. Builds `IP02_CartPI.slx`, deploys to hardware.
 
 | § | Action |
 |---|--------|
 | 1 | Load params, build plant TF |
-| 2 | PID design via pole placement (3-state augmented system) |
-| 3 | Loop analysis: Bode, Nyquist, margins |
-| 4 | 5 cm step response simulation (with saturation) |
-| 5–6 | Voltage/travel check, B_eq sensitivity |
-| 7 | Build `IP02_CartPID.slx` (sim or QUARC) |
-| 8 | Summary + save `controller_cart_pid.mat` |
-| 9 | Hardware deployment (QUARC) |
+| 2 | PI tuning: voltage-constrained `pidtune` → `sisotool` |
+| 3 | Step response check (nonlinear sim with 6V saturation + anti-windup) |
+| 4 | Build `IP02_CartPI.slx` (sim or QUARC), save `controller_cart_pi.mat` |
+| 5 | QUARC hardware deployment |
 
 **`scripts/control/control_pipeline.m`** — Controller design notebook (seesaw). Requires `tuned_params.mat`.
 
@@ -121,10 +118,10 @@ The seesaw is open-loop unstable: tilt → gravity accelerates the cart further 
 | `data/data.mat` | QUARC hardware | Raw encoder + voltage from chirp test |
 | `data/tuned_params.mat` | `modeling_pipeline.m §10` | Tuned `B_eq`, rebuilt SS matrices |
 | `data/controller.mat` | `control_pipeline.m §10` | `C_inner`, `C_outer`, gain scalars |
-| `data/controller_cart_pid.mat` | `cart_pid_pipeline.m §8` | Cart PID gains, margins, step metrics |
+| `data/controller_cart_pi.mat` | `cart_pid_pipeline.m §4` | Cart PI gains (Kp, Ki), state-space matrices |
 | `models/IP02_FreqTest.slx` | `frequency_setup.m` | Chirp excitation |
 | `models/IP02_CartOnTable.slx` | `build_simulink_models.m` | Phase 1 |
-| `models/IP02_CartPID.slx` | `cart_pid_pipeline.m §7` | Cart-only closed-loop PID |
+| `models/IP02_CartPI.slx` | `cart_pid_pipeline.m §4` | Cart-only closed-loop PI |
 | `models/Seesaw_Full.slx` | `build_simulink_models.m` | Phase 2 |
 | `models/Seesaw_Control.slx` | `build_simulink_models.m` | Phase 3 — deploy this |
 
@@ -134,15 +131,15 @@ The seesaw is open-loop unstable: tilt → gravity accelerates the cart further 
 
 ## Hardware Checklist
 
-### Cart-Only PID (no seesaw)
+### Cart-Only PI (no seesaw)
 
 1. `startup` → `cart_pid_pipeline` (run section by section)
 2. Connect Q2-USB, power on VoltPAQ-X1 — **Gain switch to 1×**
 3. Remove seesaw module or lock track flat on table
 4. Center cart on track
-5. Simulink → **External** mode → Build → Connect → Start
-6. Cart should track 5 cm step at t=2 s — watch Position and Voltage scopes
-7. Tune by adjusting `wn_dom`, `zeta_dom`, `p_int` in §2
+5. §2 opens `sisotool` — tune PI, close when done (6V constraint enforced automatically)
+6. §4 builds `IP02_CartPI.slx` — set Simulink to **External** mode → Build → Connect → Start
+7. Cart should track 5 cm step at t=2 s — watch Position and Voltage scopes
 
 ### Full Seesaw Control
 
