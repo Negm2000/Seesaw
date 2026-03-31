@@ -1,13 +1,13 @@
 %% CART PI PIPELINE — Quanser IP02 Cart on Table
-%  PI position control, tuned via sisotool. 6V motor limit enforced.
+%  PI position control, tuned via sisotool. 8V transient motor limit.
 %
 %  Plant:  G(s) = alpha_f * eta_m / (M_c * s^2 + B_total * s)
 %  Controller: PI  →  C(s) = Kp + Ki/s
 %
 %  Sections:
 %    §1  Load parameters & build plant
-%    §2  PI tuning (pidtune → sisotool), constrained to 6V
-%    §3  Step response check (with 6V saturation)
+%    §2  PI tuning (pidtune → sisotool), constrained to 8V
+%    §3  Step response check (with 8V saturation)
 %    §4  Build Simulink model
 %    §5  QUARC hardware deployment
 %
@@ -29,6 +29,14 @@ if exist(tp, 'file')
     fprintf('Using tuned B_eq = %.3f N*s/m\n', B_eq);
 end
 
+% Override V_sat for transient operation
+%   seesaw_params sets V_sat = 6V (motor continuous/nominal rating).
+%   The real constraint is peak current: I_peak = 3A (demagnetization).
+%   At stall: V_max = I_peak * R_m = 3 * 2.6 = 7.8V.
+%   Use 8V — right at I_peak at stall, and once the cart moves,
+%   back-EMF reduces current well below that.
+V_sat = 8;
+
 alpha_f = (eta_g * K_g * k_t) / (R_m * r_mp);
 B_emf   = alpha_f * K_g * k_m / r_mp;
 B_total = B_eq + B_emf;
@@ -49,16 +57,16 @@ fprintf('Poles: '); fprintf('%.4f  ', pole(G_xc)); fprintf('\n');
 fprintf('V_sat = %.1f V\n', V_sat);
 
 %% 2. PI TUNING (pidtune → sisotool)
-%  pidtune('PI') gives a starting point that respects 6V for a 5cm step.
+%  pidtune('PI') gives a starting point that respects 8V for a 25cm step.
 %  Then sisotool opens for interactive refinement.
 %  Close sisotool when done — gains are extracted automatically.
 
 fprintf('\n--- §2: PI Tuning ---\n');
 
-% --- Find max crossover frequency that stays within 6V ---
+% --- Find max crossover frequency that stays within V_sat ---
 %  For a step of x_ref [m], the peak voltage from C(s)*S(s)*x_ref
 %  must stay under V_sat.
-x_ref_design = 0.05;  % 5 cm design step
+x_ref_design = 0.25;  % 25 cm design step (~61% of usable track ±40.7cm)
 
 % Sensitivity TF: S = 1/(1+C*G),  voltage = C*S*ref
 peak_V = @(C_pi) max(abs(step( ...
@@ -82,28 +90,51 @@ for iter = 1:20
 end
 
 C_pi0 = pidtune(G_xc, 'PI', wc_best);
-fprintf('pidtune (6V-constrained):  Kp=%.3f  Ki=%.3f  wc=%.2f rad/s\n', ...
+fprintf('pidtune (V_sat-constrained):  Kp=%.3f  Ki=%.3f  wc=%.2f rad/s\n', ...
     C_pi0.Kp, C_pi0.Ki, wc_best);
-fprintf('Peak voltage for 5cm step: %.2f V (limit %.1f V)\n', ...
-    peak_V(C_pi0), V_sat);
+fprintf('Peak voltage for %.0fcm step: %.2f V (limit %.1f V)\n', ...
+    x_ref_design*100, peak_V(C_pi0), V_sat);
 
-% Open sisotool
-fprintf('\nOpening sisotool — tune the PI, then close the window.\n');
-fprintf('Keep peak voltage under %.1f V (watch step response).\n', V_sat);
+% Clear previous exports so we detect a fresh one
+evalin('base', 'clear C DesignTask');
+
+fprintf('\nOpening sisotool with voltage-constrained starting point.\n');
+fprintf('  1. Tune your PI (drag root locus, reshape Bode, etc.)\n');
+fprintf('  2. Close sisotool → click "Export" when prompted\n');
+fprintf('     (exports compensator as variable "C" to workspace)\n');
+fprintf('  3. Come back here and press ENTER\n');
 sisotool(G_xc, tf(C_pi0));
-input('  >> Tune PI in sisotool, then close it. Press ENTER to continue...', 's');
+input('  >> Press ENTER after exporting from sisotool...', 's');
 
-% Extract tuned compensator
-C_tuned = C_pi0;
+% --- Extract tuned compensator ---
+C_tuned = [];
+
+% Method 1: 'C' in workspace (standard export name)
 try
-    if evalin('base', 'exist(''DesignTask'', ''var'')')
-        DT = evalin('base', 'DesignTask');
-        C_tuned = pid(tf(DT.Compensator));
-    elseif evalin('base', 'exist(''C'', ''var'')')
-        C_tuned = pid(evalin('base', 'C'));
+    if evalin('base', 'exist(''C'',''var'')')
+        C_tuned = pid(tf(evalin('base', 'C')));
+        fprintf('Extracted compensator from workspace variable "C".\n');
     end
-catch
-    fprintf('Could not auto-extract — using pidtune defaults.\n');
+catch, end
+
+% Method 2: 'DesignTask' (some MATLAB versions)
+if isempty(C_tuned)
+    try
+        if evalin('base', 'exist(''DesignTask'',''var'')')
+            DT = evalin('base', 'DesignTask');
+            C_tuned = pid(tf(DT.Compensator));
+            fprintf('Extracted compensator from DesignTask.\n');
+        end
+    catch, end
+end
+
+% Method 3: manual fallback
+if isempty(C_tuned)
+    fprintf('\nNo exported compensator found in workspace.\n');
+    fprintf('Enter Kp and Ki manually (read from sisotool display):\n');
+    Kp_cart = input('  Kp = ');
+    Ki_cart = input('  Ki = ');
+    C_tuned = pid(Kp_cart, Ki_cart);
 end
 
 if ~isa(C_tuned, 'pid'), C_tuned = pid(C_tuned); end
@@ -122,13 +153,13 @@ else
     fprintf('Peak voltage: %.2f V — OK (limit %.1f V)\n', V_check, V_sat);
 end
 
-%% 3. STEP RESPONSE CHECK (with 6V saturation)
+%% 3. STEP RESPONSE CHECK (with saturation)
 
 fprintf('\n--- §3: Step Response ---\n');
 
 T_sim = 6;  dt = 0.001;
 t = (0:dt:T_sim)';
-x_ref = 0.05;  t_step = 1.0;
+x_ref = x_ref_design;  t_step = 1.0;
 
 sat_v = @(v) max(-V_sat, min(V_sat, v));
 
@@ -208,7 +239,7 @@ end
 
 % Reference
 add_block('simulink/Sources/Step', [mdl '/x_c_ref'], ...
-    'Time', '2', 'Before', '0', 'After', '0.05', ...
+    'Time', '2', 'Before', '0', 'After', num2str(x_ref_design), ...
     'Position', [50 95 90 135]);
 
 % Error sum
@@ -335,7 +366,7 @@ if ~strcmpi(reply, 'go')
     return;
 end
 set_param(mdl, 'SimulationCommand', 'start');
-fprintf('RUNNING — cart tracks 5cm step at t=2s.\n');
+fprintf('RUNNING — cart tracks %.0fcm step at t=2s.\n', x_ref_design*100);
 
 input('Press ENTER to stop...', 's');
 set_param(mdl, 'SimulationCommand', 'stop');
