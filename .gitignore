@@ -18,18 +18,8 @@ slprj/
 .claude/
 .vscode/
 
-# LaTeX build artifacts
-*.aux
-*.log
-*.out
-*.toc
-*.fls
-*.fdb_latexmk
-*.synctex.gz
-*.blg
-*.bbl
-*.pdf
-docs/figures/*.pdf
+# LaTeX build output (all artifacts go here)
+build/
 
 # Project logs and temporary files
 *.txt
