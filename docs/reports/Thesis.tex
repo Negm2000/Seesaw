@@ -1,0 +1,902 @@
+% A LaTeX template for ARTICLE version of the MSc Thesis submissions to 
+% Politecnico di Milano (PoliMi) - School of Industrial and Information Engineering
+%
+% S. Bonetti, A. Gruttadauria, G. Mescolini, A. Zingaro
+% e-mail: template-tesi-ingind@polimi.it
+%
+% Last Revision: October 2021
+%
+% Copyright 2021 Politecnico di Milano, Italy. Inc. NC-BY
+
+\documentclass[11pt,a4paper]{article} 
+
+%------------------------------------------------------------------------------
+%	REQUIRED PACKAGES AND  CONFIGURATIONS
+%------------------------------------------------------------------------------
+% PACKAGES FOR TITLES
+\usepackage{titlesec}
+\usepackage{color}
+
+% PACKAGES FOR LANGUAGE AND FONT
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage[T1]{fontenc} % Font encoding
+
+% PACKAGES FOR IMAGES
+\usepackage{graphicx}
+\graphicspath{{Images/}}
+\usepackage{eso-pic} % For the background picture on the title page
+\usepackage{subfig} % Numbered and caption subfigures using \subfloat
+\usepackage{caption} % Coloured captions
+\usepackage{transparent}
+
+% STANDARD MATH PACKAGES
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{bm}
+\usepackage[overload]{empheq}  % For braced-style systems of equations
+
+% PACKAGES FOR TABLES
+\usepackage{tabularx}
+\usepackage{longtable} % tables that can span several pages
+\usepackage{colortbl}
+
+% PACKAGES FOR ALGORITHMS (PSEUDO-CODE)
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+% PACKAGES FOR REFERENCES & BIBLIOGRAPHY
+\usepackage[colorlinks=true,linkcolor=black,anchorcolor=black,citecolor=black,filecolor=black,menucolor=black,runcolor=black,urlcolor=black]{hyperref} % Adds clickable links at references
+\usepackage{cleveref}
+\usepackage[square, numbers, sort&compress]{natbib} % Square brackets, citing references with numbers, citations sorted by appearance in the text and compressed
+\bibliographystyle{plain} % You may use a different style adapted to your field
+
+% PACKAGES FOR THE APPENDIX
+\usepackage{appendix}
+
+% PACKAGES FOR ITEMIZE & ENUMERATES 
+\usepackage{enumitem}
+
+% OTHER PACKAGES
+\usepackage{amsthm,thmtools,xcolor} % Coloured "Theorem"
+\usepackage{comment} % Comment part of code
+\usepackage{fancyhdr} % Fancy headers and footers
+\usepackage{lipsum} % Insert dummy text
+\usepackage{tcolorbox} % Create coloured boxes (e.g. the one for the key-words)
+
+%-------------------------------------------------------------------------
+%	NEW COMMANDS DEFINED
+%-------------------------------------------------------------------------
+% EXAMPLES OF NEW COMMANDS -> here you see how to define new commands
+\newcommand{\bea}{\begin{eqnarray}} % Shortcut for equation arrays
+\newcommand{\eea}{\end{eqnarray}}
+\newcommand{\e}[1]{\times 10^{#1}}  % Powers of 10 notation
+\newcommand{\mathbbm}[1]{\text{\usefont{U}{bbm}{m}{n}#1}} % From mathbbm.sty
+\newcommand{\pdev}[2]{\frac{\partial#1}{\partial#2}}
+% NB: you can also override some existing commands with the keyword \renewcommand
+
+%----------------------------------------------------------------------------
+%	ADD YOUR PACKAGES (be careful of package interaction)
+%----------------------------------------------------------------------------
+\usepackage{etoolbox}
+\AtBeginEnvironment{equation}{\small}
+\AtBeginEnvironment{align}{\small}
+\AtBeginEnvironment{equation*}{\small}
+\AtBeginEnvironment{align*}{\small}
+
+%----------------------------------------------------------------------------
+%	ADD YOUR DEFINITIONS AND COMMANDS (be careful of existing commands)
+%----------------------------------------------------------------------------
+
+
+% Do not change Configuration_files/config.tex file unless you really know what you are doing. 
+% This file ends the configuration procedures (e.g. customizing commands, definition of new commands)
+\input{Configuration_files/config}
+
+% Insert here the info that will be displayed into your Title page 
+% -> title of your work
+\renewcommand{\title}{054702 - AUTOMATION AND CONTROL LABORATORY}
+% -> author name and surname
+\newcommand{\authora}{Negm Karim}
+\newcommand{\authorb}{Hu Kaipeng}
+\newcommand{\authorc}{Yan Yawen}
+\newcommand{\authord}{Zeep Nathan}
+% -> MSc course
+\newcommand{\course}{Seesaw}
+% -> advisor name and surname
+\newcommand{\advisor}{Prof. Ruiz Fredy}
+% IF AND ONLY IF you need to modify the co-supervisors you also have to modify the file Configuration_files/title_page.tex (ONLY where it is marked)
+\newcommand{\firstcoadvisor}{Cordoba Andres} % insert if any otherwise comment
+% -> author ID
+\newcommand{\IDa}{11063520}
+\newcommand{\IDb}{11036887}
+\newcommand{\IDc}{11015522}
+\newcommand{\IDd}{10977678}
+% -> academic year
+\newcommand{\YEAR}{2025-2026}
+% -> abstract (only in English)
+\renewcommand{\abstract}{Here goes the Abstract in English of your thesis (in article format)
+followed by a list of keywords.
+The Abstract is a concise summary of the content of the thesis (single page of text)
+and a guide to the most important contributions included in your thesis.
+The Abstract is the very last thing you write.
+It should be a self-contained text and should be clear
+to someone who hasn't (yet) read the whole manuscript.
+The Abstract should contain the answers to the main research questions
+that have been addressed in your thesis.
+It needs to summarize the motivations and the adopted approach as well as
+the findings of your work and their relevance and impact.
+The Abstract is the part appearing in the record of your thesis inside POLITesi,
+the Digital Archive of PhD and Master Theses (Laurea Magistrale) of Politecnico di Milano.
+The Abstract will be followed by a list of four to six keywords.
+Keywords are a tool to help indexers and search engines to find relevant documents.
+To be relevant and effective, keywords must be chosen carefully.
+They should represent the content of your work and be specific to your field or sub-field.
+Keywords may be a single word or two to four words. }
+
+% -> key-words (only in English)
+\newcommand{\keywords}{Control, Model, Seesaw}
+
+%-------------------------------------------------------------------------
+%	BEGIN OF YOUR DOCUMENT
+%-------------------------------------------------------------------------
+\begin{document}
+
+%-----------------------------------------------------------------------------
+% TITLE PAGE
+%-----------------------------------------------------------------------------
+% Do not change Configuration_files/TitlePage.tex (Modify it IF AND ONLY IF you need to add or delete the Co-advisors)
+% This file creates the Title Page of the document
+\input{Configuration_files/title_page}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%     THESIS MAIN TEXT     %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Introduction}
+
+\section{Setups Descriptions}
+
+\subsection{Cart}
+unidimensional, only towards cart position on the rail $x_c$.
+
+\begin{table}[H]
+    \caption*{\textbf{Example of Table (optional)}}
+    \centering 
+    \begin{tabular}{|p{3em} c c c |}
+    \hline
+    \rowcolor{bluePoli!40}
+     & \textbf{column1} & \textbf{column2} & \textbf{column3} \T\B \\
+    \hline \hline
+    \textbf{row1} & 1 & 2 & 3 \T\B \\
+    \textbf{row2} & $\alpha$ & $\beta$ & $\gamma$ \T\B\\
+    \textbf{row3} & alpha & beta & gamma \B\\
+    \hline
+    \end{tabular}
+    \\[10pt]
+    \caption{Caption of the Table.}
+    \label{table:datasheet}
+\end{table}
+
+The actual weight of the cart seen by the motor is 
+\begin{equation}
+    M_e = M_c + \frac{J_m \cdot K_g^2}{r_{mp}^2}
+\end{equation}
+Defining the force acting on the cart as 
+\begin{equation}
+    F_c(t) = \alpha \cdot v(t) - B_{emf} \cdot \dot{x}_c(t)
+\end{equation}
+where
+\begin{align*}
+    \alpha &= \frac{k_tK_g\eta_g\eta_m}{r^2_{mp}R_m} &
+    B_{emf} &= \frac{k_tk_mK^2_g\eta_g}{r^2_{mp}R_m}
+\end{align*}
+
+The kinetic energy takes the form
+\begin{equation}
+    T = \frac{1}{2}M_e\dot{x}_c^2
+\end{equation}
+The equation of motion of the system is:
+\begin{equation}
+    \label{eq:cart_eom}
+    \begin{aligned}
+        &\frac{\partial^2T}{\partial t \partial \dot{x}_c} - \frac{\partial T}{\partial x_c}&=& -B_{eq,c} \cdot \dot{x}_c + F_c \\
+        \Leftrightarrow& M_e \cdot \ddot{x}_c &=&-B_{eq,c} \cdot \dot{x}_c + \alpha \cdot v - B_{emf}\cdot \dot{x}_c\\
+        \Leftrightarrow &M_e \cdot \ddot{x}_c(t) + (B_{eq,c} + B_{emf}) \cdot \dot{x}_c (t) &=&\alpha \cdot v(t)
+    \end{aligned}
+\end{equation}
+
+\subsection{Cart and Seesaw}
+2 dimensions : cart position on the rail $x_c$, seesaw inclination $\theta$.\\
+In addition to the previous setup, we also have the following data:
+
+\begin{table}[H]
+    \caption*{\textbf{Example of Table (optional)}}
+    \centering 
+    \begin{tabular}{|p{3em} c c c |}
+    \hline
+    \rowcolor{bluePoli!40}
+     & \textbf{column1} & \textbf{column2} & \textbf{column3} \T\B \\
+    \hline \hline
+    \textbf{row1} & 1 & 2 & 3 \T\B \\
+    \textbf{row2} & $\alpha$ & $\beta$ & $\gamma$ \T\B\\
+    \textbf{row3} & alpha & beta & gamma \B\\
+    \hline
+    \end{tabular}
+    \\[10pt]
+    \caption{Caption of the Table.}
+    \label{table:datasheet}
+\end{table}
+Define the Lagrangian of the $L = T-V$ where $T$ is the kinetic energy and $V$ the potential energy.
+\begin{equation}
+    T = \frac{1}{2}M_e \dot{x}_c^2 + \frac{1}{2}(J_{sw} + M_eD_T^2)\dot{\theta}^2 + \frac{1}{2}M_ex_c^2 \dot{\theta}^2 - M_eD_T \dot{x}_c \dot{\theta}
+\end{equation}
+\begin{equation}
+    V = gM_ex_csin(\theta) + g(M_eD_T + M_{sw}D_C )cos(\theta)
+\end{equation}
+Using the Euler-Lagrange relation:\\
+\begin{equation}
+    \left\{
+    \begin{aligned}
+    \frac{\partial^2L}{\partial t \partial \dot{x}_c} - \frac{\partial L}{\partial x_c} &= - B_{eq,c} \dot{x}_c + F_c\\
+        \frac{\partial^2L}{\partial t \partial \dot{\theta}} - \frac{\partial L}{\partial \theta} &= - B_{sw} \dot{\theta}
+    \end{aligned}
+    \right.
+\end{equation}
+The final equations of motion for the complete system are:
+\begin{equation}
+    \label{eq:seesaw_eom}
+    \left\{
+    \begin{aligned}
+        M_e\dot{x}_c - M_eD_T \ddot{\theta} - M_e x_c \dot{\theta}^2 + gM_e sin(\theta)&= - B_{eq,c} \dot{x}_c + F_c\\
+        M_e \ddot{\theta} x_c^2 + 2M_e \dot{x}_c \dot{\theta} + gM_ecos(\theta)x_c - M_e D_T \ddot{x}_c& + \\
+        (J_{sw} + M_eD^2_T)\ddot{\theta} - g(M_eD_T - M_{sw}D_C)sin(\theta) &= - B_{sw} \dot{\theta}
+    \end{aligned}
+    \right.
+\end{equation}
+
+\section{First experience: Cart position control}
+
+\subsection{Transfer Function Definition}
+
+Based on the equation of motion described at Eq.~\ref{eq:cart_eom}, we define the transfer function of the system using the Laplace Transform.
+\begin{equation}
+    \label{eq:cart_eom_laplace}
+    [M_e \cdot s^2 + (B_{eq,c} + B_{emf}) \cdot s]\cdot X_c(s) = \alpha \cdot V(s) 
+\end{equation}
+\begin{equation}
+    \label{eq:cart_tf}
+    \begin{aligned}
+        G(s) = \frac{X(s)}{V(s)} &= \frac{\alpha}{M_e \cdot s^2 + B_{tot} \cdot s}\\
+        &= \frac{1}{s} \cdot \frac{(\alpha / B_{tot})}{(M_e / B_{tot}) \cdot s + 1}
+    \end{aligned}    
+\end{equation}
+
+\subsection{Parameters Tuning} \label{sec:tuning}
+The section~\ref{sec:tuning} is aimed at finding values that match better our real system in order to have a model precise-enough. In this section, most of the values obtained from Tab.~\ref{table:datasheet} are assumed to be true. The focus will be put on the viscous damping coefficient $B_{eq,c}$, the planetary gearbox efficiency $\eta_g$, and the motor efficiency $\eta_m$.\\
+\begin{comment}
+    
+\paragraph{Motor inductance}
+$L_m$\\
+\qquad \emph{Assumption: } $L_m \simeq 0$\\
+Motivation: allow to go from 3rd order system to 2nd order, reduce complexity.
+\begin{equation}
+    G(s) = \frac{\alpha}{ R_m \cdot M_e \cdot s^2 + (R_m \cdot B_c + \beta) \cdot s}
+\end{equation}
+Correctness: \\
+\begin{itemize}
+    \item poles of $G_0$: $-1.44.10^4, \quad -22, \quad 0 \qquad [rad/s]$
+    \item poles of $G$: $-21.9621, \quad 0 \qquad [rad/s]$
+\end{itemize}
+The third pole added by the motor armature inductance $L_m$ is at very high frequency and lays very close to the numerical solver frequency which leads to accumulative error. The second pole, around 22 rad/s remains almost unchanged.
+\end{comment}
+\paragraph{Equivalent viscous coefficient}
+$B_{eq,c}$ \\
+initial value $B_{eq,c} = 4.3$ [Nms / rad ]\\
+\textcolor{blue}{describe the process of tuning : apply a sinesweep to cover multiple frequencies from x to y then select the region of interest and apply a mean square error fitting}
+
+final value $B_{eq,c} = 6.7217$ [Nms / rad ]\\
+
+
+\paragraph{Efficiencies ratios:} 
+Planetary gearbox efficiency $\eta _g$, Motor efficiency $\eta_m$\\
+
+initial values $\eta_g = 0.9$ [-], $\eta_m = 0.69$ [-]\\
+\textcolor{blue}{describe the process of tuning : apply a step, compute the time constant and static gain. With $B_{eq,c}$ being fixed at previous step we can easily perform a grid search to find best match in terms of settling time and static gain}
+Best match is the one that always minimizes both efficiencies. The datasheet includes respectively 10\% and 5\% of variation foreseen but as our model does not include some outside effects like Coulomb's friction and cable pulling forces, we can easily go down by an extra 10\% (arbitrary value) to compensate. The mean square error is computed only on the 0 to 25 [rad/s] range of frequencies because it corresponds to the region of interest.\\
+
+$\tau = \frac{M_e}{B_{tot}(\eta_g)}, \qquad K = \frac{\alpha (\eta_g,\eta_m)}{B_{tot}(\eta_g)}$
+
+\begin{table}[H]
+    %\caption*{\textbf{Example of Table (optional)}}
+    \centering 
+    % Use tabularx with \textwidth. The 'X' column will stretch.
+    \begin{tabularx}{\textwidth}{|X c c c |}
+    \hline
+    \rowcolor{bluePoli!40}
+     & \textbf{$\eta_g$} & \textbf{$\eta_m$} & \textbf{mean square error} \T\B \\
+    \hline \hline
+    \textbf{datasheet base value} & $0.9$ & $0.69$ & $1.11\cdot 10^2$ \T\B \\
+    \textbf{datasheet variation} & $0.81$ & $0.65$ & $8.08\cdot 10^1$ \T\B\\
+    \textbf{extra variation} & $0.72$ & $0.5865$ & $4.98\cdot 10^1$ \B\\
+    \hline
+    \end{tabularx}
+    \\[10pt]
+    \caption{Efficiencies and associated MSE depending on the setup.}
+    \label{table:datasheet}
+\end{table}
+
+\textcolor{green}{actually the model that fits the most the "measured model" that we have from the step response has the values $B_{eq,c}=3.87, \eta_g = 0.6, \eta_m =0.69$, see fig.~\ref{fig:comp}}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\linewidth]{Images/bode_comparison_meas_tuned_theory.png}
+    \caption{Caption}
+    \label{fig:comp}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \subfloat[One PoliMi logo.\label{fig:polimi_logo1}]{
+        \includegraphics[width=0.4\linewidth]{Images/time_comparison_2hz_real_tuned_meas.png}
+    }
+    \quad
+    \subfloat[Another one PoliMi logo.\label{fig:polimi_logo2}]{
+        \includegraphics[width=0.4\linewidth]{Images/time_comparison_8hz_real_tuned_meas.png}
+    }
+    \caption[]{Caption of the Figure.}
+    \label{fig:quadtree2}
+\end{figure}
+
+final values $\eta_g = 0.72$ [-], $\eta_m = 0.5865$ [-]\\
+
+\subsection{Model Validation}
+
+\paragraph{Time validation}
+
+\paragraph{Frequency Validation}
+
+\subsection{Control of the position}
+
+using PID control
+
+\section{Second experience: Body Stabilization in horizontal position}
+
+\subsection{Transfer Functions Definition}
+
+Assumptions for linearization :
+\begin{enumerate}
+    \item Small angles ($\theta \simeq 0$) : $sin(\theta) = \theta$ and $cos(\theta) = 1$
+    \item Ignoring high-order velocity terms : $\dot{\theta}^2, x_c^2, \dot{x}_c\dot{\theta} \simeq 0$
+\end{enumerate}
+After linearizing and replacing $F_c$, the system is:
+\begin{equation}
+    \left\{
+    \begin{aligned}
+        M_e\dot{x}_c - M_eD_T \ddot{\theta} 
+        + gM_e \theta + B_c \dot{x}_c + B_{emf}\dot{x}_c &=  \alpha V_{DC}\\
+        - M_e D_T \ddot{x}_c + gM_ex_c +\\ (J_{sw} + M_eD^2_T)\ddot{\theta} + B_{sw} \dot{\theta} - g(M_eD_T - M_{sw}D_C)\theta &= 0
+    \end{aligned}
+    \right.
+\end{equation}
+For which the Laplace trasnform gives, considering initial states of (0,0):
+\begin{equation}
+    \left\{
+    \begin{aligned}
+        (M_e s^2 + (B_{eq,c} + B_{emf})s) \cdot X(s) & + \\
+        (- M_e D_T s^2 + g M_e s) \cdot \Theta (s) &=  \alpha \cdot V_{DC}(s)\\
+        (-M_e D_T s^2 + g M_e) \cdot X(s) & + \\
+        ( (J_{sw} + M_e D_T)s^2 + B_{sw}s - g(M_eD_T + M_{sw}D_C)) \cdot \Theta (s) &= 0
+    \end{aligned}
+    \right.
+\end{equation}
+
+Matrix form :
+\begin{equation}
+    \begin{bmatrix}
+        M_e s^2 + (B_{eq,c} + B_{emf})s & -M_e D_T s^2 + g M_e s\\
+        -M_e D_T s^2 + g M_e & (J_{sw} + M_e D_T)s^2 + B_{sw}s - g(M_eD_T + M_{sw}D_C)
+    \end{bmatrix}
+    \begin{bmatrix}
+        X(s)\\
+        \Theta(s)
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+        \alpha \\
+        0
+    \end{bmatrix}
+    V_{DC}(s)
+\end{equation}
+\begin{equation}
+    \begin{bmatrix}
+        P_{11} & P_{12}\\
+        P_{21} & P_{22}
+    \end{bmatrix}
+    \begin{bmatrix}
+        X(s)\\
+        \Theta(s)
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+        \alpha \\
+        0
+    \end{bmatrix}
+    V_{DC}(s)
+\end{equation}
+using Cramer's rule we can define $G(s)$ and $H(s)$ the transfer functions from $V_{DC}(s)$ to respectively $X(s)$ and $\Theta(s)$.
+\begin{equation}
+    \begin{aligned}
+        G(s) &= \frac{X(s)}{V_{DC}(s)} &= \alpha \frac{P_{22}}{P_{11}\cdot P_{22} - P_{12} \cdot P_{21}} \\
+        & & = \frac{numG}{den}\\
+        H(s) &= \frac{\Theta(s)}{V_{DC}(s)} &= \alpha \frac{-P_{21}}{P_{11}\cdot P_{22} - P_{12} \cdot P_{21}}\\
+        & & = \frac{numH}{den}
+    \end{aligned}
+\end{equation}
+
+Both share the same 4 poles : \textcolor{red}{$-23, \quad -3.31, \quad 0, \quad 3$}\\
+Having the 4\textsuperscript{th} pole positive makes the system unstable and this requires the control actions developed in the next sections.
+
+\subsection{State-Space Representation}
+Solving the equations of motions for the second order derivative:
+\begin{equation}
+        \begin{bmatrix}
+            M_e & -M_eD_T\\
+            -M_eD_T & J_{sw} + M_eD_T^2
+        \end{bmatrix} 
+        \begin{bmatrix}
+            \ddot{x}_c\\
+            \ddot{\theta}
+        \end{bmatrix}
+         =
+        \begin{bmatrix}
+            0 & -gM_e & -B_{tot} & 0 \\
+            -gM_e & g(M_eD_T + M_{sw}D_C) & 0 & -B_{sw}
+        \end{bmatrix}
+        \begin{bmatrix}
+            x_c \\
+            \theta \\
+            \dot{x}_c \\
+            \dot{\theta}
+        \end{bmatrix} 
+         + \begin{bmatrix}
+            \alpha \\
+            0
+        \end{bmatrix}
+        V
+\end{equation}
+\begin{comment}
+\begin{equation}
+    \begin{aligned}
+        \begin{bmatrix}
+            \ddot{x}_c\\
+            \ddot{\theta}
+        \end{bmatrix}
+        & =
+        \frac{1}{M_eJ_{sw}}
+        \begin{bmatrix}
+            J_{sw} + M_eD_T^2 & M_eD_T\\
+            M_eD_T & M_e
+        \end{bmatrix} 
+        \begin{bmatrix}
+            0 & -gM_e & -B_{tot} & 0 \\
+            -gM_e & g(M_eD_T + M_{sw}D_C) & 0 & -B_{sw}
+        \end{bmatrix}
+        \begin{bmatrix}
+            x_c \\
+            \theta \\
+            \dot{x}_c \\
+            \dot{\theta}
+        \end{bmatrix} \\
+        & + 
+        \frac{1}{M_eJ_{sw}}
+        \begin{bmatrix}
+            J_{sw} + M_eD_T^2 & M_eD_T\\
+            M_eD_T & M_e
+        \end{bmatrix} 
+        \begin{bmatrix}
+            \alpha \\
+            0
+        \end{bmatrix}
+        V
+    \end{aligned}
+\end{equation}
+    
+\end{comment}
+\begin{equation}
+    \begin{aligned}
+        \begin{bmatrix}
+            \ddot{x}_c\\
+            \ddot{\theta}
+        \end{bmatrix}
+        & =
+        \frac{1}{J_{sw}}
+        \begin{bmatrix}
+            -gM_eD_T & g( -J_{sw} \textcolor{blue}{+ 2gM_eD_T^2} + M_{sw}D_TD_C) & -B_{tot}(\frac{J_{sw}}{M_e}+D_T^2) & -B_{sw}D_T \\
+            -gM_e & g(\textcolor{blue}{2M_eD_T} + M_{sw}D_C) & -B_{tot}D_T & -B_{sw}
+        \end{bmatrix}
+        \begin{bmatrix}
+            x_c \\
+            \theta \\
+            \dot{x}_c \\
+            \dot{\theta}
+        \end{bmatrix} \\
+        & + 
+        \frac{\alpha}{J_{sw}}
+        \begin{bmatrix}
+            \frac{J_{sw}}{M_e} + D_T^2 \\
+            D_T
+        \end{bmatrix}
+        V
+    \end{aligned}
+\end{equation}
+We can extend this system to include $\dot{x}_c$ and $\dot{\theta}$:
+\begin{equation}
+    \begin{aligned}
+        \begin{bmatrix}
+            \dot{x}_c\\
+            \dot{\theta}\\
+            \ddot{x}_c\\
+            \ddot{\theta}
+        \end{bmatrix}
+        & =
+        \frac{1}{J_{sw}}
+        \begin{bmatrix}
+            0 & 0 & J_{sw} & 0 \\
+            0 & 0 & 0 & J_{sw} \\
+            -gM_eD_T & g( -J_{sw} \textcolor{blue}{+ 2gM_eD_T^2} + M_{sw}D_TD_C) & -B_{tot}(\frac{J_{sw}}{M_e}+D_T^2) & -B_{sw}D_T \\
+            -gM_e & g(\textcolor{blue}{2M_eD_T} + M_{sw}D_C) & -B_{tot}D_T & -B_{sw}
+        \end{bmatrix}
+        \begin{bmatrix}
+            x_c \\
+            \theta \\
+            \dot{x}_c \\
+            \dot{\theta}
+        \end{bmatrix} \\
+        & + 
+        \frac{\alpha}{J_{sw}}
+        \begin{bmatrix}
+            0 \\
+            0 \\
+            \frac{J_{sw}}{M_e} + D_T^2 \\
+            D_T
+        \end{bmatrix}
+        V
+    \end{aligned}
+\end{equation}
+This gives the state and input matrices as
+\begin{align*}
+    A &= 
+        \frac{1}{J_{sw}}
+        \begin{bmatrix}
+            0 & 0 & J_{sw} & 0 \\
+            0 & 0 & 0 & J_{sw} \\
+            -gM_eD_T & g( -J_{sw} \textcolor{blue}{+ 2gM_eD_T^2} + M_{sw}D_TD_C) & -B_{tot}(\frac{J_{sw}}{M_e}+D_T^2) & -B_{sw}D_T \\
+            -gM_e & g(\textcolor{blue}{2M_eD_T} + M_{sw}D_C) & -B_{tot}D_T & -B_{sw}
+        \end{bmatrix} \\
+    B &= \frac{\alpha}{J_{sw}}
+        \begin{bmatrix}
+            0 \\
+            0 \\
+            \frac{J_{sw}}{M_e} + D_T^2 \\
+            D_T
+        \end{bmatrix}
+\end{align*}
+Regarding the output equation, only the positions $x_c$ and the angle $\theta$ are observable and the measurements are not dependent on the input voltage, therefore the output and transmission matrices are :
+\begin{align*}
+    C &= 
+    \begin{bmatrix}
+        1 & 0 & 0 & 0 \\
+        0 & 1 & 0 & 0
+    \end{bmatrix} &
+    D &= 
+    \begin{bmatrix}
+        0\\
+        0
+    \end{bmatrix}
+\end{align*}
+\section{Experience 3: Periodic trajectory tracking for the body and lift-up}
+
+
+\begin{comment}
+%-----------------------------------------------------------------------------
+% INTRODUCTION
+%-----------------------------------------------------------------------------
+\section{Introduction}
+\label{sec:introduction}
+This document is intended to be both an example of the Polimi \LaTeX{} template for Master Theses in article format,
+as well as a short introduction to its use. It is not intended to be a general introduction to \LaTeX{} itself,
+and the reader is assumed to be familiar with the basics of creating and compiling \LaTeX{} documents (see \cite{oetiker1995not, kottwitz2015latex}). 
+\\
+The cover page of the thesis in article format must contain all the relevant information:
+title of the thesis, name of the Study Programme, name(s) of the author(s),
+student ID number, name of the supervisor, name(s) of the co-supervisor(s) (if any), academic year.
+\\
+Be sure to select a title that is meaningful.
+It should contain important keywords to be identified by indexer.
+Keep the title as concise as possible and comprehensible even to people who are not experts in your field.
+The title has to be chosen at the end of your work so that it accurately captures the main subject of the manuscript.
+
+It is convenient to break the article format of your thesis (in article format) into sections and subsections. 
+If necessary, subsubsections, paragraphs and subparagraphs can be used. 
+A new section is created by the command
+\begin{verbatim}
+\section{Title of the section}
+\end{verbatim}
+The numbering can be turned off by using \verb|\section*{}|.
+A new subsection is created by the command
+\begin{verbatim}
+\subsection{Title of the subsection}
+\end{verbatim}
+and, similarly, the numbering can be turned off by adding an asterisk as follows 
+\begin{verbatim}
+\subsection*{}
+\end{verbatim}
+It is recommended to give a label to each section by using the command
+\begin{verbatim}
+\label{sec:section_name}%
+\end{verbatim}
+where the argument is just a text string that you'll use to reference that part
+as follows: \textit{Section~\ref{sec:introduction} contains \sc{INTRODUCTION}  \dots}.
+
+%-----------------------------------------------------------------------------
+% EQUATIONS
+%-----------------------------------------------------------------------------
+\section{Equations}
+\label{sec:eqs}
+This section gives some examples of writing mathematical equations in your thesis.
+
+Maxwell's equations read:
+\begin{subequations}
+    \label{eq:maxwell}
+    \begin{align}[left=\empheqlbrace]
+    \nabla\cdot \bm{D} & = \rho, \label{eq:maxwell1} \\
+    \nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} & = \bm{0}, \label{eq:maxwell2} \\
+    \nabla\cdot \bm{B} & = 0, \label{eq:maxwell3} \\
+    \nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t} &= \bm{J}. \label{eq:maxwell4}
+    \end{align}
+\end{subequations}
+
+Equation~\eqref{eq:maxwell} is automatically labeled by \texttt{cleveref},
+as well as Equation~\eqref{eq:maxwell1} and Equation~\eqref{eq:maxwell3}.
+Thanks to the \verb|cleveref| package, there is no need to use \verb|\eqref|.
+Equations have to be numbered only if they are referenced in the text.
+
+Equations~\eqref{eq:maxwell_multilabels1}, \eqref{eq:maxwell_multilabels2}, \eqref{eq:maxwell_multilabels3}, and \eqref{eq:maxwell_multilabels4} show again Maxwell's equations without brace:
+\begin{align}
+    \nabla\cdot \bm{D} & = \rho, \label{eq:maxwell_multilabels1} \\
+    \nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} &= \bm{0}, \label{eq:maxwell_multilabels2} \\
+    \nabla\cdot \bm{B} & = 0, \label{eq:maxwell_multilabels3} \\
+    \nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t} &= \bm{J} \label{eq:maxwell_multilabels4}.
+\end{align}
+
+Equation~\eqref{eq:maxwell_singlelabel} is the same as before,
+but with just one label:
+\begin{equation}
+    \label{eq:maxwell_singlelabel}
+    \left\{
+    \begin{aligned}
+    \nabla\cdot \bm{D} & = \rho, \\
+    \nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} &= \bm{0},\\
+    \nabla\cdot \bm{B} & = 0, \\
+    \nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t} &= \bm{J}.
+    \end{aligned}
+    \right.
+\end{equation}
+
+%-----------------------------------------------------------------------------
+% FIGURES, TABLES AND ALGORITHMS
+%-----------------------------------------------------------------------------
+\section{Figures, Tables and Algorithms}
+
+Figures, Tables and Algorithms have to contain a Caption that describes their content, and have to be properly referred in the text.
+
+\subsection{Figures}
+\label{subsec:figures}
+
+For including pictures in your text you can use \texttt{TikZ} for high-quality hand-made figures \cite{tikz},
+or just include them with the command
+\begin{verbatim}
+\includegraphics[options]{filename.xxx}
+\end{verbatim}
+Here xxx is the correct format, e.g.  \verb|.png|, \verb|.jpg|, \verb|.eps|, \dots.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.3\textwidth]{logo_polimi_scritta.eps}
+    \caption{Caption of the Figure.}
+    \label{fig:quadtree}
+\end{figure}
+
+Thanks to the \texttt{\textbackslash subfloat} command, a single figure, such as Figure~\ref{fig:quadtree},
+can contain multiple sub-figures with their own caption and label, e.g. Figure~\ref{fig:polimi_logo1} and Figure~\ref{fig:polimi_logo2}. 
+
+\begin{figure}[H]
+    \centering
+    \subfloat[One PoliMi logo.\label{fig:polimi_logo1}]{
+        \includegraphics[scale=0.5]{Images/logo_polimi_scritta.eps}
+    }
+    \quad
+    \subfloat[Another one PoliMi logo.\label{fig:polimi_logo2}]{
+        \includegraphics[scale=0.5]{Images/logo_polimi_scritta2.eps}
+    }
+    \caption[]{Caption of the Figure.}
+    \label{fig:quadtree2}
+\end{figure}
+
+\subsection{Tables}
+\label{subsec:tables}
+
+Within the environments \texttt{table} and  \texttt{tabular} you can create very fancy tables as the one shown in Table~\ref{table:example}.
+
+\begin{table}[H]
+    \caption*{\textbf{Example of Table (optional)}}
+    \centering 
+    \begin{tabular}{|p{3em} c c c |}
+    \hline
+    \rowcolor{bluePoli!40}
+     & \textbf{column1} & \textbf{column2} & \textbf{column3} \T\B \\
+    \hline \hline
+    \textbf{row1} & 1 & 2 & 3 \T\B \\
+    \textbf{row2} & $\alpha$ & $\beta$ & $\gamma$ \T\B\\
+    \textbf{row3} & alpha & beta & gamma \B\\
+    \hline
+    \end{tabular}
+    \\[10pt]
+    \caption{Caption of the Table.}
+    \label{table:example}
+\end{table}
+
+You can also consider to highlight selected columns or rows in order to make tables more readable.
+Moreover, with the use of \texttt{table*} and the option \texttt{bp} it is possible to align them at the bottom of the page. One example is presented in Table~\ref{table:exampleC}. 
+
+\begin{table*}[bp]
+\centering 
+    \begin{tabular}{|p{3em} | c | c | c | c | c | c|}
+    \hline
+%    \rowcolor{bluePoli!40}
+     & \textbf{column1} & \textbf{column2} & \textbf{column3} & \textbf{column4} & \textbf{column5} & \textbf{column6} \T\B \\
+    \hline \hline
+    \textbf{row1} & 1 & 2 & 3 & 4 & 5 & 6 \T\B\\
+    \textbf{row2} & a & b & c & d & e & f \T\B\\
+    \textbf{row3} & $\alpha$ & $\beta$ & $\gamma$ & $\delta$ & $\phi$ & $\omega$ \T\B\\
+    \textbf{row4} & alpha & beta & gamma & delta & phi & omega \B\\
+    \hline
+    \end{tabular}
+    \\[10pt]
+    \caption{Highlighting the columns}
+    \label{table:exampleC}
+\end{table*}
+
+\subsection{Algorithms}
+\label{subsec:algorithms}
+
+Pseudo-algorithms can be written in \LaTeX{} with the \texttt{algorithm} and \texttt{algorithmic} packages.
+An example is shown in Algorithm~\ref{alg:var}.
+\begin{algorithm}[H]
+\label{alg:example}
+\caption{Name of the Algorithm}
+\label{alg:var}
+\label{protocol1}
+\begin{algorithmic}[1]
+\STATE Initial instructions
+\FOR{$for-condition$}
+\STATE{Some instructions}
+\IF{$if-condition$}
+\STATE{Some other instructions}
+\ENDIF
+\ENDFOR
+\WHILE{$while-condition$}
+\STATE{Some further instructions}
+\ENDWHILE
+\STATE Final instructions
+\end{algorithmic}
+\end{algorithm} 
+
+\section{Some further useful suggestions}
+
+Theorems have to be formatted as follows:
+\begin{theorem}
+\label{a_theorem}
+Write here your theorem. 
+\end{theorem}
+\textit{Proof.} If useful you can report here the proof.
+\vspace{0.3cm} % Insert vertical space
+
+Propositions have to be formatted as follows:
+\begin{proposition}
+Write here your proposition.
+\end{proposition}
+\vspace{0.3cm} % Insert vertical space
+
+How to insert itemized lists:
+\begin{itemize}
+    \item first item;
+    \item second item.
+\end{itemize}
+How to write numbered lists:
+\begin{enumerate}
+    \item first item;
+    \item second item.
+\end{enumerate}
+
+\section{Use of copyrighted material}
+
+Each student is responsible for obtaining copyright permissions, if necessary, to include published material in the thesis.
+This applies typically to third-party material published by someone else.
+
+\section{Plagiarism}
+
+You have to be sure to respect the rules on Copyright and avoid an involuntary plagiarism.
+It is allowed to take other persons' ideas only if the author and his original work are clearly mentioned.
+As stated in the Code of Ethics and Conduct, Politecnico di Milano \textit{promotes the integrity of research,
+condemns manipulation and the infringement of intellectual property}, and gives opportunity to all those
+who carry out research activities to have an adequate training on ethical conduct and integrity while doing research.
+To be sure to respect the copyright rules, read the guides on Copyright legislation and citation styles available
+at:
+\begin{verbatim}
+https://www.biblio.polimi.it/en/tools/courses-and-tutorials
+\end{verbatim}
+You can also attend the courses which are periodically organized on "Bibliographic citations and bibliography management".
+
+%-----------------------------------------------------------------------------
+% CONCLUSION
+%-----------------------------------------------------------------------------
+\section{Conclusions}
+\color{black}
+A final section containing the main conclusions of your research/study
+and possible future developments of your work have to be inserted in the section ``Conclusions''.
+
+\section{Bibliography and citations}
+Your thesis must contain a suitable Bibliography which lists all the sources consulted on developing the work.
+The list of references is placed at the end of the manuscript after the chapter containing the conclusions.
+It is suggested to use the BibTeX package and save the bibliographic references in the file \verb|bibliography.bib|.
+This is indeed a database containing all the information about the references. To cite in your manuscript, use the \verb|\cite{}| command as follows:
+\\
+\textit{Here is how you cite bibliography entries: \cite{knuth74}, or multiple ones at once: \cite{knuth92,lamport94}}.
+\\
+The bibliography and list of references are generated automatically by running BibTeX \cite{bibtex}.
+
+\end{comment}
+%-----------------------------------------------------------------------------
+% BIBLIOGRAPHY
+%-----------------------------------------------------------------------------
+\bibliography{bibliography.bib}
+
+\appendix
+\section{Appendix A}
+If you need to include an appendix to support the research in your thesis, you can place it at the end of the manuscript.
+An appendix contains supplementary material (figures, tables, data, codes, mathematical proofs, surveys, \dots)
+which supplement the main results contained in the previous sections.
+
+\section{Appendix B}
+It may be necessary to include another appendix to better organize the presentation of supplementary material.
+
+\begin{comment}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%     ABSTRACT IN ITALIAN LANGUAGE AND ACKNOWLEDGMENTS     %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\cleardoublepage
+
+%-----------------------------------------------------------------------------
+% SOMMARIO
+%-----------------------------------------------------------------------------
+\section*{Abstract in lingua italiana}
+Qui va l'Abstract in lingua italiana della tesi seguito dalla lista di parole chiave.
+\vspace{15pt}
+\begin{tcolorbox}[arc=0pt, boxrule=0pt, colback=bluePoli!60, width=\textwidth, colupper=white]
+    \textbf{Parole chiave:} qui, le parole chiave, della tesi, in italiano 
+\end{tcolorbox}
+
+%-----------------------------------------------------------------------------
+% ACKNOWLEDGEMENTS
+%-----------------------------------------------------------------------------
+\section*{Acknowledgements}
+Here you might want to acknowledge someone.
+
+\end{comment}
+
+%-------------------------------------------------------------------------
+%	END OF YOUR DOCUMENT
+%-------------------------------------------------------------------------
+\end{document}
