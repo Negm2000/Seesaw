@@ -20,6 +20,8 @@ slprj/
 
 # LaTeX build output (all artifacts go here)
 build/
+*.bak*
+indent.log
 
 # Project logs and temporary files
 *.txt

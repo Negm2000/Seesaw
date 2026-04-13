@@ -725,7 +725,7 @@ The four poles from the previous design are retained and one integrator pole is 
 	\mathbf{K}_a = \begin{bmatrix} 121.29 & 8.50 & -140.79 & -51.41 & -28.63 \end{bmatrix}
 \end{equation}
 
-Under the same bias-load test, steady-state tilt is eliminated ($\theta_{ss} \approx 0^\circ$). The cost: settling increases to $5.29$ s and peak voltage rises to $11.06$ V.
+Under the same 100 g bias-load test, steady-state tilt is eliminated ($\theta_{ss} \approx 0^\circ$), as shown in Fig.~\ref{fig:bias_integral}. The cart settles at about $3.3$ cm to maintain balance, and peak voltage stays below $2.1$ V.
 
 \begin{figure}[H]
 	\centering
@@ -745,8 +745,14 @@ The loop transfer function $L(s) = \mathbf{K}(sI - A)^{-1}B$ yields a phase marg
 	\label{fig:loop_final}
 \end{figure}
 
-\subsubsection{Simulink Model}
-\textcolor{red}{TODO: build the practical controller using measured }$x_c$\textcolor{red}{ and }$\theta$\textcolor{red}{, estimate }$\dot{x}_c$\textcolor{red}{ and }$\dot{\theta}$\textcolor{red}{ with filtered derivatives, and validate the balance controller against the official disturbance test before deployment.}
+\subsubsection{Implementation and Hardware Results}
+
+On hardware, only $x_c$ and $\theta$ are measured by encoders. The velocities $\dot{x}_c$ and $\dot{\theta}$ are obtained by differentiating the encoder signals through a first-order low-pass filter ($\omega_f = 100$ rad/s) to attenuate sensor noise.
+
+% TODO: Simulink block diagram screenshot
+% TODO: Hardware test — initial tilt response (plot + table: settling time, peak theta, peak V_m)
+% TODO: Hardware test — bias load response with integral action
+% TODO: Compare simulation vs hardware results, discuss discrepancies
 
 \section{Experience 3: Periodic trajectory tracking for the body and lift-up}
 
