@@ -1,0 +1,1653 @@
+<head>
+<title>SEESAW.html</title>
+<!-- Created by Maple 15.00, IBM INTEL NT -->
+</head>
+<body bgcolor="FFFFFF">
+<basefont size="3">
+<a href="SEESAW.html#MapleAutoBookmark1">SEESAW.mws</a>
+<ul>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark2">Description</a></font>
+<ul>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark3">The Quanser_Tools Package</a></font>
+</ul>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark4">Worksheet Initialization</a></font>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark5">Notations</a></font>
+<ul>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark6">Generalized Coordinates: <br />
+q[i]'s</a></font>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark7">Absolute Cartesian Coordinates of the Centre Of Gravity</a></font>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark8">State-Space Variables</a></font>
+</ul>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark9">Total Potential and Kinetic Energies of the System</a></font>
+<ul>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark10">Total Potential Energy: <br />
+V[T];</a></font>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark11">Total Kinetic Energy: <br />
+T[T];</a></font>
+</ul>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark12">Generalized Forces: <br />
+Q[i]'s</a></font>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark13">Euler-Lagrange's Equations</a></font>
+<ul>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark14">Linearization in the EOM's of the Trigonometric Functions</a></font>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark15">Additional Insight: Inertia (or mass) Matrix: Fi</a></font>
+</ul>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark16">Solving the Euler-Lagrange's Equations</a></font>
+<ul>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark17">Reverse State Substitution for Pretty Display of the Solved EOM's</a></font>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark18">Solution to the Non-Linear Equations of Motion</a></font>
+<li><font size="-2"><a href="SEESAW.html#MapleAutoBookmark19">Solution to the Linearized EOM's</a></font>
+</ul>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark20">Determine the System State-Space Matrices: A, B, C, and D</a></font>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark21">Write A, B, C, and D to a Matlab file</a></font>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark22">Procedure Printing</a></font>
+<li><font size="-1"><a href="SEESAW.html#MapleAutoBookmark23">Formula to Estimate J[sw] from the "inverted" seesaw free oscillations</a></font>
+</ul>
+<hr/>
+<a name="MapleAutoBookmark1" />
+<p align="center">
+<b><u><font color="#000000" size="6">Dynamic Equations for the SEESAW-E System</font></u></b>
+</p>
+<p align="center">
+<i><font color="#000000">©</font></i>
+<i><font color="#000000">&nbsp;2012 Quanser Consulting Inc.</font></i>
+</p>
+<p align="center">
+<font color="#000000">URL: </font>
+<a href="http://www.quanser.com">http://www.quanser.com</a></p>
+<p align="center">
+<font color="#000000" size="2">NOTE: This worksheet presents the general dynamic equations modelling a linear track-and-cart system mounted on top of a seesaw.</font>
+</p>
+<p align="center"><a name="Description" />
+</p>
+<dl><a name="MapleAutoBookmark2" />
+<p align="left">
+<b><font color="#000000" size="5">Description</font></b>
+</p>
+<ul><li>
+<font color="#000000">This worksheet presents the general dynamic equations modelling a seesaw on top of which a linear cart is mounted.</font>
+</li>
+<li>
+<font color="#000000">Specifically, this worksheet is used to derive the state-space matrices for the Quanser's </font>
+<b><font color="#000000">Seesaw</font></b>
+<font color="#000000">&nbsp;experiment.</font>
+</li>
+<li>
+<font color="#000000">The Lagrange's method is used to obtain the dynamic model of the system.</font>
+</li>
+<dl><a name="MapleAutoBookmark3" />
+</ul>
+<p align="left">
+<b><font color="#000000" size="4">The </font></b>
+<i><b><font color="#000000" size="4">Quanser_Tools</font></b></i>
+<b><font color="#000000" size="4">&nbsp;Package</font></b>
+</p>
+<ul><li>
+<font color="#000000">The </font>
+<i><font color="#000000">Quanser_Tools</font></i>
+<font color="#000000">&nbsp;module defines generic procedures and data in relation to determining the state-space representation of all the Quanser experiments. Specifically, this means deriving and solving the Lagrange's equations of the Quanser systems.</font>
+</li>
+<li>
+<font color="#000000">The </font>
+<i><font color="#000000">quanser</font></i>
+<font color="#000000">&nbsp;repository containing the </font>
+<i><font color="#000000">Quanser_Tools</font></i>
+<font color="#000000">&nbsp;package is implemented in the 2 following files: </font>
+<i><font color="#000000">quanser.ind</font></i>
+<font color="#000000">&nbsp;and </font>
+<i><font color="#000000">quanser.lib.</font></i>
+<font color="#000000">&nbsp;If these two files are not readily available, they can be generated by executing the Maple worksheet titled: </font>
+<i><font color="#000000">quanser_tools.mws</font></i>
+<font color="#000000">.</font>
+</li>
+<li>
+<b><font color="#000000">To install</font></b>
+<font color="#000000">&nbsp;the </font>
+<i><font color="#000000">Quanser_Tools</font></i>
+<font color="#000000">&nbsp;package, copy the two files </font>
+<i><font color="#000000">quanser.ind</font></i>
+<font color="#000000">&nbsp;and </font>
+<i><font color="#000000">quanser.lib</font></i>
+<font color="#000000">&nbsp;&nbsp;into a directory of your choice, like for example: "C:\Program Files\Quanser\Maple Repository". </font>
+</li>
+<li>
+<b><font color="#000000">To use</font></b>
+<font color="#000000">&nbsp;the </font>
+<i><font color="#000000">Quanser_Tools</font></i>
+<font color="#000000">&nbsp;package in a Maple worksheet, add the path to its disk location to the Maple global variable </font>
+<i><font color="#000000">libname</font></i>
+<font color="#000000">. For example, this can be achieved by the following Maple command: <br />
+libname := </font>
+<i><font color="#000000">&nbsp;"C:/Program Files/Quanser/Maple Repository", libname:</font></i>
+</li>
+</dl></ul>
+<p align="left">
+</p>
+</dl><dl><a name="MapleAutoBookmark4" />
+<p align="left">
+<b><font color="#000000" size="5">Worksheet Initialization</font></b>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">restart: interface( imaginaryunit = j ): </font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">with( LinearAlgebra ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">libname := "C:/Program Files/Quanser/Maple Repository", ".", libname:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">with( Quanser_Tools );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mfenced open='[' close=']'>
+    <mi>HTM</mi>
+    <mi>deriveA</mi>
+    <mi>deriveB</mi>
+    <mi>deriveF</mi>
+    <mi>kinetic_energy</mi>
+    <mi>lagrange_equations</mi>
+    <mi>moment_of_inertia</mi>
+    <mi>n_norm</mi>
+    <mi>potential_energy</mi>
+    <mi>write_ABCD_to_Mfile</mi>
+  </mfenced>
+</math>
+</p>
+<p align="left">
+<font color="#000000">environment variable representing the order of series calculations</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Order := 2:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+</dl><dl><a name="MapleAutoBookmark5" />
+<p align="left"><a name="Notations" />
+<b><font color="#000000" size="5">Notations</font></b>
+</p>
+<dl><a name="MapleAutoBookmark6" />
+<p align="left">
+<b><font color="#000000" size="4">Generalized Coordinates: </font></b>
+<img src="images/SEESAW1.gif" width="29" height="36" alt="q[i]" align="middle" />
+<b><font color="#000000" size="4">'s</font></b>
+</p>
+<p align="left">
+<font color="#000000">The generalized coordinates are also called Lagrangian coordinates.</font>
+</p>
+<p align="left">
+<img src="images/SEESAW2.gif" width="50" height="32" alt="x[c](t)" align="middle" />
+<font color="#000000">&nbsp;= &nbsp;driving cart (i.e. IP02 or IP01) linear position: the cart zero position is defined at mid-stroke, at the system's quiescent point of operation.</font>
+</p>
+<p align="left">
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mrow>
+    <mi>&theta;</mi>
+    <mo>&ApplyFunction;</mo>
+    <mfenced>
+      <mi>t</mi>
+    </mfenced>
+  </mrow>
+</math>
+<font color="#000000">&nbsp;= Seesaw tilt angle about the horizontal: the zero angle [mod </font>
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mrow>
+    <mn>2</mn>
+    <mo>&InvisibleTimes;</mo>
+    <mi>&pi;</mi>
+  </mrow>
+</math>
+<font color="#000000">] is defined when the seesaw is in the perfect horizontal position.</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">q := [ x[c](t), theta(t) ];</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW3.gif" width="127" height="27" alt="q := [x[c](t), theta(t)]" />
+</p>
+<p align="left">
+<font color="#000000">Nq = number of Lagrangian coordinates (e.g. here, it is Nq = 2)</font>
+</p>
+<p align="left">
+<font color="#000000">Nq is also the number of position states.</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Nq := nops( q ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">qd = first-order time derivative of the generalized coordinates, e.g. position and angular velocities</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">qd := map( diff, q, t );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW4.gif" width="171" height="45" alt="qd := [diff(x[c](t),t), diff(theta(t),t)]" />
+</p>
+</dl><p align="left">
+</p>
+<dl><a name="MapleAutoBookmark7" />
+<p align="left">
+<b><font color="#000000" size="4">Absolute Cartesian Coordinates of the Centre Of Gravity </font></b>
+</p>
+<p align="left">
+<font color="#000000">conventions:</font>
+</p>
+<p align="left">
+<font color="#000000">1) </font>
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mrow>
+    <mi>&theta;</mi>
+    <mo>=</mo>
+    <mn>0</mn>
+  </mrow>
+</math>
+<font color="#000000">&nbsp;corresponds to seesaw perfectly horizontal.</font>
+</p>
+<p align="left">
+<font color="#000000">2) positive rotation is CCW when facing the cart.</font>
+</p>
+<p align="left">
+<font color="#000000">absolute Cartesian coordinates of the Centre Of Gravity (COG) of the seesaw-plus-IP01-or-IP02-track system</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">X[sw] := - D[c] * sin( q[2] );<br />
+Y[sw] := D[c] * cos( q[2] );<br />
+</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW5.gif" width="151" height="27" alt="X[sw] := -D[c]*sin(theta(t))" />
+</p>
+<p align="center">
+<img src="images/SEESAW6.gif" width="145" height="27" alt="Y[sw] := D[c]*cos(theta(t))" />
+</p>
+<p align="left">
+<font color="#000000">absolute Cartesian coordinates of the IP01 or IP02 linear cart's Centre Of Gravity (COG)</font>
+</p>
+<p align="left">
+<font color="#000000">remark: the cart slides on top of the seesaw</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">X[c] := - D[T] * sin( q[2] ) + q[1] * cos( q[2] );<br />
+Y[c] := D[T] * cos( q[2] ) + q[1] * sin( q[2] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW7.gif" width="260" height="27" alt="X[c] := -D[T]*sin(theta(t))+x[c](t)*cos(theta(t))" />
+</p>
+<p align="center">
+<img src="images/SEESAW8.gif" width="249" height="27" alt="Y[c] := D[T]*cos(theta(t))+x[c](t)*sin(theta(t))" />
+</p>
+<p align="left">
+<font color="#000000">absolute Cartesian velocity coordinates of the IP01 or IP02 linear cart's COG</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xd[c] := diff( X[c], t );<br />
+Yd[c] := diff( Y[c], t );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW9.gif" width="546" height="45" alt="Xd[c] := -D[T]*cos(theta(t))*diff(theta(t),t)+diff(x[c](t),t)*cos(theta(t))-x[c](t)*sin(theta(t))*diff(theta(t),t)" />
+</p>
+<p align="center">
+<img src="images/SEESAW10.gif" width="539" height="45" alt="Yd[c] := -D[T]*sin(theta(t))*diff(theta(t),t)+diff(x[c](t),t)*sin(theta(t))+x[c](t)*cos(theta(t))*diff(theta(t),t)" />
+</p>
+<p align="left">
+</p>
+</dl><dl><a name="MapleAutoBookmark8" />
+<p align="left">
+<b><font color="#000000" size="4">State-Space Variables</font></b>
+</p>
+<ul><li>
+<font color="#000000">The chosen states should at least include the generalized coordinates and their first-time derivatives.</font>
+</li>
+<li>
+<font color="#000000">X is the state vector.</font>
+</li>
+<li>
+<font color="#000000">In the state vector X: Lagrangian coordinates are first, followed by their first-time derivatives, and finally any other states, as required.</font>
+</li>
+</ul>
+<p align="left">
+<font color="#000000">Substitution sets for the states (to obtain time-independent state equations).</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">subs_Xq := { seq( q[i] = X[i], i=1..Nq ) };<br />
+subs_Xqd := { seq( qd[i] = X[i+Nq], i=1..Nq ) };</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW11.gif" width="248" height="27" alt="subs_Xq := {theta(t) = X[2], x[c](t) = X[1]}" />
+</p>
+<p align="center">
+<img src="images/SEESAW12.gif" width="290" height="45" alt="subs_Xqd := {diff(theta(t),t) = X[4], diff(x[c](t),t) = X[3]}" />
+</p>
+<p align="left">
+<font color="#000000">Substitution set for the input(s).</font>
+</p>
+<p align="left">
+<font color="#000000">set the input to be the motor voltage:</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#subs_U := { V[m] = U[1] }:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">set the input to be the cart's driving force: </font>
+<img src="images/SEESAW13.gif" width="33" height="32" alt="F[c]" align="middle" />
+<font color="#000000">&nbsp;(if not expressed as a function of the motor voltage): </font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">subs_U := { F[c] = U[1] }:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">Nu = number of inputs; U = input (row) vector (e.g. U = [ V[m] ] )</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Nu := nops( subs_U ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">substitution set for the position states' second time derivatives</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">subs_Xqdd := { seq( diff( q[i], t$2 ) = &nbsp;Xd[i+Nq], i=1..Nq ) };</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW14.gif" width="333" height="63" alt="subs_Xqdd := {diff(theta(t),`$`(t,2)) = Xd[4], diff(x[c](t),`$`(t,2)) = Xd[3]}" />
+</p>
+<p align="left">
+<font color="#000000">second time derivatives of the position states (written as time-independent variables).</font>
+</p>
+<p align="left">
+<font color="#000000">The set of unknowns is obtained from this list to solve the Lagrange's equations of motion.</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xqdd := [ seq( Xd[i+Nq], i=1..Nq ) ];</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW15.gif" width="144" height="27" alt="Xqdd := [Xd[3], Xd[4]]" />
+</p>
+<p align="left">
+<font color="#000000">substitution set to linearize the state-space matrices (i.e. A and B) </font>
+</p>
+<p align="left">
+<font color="#000000">about the quiescent null state vector (small-displacement theory)</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">subs_XUzero := { seq( X[i] = 0, i=1..2*Nq ), seq( U[i] = 0, i=1..Nu ) }:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">Nx = dim( X ) = total number of states (should be greater than or equal to: 2 * Nq)</font>
+</p>
+<p align="left">
+<font color="#000000">Ny = chosen number of outputs</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Nx := 2 * Nq + 0:<br />
+Ny := Nq:</font></b>
+</td></tr>
+</table>
+</p>
+</dl></dl><dl><a name="MapleAutoBookmark9" />
+<p align="left">
+<b><font color="#000000" size="5">Total Potential and Kinetic Energies of the System</font></b>
+</p>
+<p align="left">
+<font color="#000000">The total potential and kinetic energies are needed to calculate the Lagrangian of the system.</font>
+</p>
+<dl><a name="MapleAutoBookmark10" />
+<p align="left">
+<b><font color="#000000" size="4">Total Potential Energy: </font></b>
+<img src="images/SEESAW16.gif" width="39" height="36" alt="V[T]" align="middle" />
+<b><font color="#000000" size="4">&nbsp;</font></b>
+</p>
+<p align="left">
+<font color="#000000">The total potential energy can be expressed in terms of the generalized coordinates alone.</font>
+</p>
+<p align="left">
+<font color="#000000">Ve[T] = Total Elastic Potential Energy of the system</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Ve[T] := 0: </font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">IP01 or IP02 cart's gravitational potential energy</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Vg[c] := potential_energy( 'gravity', m[c], g, Y[c] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW17.gif" width="308" height="27" alt="Vg[c] := m[c]*g*(D[T]*cos(theta(t))+x[c](t)*sin(theta(t)))" />
+</p>
+<p align="left">
+<font color="#000000">gravitational potential energy of the one-seesaw-plus-one-IP01-or-IP02-track system</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Vg[sw] := potential_energy( 'gravity', m[sw], g, Y[sw] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW18.gif" width="200" height="27" alt="Vg[sw] := m[sw]*g*D[c]*cos(theta(t))" />
+</p>
+<p align="left">
+<font color="#000000">Vg[T] = Total Gravitational Potential Energy of the system</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Vg[T] := Vg[c] + Vg[sw]:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">V[T] = Total Potential Energy of the system</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">V[T] := simplify( Ve[T] + Vg[T] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW19.gif" width="459" height="27" alt="V[T] := g*(m[c]*D[T]*cos(theta(t))+m[c]*x[c](t)*sin(theta(t))+m[sw]*D[c]*cos(theta(t)))" />
+</p>
+<p align="left">
+</p>
+</dl><dl><a name="MapleAutoBookmark11" />
+<p align="left">
+<b><font color="#000000" size="4">Total Kinetic Energy: </font></b>
+<img src="images/SEESAW20.gif" width="38" height="36" alt="T[T]" align="middle" />
+</p>
+<p align="left">
+<font color="#000000">The total kinetic energy can be expressed in terms of the generalized coordinates and their first-time derivatives.</font>
+</p>
+<p align="left">
+<font color="#000000">The cart's directions of translation and rotation are orthogonal.</font>
+</p>
+<p align="left">
+<img src="images/SEESAW21.gif" width="38" height="32" alt="Tr[c]" align="middle" />
+<font color="#000000">&nbsp;= kinetic energy due to rotation tied to the motorized cart</font>
+</p>
+<p align="left">
+<img src="images/SEESAW22.gif" width="35" height="32" alt="J[m]" align="middle" />
+<font color="#000000">&nbsp;= motor armature inertia; </font>
+<img src="images/SEESAW23.gif" width="35" height="32" alt="K[g]" align="middle" />
+<font color="#000000">&nbsp;= gear ratio; </font>
+<img src="images/SEESAW24.gif" width="42" height="32" alt="r[mp]" align="middle" />
+<font color="#000000">&nbsp;= motor pinion radius</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Tr[c] := kinetic_energy( 'rotation', J[m], omega[m](t) ): </font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">omega[m](t) := K[g] * qd[1] / r[mp]:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">'Tr[c]' = Tr[c];</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW25.gif" width="202" height="92" alt="Tr[c] = 1/2*J[m]*K[g]^2*diff(x[c](t),t)^2/r[mp]^2" />
+</p>
+<p align="left">
+<font color="#000000">from the IP02 or IP01 parameters: </font>
+<img src="images/SEESAW26.gif" width="71" height="76" alt="J[m]*K[g]^2/(r[mp]^2)" align="middle" />
+<font color="#000000">&nbsp;&lt; 0.14 kg &lt; </font>
+<img src="images/SEESAW27.gif" width="48" height="32" alt="Mm[c]" align="middle" />
+</p>
+<p align="left">
+<font color="#000000">The cart's rotational kinetic energy can be neglected</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Tr[c] := 0:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">or if:</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">M[rc] = J[m] * K[g]^2 / r[mp]^2:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">then</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Tr[c] = 1/2 * m[rc] * qd[1]^2:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">V[c] = IP01 or IP02 Cartesian linear velocity <br />
+Euclidian norm (i.e. magnitude) of the absolute Cartesian (linear) velocity of the IP01 or IP02 cart's COG</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">V[c] := n_norm( [ Xd[c], Yd[c] ], 2 ):<br />
+V[c] := combine( V[c], trig );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW28.gif" width="598" height="61" alt="V[c] := (D[T]^2*diff(theta(t),t)^2-2*D[T]*diff(theta(t),t)*diff(x[c](t),t)+diff(x[c](t),t)^2+x[c](t)^2*diff(theta(t),t)^2)^(1/2)" />
+</p>
+<p align="left">
+<img src="images/SEESAW29.gif" width="37" height="32" alt="Tt[c]" align="middle" />
+<font color="#000000">&nbsp;= translational kinetic energy of the motorized cart (e.g. IP02 or IP01)</font>
+</p>
+<p align="left">
+<img src="images/SEESAW30.gif" width="36" height="32" alt="M[c]" align="middle" />
+<font color="#000000">&nbsp;= cart total mass</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Tt[c] := kinetic_energy( 'translation', m[c], V[c] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW31.gif" width="620" height="58" alt="Tt[c] := 1/2*m[c]*(D[T]^2*diff(theta(t),t)^2-2*D[T]*diff(theta(t),t)*diff(x[c](t),t)+diff(x[c](t),t)^2+x[c](t)^2*diff(theta(t),t)^2)" />
+</p>
+<p align="left">
+<font color="#000000">The motion of the one-seesaw-plus-one-IP01-or-IP02-track system consists only of one rotation (no translation).</font>
+</p>
+<p align="left">
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mrow>
+    <mfrac>
+      <mo>&DifferentialD;</mo>
+      <mrow>
+        <mo>&DifferentialD;</mo>
+        <mi>t</mi>
+      </mrow>
+    </mfrac>
+    <mrow>
+      <mi>&theta;</mi>
+      <mo>&ApplyFunction;</mo>
+      <mfenced>
+        <mi>t</mi>
+      </mfenced>
+    </mrow>
+  </mrow>
+</math>
+<font color="#000000">&nbsp;= seesaw absolute angular velocity</font>
+</p>
+<p align="left">
+<font color="#000000">Tr[sw] = seesaw rotational kinetic kinergy</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Tr[sw] := kinetic_energy( 'rotation', J[sw], qd[2] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW32.gif" width="177" height="58" alt="Tr[sw] := 1/2*J[sw]*diff(theta(t),t)^2" />
+</p>
+<p align="left">
+<img src="images/SEESAW33.gif" width="34" height="32" alt="T[T]" align="middle" />
+<font color="#000000">&nbsp;= Total Kinetic Energy of the system</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">T[T] := combine( Tr[sw] + Tt[c] + Tr[c], trig ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">T[T] := collect( T[T], diff );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW34.gif" width="678" height="58" alt="T[T] := (1/2*J[sw]+1/2*m[c]*D[T]^2+1/2*m[c]*x[c](t)^2)*diff(theta(t),t)^2-m[c]*D[T]*diff(theta(t),t)*diff(x[c](t),t)+1/2*m[c]*diff(x[c](t),t)^2" />
+</p>
+<p align="left">
+</p>
+</dl><p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+</dl><dl><a name="MapleAutoBookmark12" />
+<p align="left">
+<b><font color="#000000" size="5">Generalized Forces: </font></b>
+<img src="images/SEESAW35.gif" width="38" height="48" alt="Q[i]" align="middle" />
+<b><font color="#000000" size="5">'s</font></b>
+</p>
+<p align="left">
+<font color="#000000">The non-conservative forces corresponding to the generalized coordinates are: </font>
+<img src="images/SEESAW36.gif" width="33" height="32" alt="F[c]" align="middle" />
+<font color="#000000">&nbsp;and the viscous damping forces, where</font>
+</p>
+<p align="left">
+<img src="images/SEESAW37.gif" width="33" height="32" alt="F[c]" align="middle" />
+<font color="#000000">&nbsp;= linear force generated by the motorized cart (e.g. IP02, IP01)</font>
+</p>
+<p align="left">
+<font color="#000000">Bsw = seesaw viscous friction torque coefficient (a.k.a. viscous damping)</font>
+</p>
+<p align="left">
+<font color="#000000">Beq = cart viscous damping force coefficient</font>
+</p>
+<p align="left">
+<img src="images/SEESAW38.gif" width="40" height="32" alt="B[eq]" align="middle" />
+<font color="#000000">&nbsp;= 0 and </font>
+<img src="images/SEESAW39.gif" width="42" height="32" alt="B[sw]" align="middle" />
+<font color="#000000">&nbsp;= 0 if both viscous dampings are neglected</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#B[eq] = 0: B[p] = 0:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">Q[i] = generalized force applied on generalized coordinate q[i]</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Q[1] := F[c] - B[eq] * qd[1];</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW40.gif" width="184" height="45" alt="Q[1] := F[c]-B[eq]*diff(x[c](t),t)" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Q[2] := - B[sw] * qd[2];</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW41.gif" width="154" height="45" alt="Q[2] := -B[sw]*diff(theta(t),t)" />
+</p>
+<p align="left">
+<img src="images/SEESAW42.gif" width="33" height="32" alt="F[c]" align="middle" />
+<font color="#000000">&nbsp;= Linear force produced by the motor at the motor pinion (i.e. after the gearbox): cart driving force</font>
+</p>
+<p align="left">
+<img src="images/SEESAW43.gif" width="33" height="32" alt="F[c]" align="middle" />
+<font color="#000000">&nbsp;is calculated in the Maple worksheet titled: </font>
+<i><font color="#000000">IP01_2_Equations.mws</font></i>
+<font color="#000000">.<br />
+rm: comment the following line out if U = F[c], uncomment it if U = V[m]</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#F[c] := eta[g] * K[g] * eta[m] * K[t] * ( V[m] * r[mp] - K[g] * K[m] * qd[1] ) / R[m] / r[mp]^2;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Q := [ seq( Q[i], i=1..Nq ) ];</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW44.gif" width="299" height="45" alt="Q := [F[c]-B[eq]*diff(x[c](t),t), -B[sw]*diff(theta(t),t)]" />
+</p>
+</dl><dl><a name="MapleAutoBookmark13" />
+<p align="left">
+<b><font color="#000000" size="5">Euler-Lagrange's Equations</font></b>
+</p>
+<p align="left">
+<font color="#000000">For a </font>
+<i><font color="#000000">N</font></i>
+<font color="#000000">-DOF system, the Lagrange's equations can be written:</font>
+</p>
+<p align="left">
+<img src="images/SEESAW45.gif" width="217" height="58" alt="Diff(Diff(L,qdot[i]),t)-Diff(L,q[i]) = Q[i]" align="middle" />
+<font color="#000000">&nbsp;&nbsp;for </font>
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mrow>
+    <mi>i</mi>
+    <mo>=</mo>
+    <mn>1</mn>
+  </mrow>
+</math>
+<font color="#000000">&nbsp;through </font>
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mi>N</mi>
+</math>
+</p>
+<p align="left">
+<font color="#000000">where:</font>
+</p>
+<p align="left">
+<font color="#000000">&nbsp;</font>
+<img src="images/SEESAW46.gif" width="31" height="32" alt="Q[i]" align="middle" />
+<font color="#000000">'s are special combinations of external forces and called the </font>
+<i><font color="#000000">generalized forces,</font></i>
+</p>
+<p align="left">
+<i><font color="#000000">&nbsp;</font></i>
+<img src="images/SEESAW47.gif" width="32" height="32" alt="q[1]" align="middle" />
+<font color="#000000">, ..., </font>
+<img src="images/SEESAW48.gif" width="35" height="32" alt="q[N]" align="middle" />
+<font color="#000000">, are </font>
+<i><font color="#000000">N </font></i>
+<font color="#000000">independent coordinates chosen to describe the system and called the </font>
+<i><font color="#000000">generalized coordinates</font></i>
+<font color="#000000">,</font>
+</p>
+<p align="left">
+<font color="#000000">&nbsp;and </font>
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mi>L</mi>
+</math>
+<font color="#000000">&nbsp;is the </font>
+<i><font color="#000000">Lagrangian</font></i>
+<font color="#000000">&nbsp;of the system.</font>
+</p>
+<p align="left">
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mi>L</mi>
+</math>
+<font color="#000000">&nbsp;is defined by:</font>
+</p>
+<p align="left">
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mrow>
+    <mi>L</mi>
+    <mo>=</mo>
+    <mrow>
+      <mi>T</mi>
+      <mo>-</mo>
+      <mi>U</mi>
+    </mrow>
+  </mrow>
+</math>
+</p>
+<p align="left">
+<font color="#000000">where </font>
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mi>T</mi>
+</math>
+<font color="#000000">&nbsp;is the total kinetic energy of the system and </font>
+<math xmlns='http://www.w3.org/1998/Math/MathML'>
+  <mi>U</mi>
+</math>
+<font color="#000000">&nbsp;the total potential energy of the system.</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EOM_orig := lagrange_equations( T[T], V[T], q, Q ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">this is to display the EOM's</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EOM_orig := collect( EOM_orig, { seq( diff( q[i], t$2 ), i=1..Nq ), seq( diff( q[i], t ), i=1..Nq ), seq( q[i], i=1..Nq ) } );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW49.gif" width="759" height="67" alt="EOM_orig := [-m[c]*D[T]*diff(theta(t),`$`(t,2))+m[c]*diff(x[c](t),`$`(t,2))-m[c]*x[c](t)*diff(theta(t),t)^2+g*m[c]*sin(theta(t)) = F[c]-B[eq]*diff(x[c](t),t), (J[sw]+m[c]*D[T]^2+m[c]*x[c](t)^2)*diff(th..." />
+<br />
+<img src="images/SEESAW50.gif" width="785" height="63" alt="EOM_orig := [-m[c]*D[T]*diff(theta(t),`$`(t,2))+m[c]*diff(x[c](t),`$`(t,2))-m[c]*x[c](t)*diff(theta(t),t)^2+g*m[c]*sin(theta(t)) = F[c]-B[eq]*diff(x[c](t),t), (J[sw]+m[c]*D[T]^2+m[c]*x[c](t)^2)*diff(th..." />
+<br />
+<img src="images/SEESAW51.gif" width="421" height="67" alt="EOM_orig := [-m[c]*D[T]*diff(theta(t),`$`(t,2))+m[c]*diff(x[c](t),`$`(t,2))-m[c]*x[c](t)*diff(theta(t),t)^2+g*m[c]*sin(theta(t)) = F[c]-B[eq]*diff(x[c](t),t), (J[sw]+m[c]*D[T]^2+m[c]*x[c](t)^2)*diff(th..." />
+</p>
+<p align="left">
+<font color="#000000">Express the Euler-Lagrange equations of motion as functions of the states:</font>
+</p>
+<p align="left">
+<font color="#000000">1) substitute (i.e. name) the acceleration states first! </font>
+</p>
+<p align="left">
+<font color="#000000">2) then substitute the velocity states!</font>
+</p>
+<p align="left">
+<font color="#000000">3) and only after, the position states, and the inputs!</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EOM_states := subs( subs_Xqd, subs( subs_Xqdd, EOM_orig ) ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EOM_states := subs( subs_Xq, subs_U, EOM_states );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW52.gif" width="563" height="29" alt="EOM_states := [-m[c]*D[T]*Xd[4]+m[c]*Xd[3]-m[c]*X[1]*X[4]^2+g*m[c]*sin(X[2]) = U[1]-B[eq]*X[3], (J[sw]+m[c]*D[T]^2+m[c]*X[1]^2)*Xd[4]+2*m[c]*X[1]*X[3]*X[4]-g*m[c]*D[T]*sin(X[2])+g*m[c]*X[1]*cos(X[2])-g..." />
+<br />
+<img src="images/SEESAW53.gif" width="881" height="29" alt="EOM_states := [-m[c]*D[T]*Xd[4]+m[c]*Xd[3]-m[c]*X[1]*X[4]^2+g*m[c]*sin(X[2]) = U[1]-B[eq]*X[3], (J[sw]+m[c]*D[T]^2+m[c]*X[1]^2)*Xd[4]+2*m[c]*X[1]*X[3]*X[4]-g*m[c]*D[T]*sin(X[2])+g*m[c]*X[1]*cos(X[2])-g..." />
+<br />
+<img src="images/SEESAW54.gif" width="21" height="20" alt="EOM_states := [-m[c]*D[T]*Xd[4]+m[c]*Xd[3]-m[c]*X[1]*X[4]^2+g*m[c]*sin(X[2]) = U[1]-B[eq]*X[3], (J[sw]+m[c]*D[T]^2+m[c]*X[1]^2)*Xd[4]+2*m[c]*X[1]*X[3]*X[4]-g*m[c]*D[T]*sin(X[2])+g*m[c]*X[1]*cos(X[2])-g..." />
+</p>
+<dl><a name="MapleAutoBookmark14" />
+<p align="left">
+<b><font color="#000000" size="4">Linearization in the EOM's</font></b>
+<font color="#000000" size="4">&nbsp;</font>
+<b><font color="#000000" size="4">of the Trigonometric Functions</font></b>
+</p>
+<p align="left">
+<font color="#000000">Linearization of the equations of motion around the quiescent point of operation.</font>
+</p>
+<p align="left">
+<font color="#000000">Here, linearization around the zero theta angle, i.e. for small-amplitude seesaw oscillations.</font>
+</p>
+<p align="left">
+<font color="#000000">Linearization around: theta0 = 0, and theta_dot0 = 0</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EOM_ser := EOM_states:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">Generalized series expansions of the trigonometric functions is used (for small angles).</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">for i from 1 to Nq do<br />
+&nbsp;&nbsp;EOM_ser[i] := subsop( 1 = convert( series( op( 1, EOM_ser[i] ), X[2] ), polynom ), EOM_ser[i] );<br />
+&nbsp;&nbsp;EOM_ser[i] := simplify( EOM_ser[i] );<br />
+end do:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EOM_ser;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW55.gif" width="434" height="29" alt="[-m[c]*D[T]*Xd[4]+m[c]*Xd[3]-m[c]*X[1]*X[4]^2+g*m[c]*X[2] = U[1]-B[eq]*X[3], Xd[4]*J[sw]+Xd[4]*m[c]*D[T]^2+Xd[4]*m[c]*X[1]^2+2*m[c]*X[1]*X[3]*X[4]+g*m[c]*X[1]-m[c]*D[T]*Xd[3]-X[2]*g*m[c]*D[T]-X[2]*g*m[..." />
+<br />
+<img src="images/SEESAW56.gif" width="817" height="29" alt="[-m[c]*D[T]*Xd[4]+m[c]*Xd[3]-m[c]*X[1]*X[4]^2+g*m[c]*X[2] = U[1]-B[eq]*X[3], Xd[4]*J[sw]+Xd[4]*m[c]*D[T]^2+Xd[4]*m[c]*X[1]^2+2*m[c]*X[1]*X[3]*X[4]+g*m[c]*X[1]-m[c]*D[T]*Xd[3]-X[2]*g*m[c]*D[T]-X[2]*g*m[..." />
+</p>
+<p align="left">
+</p>
+</dl><dl><a name="MapleAutoBookmark15" />
+<p align="left">
+<b><font color="#000000" size="4">Additional Insight: Inertia (or mass) Matrix: Fi</font></b>
+</p>
+<p align="left">
+<font color="#000000">The nonlinear system of equations resulting from the Lagrangian mechanics can be written in the following matrix form:</font>
+</p>
+<p align="left">
+<font color="#000000">F( q ) . qdd + G( q, qd ) . qd + H( q ) . q = L( q, qd, u )</font>
+</p>
+<p align="left">
+<font color="#000000">F, G, and H are called, respectively, the mass, damping, and stiffness matrices.</font>
+</p>
+<p align="left">
+<font color="#000000">They are symmetric in form.</font>
+</p>
+<p align="left">
+<font color="#000000">The inertia (a.k.a. mass) matrix, F, gives indications regarding the coupling existing in the system.</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Fi := Matrix( Nq, Nq ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">for i from 1 to Nq do<br />
+&nbsp;&nbsp;for k from 1 to Nq do<br />
+&nbsp;&nbsp;&nbsp;&nbsp;Fi[ i, k ] := simplify( diff( op( 1, EOM_states[i] ), Xd[k+Nq] ) );<br />
+&nbsp;&nbsp;&nbsp;&nbsp;Fi[ i, k ] := collect( combine( Fi[ i, k ], trig ), cos );<br />
+&nbsp;&nbsp;end do;<br />
+end do:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">'F[i]' = Fi;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW57.gif" width="287" height="66" alt="F[i] = Matrix(%id = 135211900)" />
+</p>
+<p align="left">
+<font color="#000000">Linearization of the inertia matrix for small-displacements</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Fi_lin := Matrix( Nq, Nq ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">for i from 1 to Nq do<br />
+&nbsp;&nbsp;for k from 1 to Nq do<br />
+&nbsp;&nbsp;&nbsp;&nbsp;Fi_lin[ i, k ] := Fi[ i, k ];<br />
+&nbsp;&nbsp;&nbsp;&nbsp;Fi_lin[ i, k ] := convert( series( Fi_lin[ i, k ], X[ 2 ] ), polynom );<br />
+&nbsp;&nbsp;&nbsp;&nbsp;Fi_lin[ i, k ] := subs( subs_XUzero, Fi_lin[ i, k ] );<br />
+&nbsp;&nbsp;end do; <br />
+end do:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">'F_lin' = Fi_lin;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW58.gif" width="240" height="66" alt="F_lin = Matrix(%id = 135212220)" />
+</p>
+<p align="left">
+</p>
+</dl></dl><dl><a name="MapleAutoBookmark16" />
+<p align="left">
+<b><font color="#000000" size="5">Solving the Euler-Lagrange's Equations</font></b>
+</p>
+<dl><a name="MapleAutoBookmark17" />
+<p align="left">
+<b><font color="#000000" size="4">Reverse State Substitution for Pretty Display of the Solved EOM's</font></b>
+</p>
+<p align="left">
+<font color="#000000">only for pretty print</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">subs_Xq_rev := { seq( X[i] = q[i], i=1..Nq ) }:<br />
+subs_Xqd_rev := { seq( X[i+Nq] = qd[i], i=1..Nq ) }:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#subs_U_rev := { U[1] = V[m] }: <br />
+subs_U_rev := { U[1] = F[c] }:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">eom_collect_list := { seq( diff( q[i], t ), i=1..Nq ), seq( q[i], i=1..Nq ), J[sw] };</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW59.gif" width="371" height="45" alt="eom_collect_list := {J[sw], diff(theta(t),t), diff(x[c](t),t), theta(t), x[c](t)}" />
+</p>
+<p align="left">
+</p>
+</dl><p align="left">
+</p>
+<dl><a name="MapleAutoBookmark18" />
+<p align="left">
+<b><font color="#000000" size="4">Solution to the Non-Linear Equations of Motion</font></b>
+</p>
+<p align="left">
+<font color="#000000">Solve the non-linear form of the equations of motion for the states' second time derivatives</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xqdd_solset_nl := solve( convert( EOM_states, set ), convert( Xqdd, set ) ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">assign( Xqdd_solset_nl );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xd_nl[3] := simplify( Xd[3] ):<br />
+Xd_nl[4] := simplify( Xd[4] ):<br />
+unassign( 'Xd[3]', 'Xd[4]' ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">pretty display w.r.t. the named system states</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xd_nl[3] := simplify( subs( subs_U_rev, subs_Xq_rev, subs_Xqd_rev, Xd_nl[3] ) ):<br />
+diff( qd[1], t ) = collect( Xd_nl[3], eom_collect_list );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW60.gif" width="856" height="67" alt="diff(x[c](t),`$`(t,2)) = -((-F[c]+B[eq]*diff(x[c](t),t)-m[c]*x[c](t)*diff(theta(t),t)^2+g*m[c]*sin(theta(t)))*J[sw]+(-m[c]^2*D[T]^2*x[c](t)-m[c]^2*x[c](t)^3)*diff(theta(t),t)^2+(2*m[c]^2*D[T]*x[c](t)*d..." />
+<br />
+<img src="images/SEESAW61.gif" width="669" height="45" alt="diff(x[c](t),`$`(t,2)) = -((-F[c]+B[eq]*diff(x[c](t),t)-m[c]*x[c](t)*diff(theta(t),t)^2+g*m[c]*sin(theta(t)))*J[sw]+(-m[c]^2*D[T]^2*x[c](t)-m[c]^2*x[c](t)^3)*diff(theta(t),t)^2+(2*m[c]^2*D[T]*x[c](t)*d..." />
+<br />
+<img src="images/SEESAW62.gif" width="757" height="58" alt="diff(x[c](t),`$`(t,2)) = -((-F[c]+B[eq]*diff(x[c](t),t)-m[c]*x[c](t)*diff(theta(t),t)^2+g*m[c]*sin(theta(t)))*J[sw]+(-m[c]^2*D[T]^2*x[c](t)-m[c]^2*x[c](t)^3)*diff(theta(t),t)^2+(2*m[c]^2*D[T]*x[c](t)*d..." />
+<br />
+<img src="images/SEESAW63.gif" width="167" height="29" alt="diff(x[c](t),`$`(t,2)) = -((-F[c]+B[eq]*diff(x[c](t),t)-m[c]*x[c](t)*diff(theta(t),t)^2+g*m[c]*sin(theta(t)))*J[sw]+(-m[c]^2*D[T]^2*x[c](t)-m[c]^2*x[c](t)^3)*diff(theta(t),t)^2+(2*m[c]^2*D[T]*x[c](t)*d..." />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xd_nl[4] := simplify( subs( subs_U_rev, subs_Xq_rev, subs_Xqd_rev, Xd_nl[4] ) ):<br />
+diff( qd[2], t ) = collect( Xd_nl[4], eom_collect_list );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW64.gif" width="843" height="67" alt="diff(theta(t),`$`(t,2)) = -(-D[T]*m[c]*x[c](t)*diff(theta(t),t)^2+(2*m[c]*x[c](t)*diff(x[c](t),t)+B[sw])*diff(theta(t),t)-g*m[sw]*D[c]*sin(theta(t))+g*m[c]*x[c](t)*cos(theta(t))-D[T]*F[c]+D[T]*B[eq]*di..." />
+<br />
+<img src="images/SEESAW65.gif" width="368" height="58" alt="diff(theta(t),`$`(t,2)) = -(-D[T]*m[c]*x[c](t)*diff(theta(t),t)^2+(2*m[c]*x[c](t)*diff(x[c](t),t)+B[sw])*diff(theta(t),t)-g*m[sw]*D[c]*sin(theta(t))+g*m[c]*x[c](t)*cos(theta(t))-D[T]*F[c]+D[T]*B[eq]*di..." />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+</dl><dl><a name="MapleAutoBookmark19" />
+<p align="left">
+<b><font color="#000000" size="4">Solution to the Linearized EOM's</font></b>
+</p>
+<p align="left">
+<font color="#000000">Solve the linear form of the equations of motion for the states' second time derivatives</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xqdd_solset_ser := solve( convert( EOM_ser, set ), convert( Xqdd, set ) );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW66.gif" width="788" height="63" alt="Xqdd_solset_ser := {Xd[3] = (m[c]*D[T]*X[2]*g*m[sw]*D[c]-m[c]*D[T]*B[sw]*X[4]-2*m[c]^2*D[T]*X[1]*X[3]*X[4]-m[c]^2*D[T]*g*X[1]+m[c]*D[T]^2*U[1]-m[c]*D[T]^2*B[eq]*X[3]+m[c]^2*D[T]^2*X[1]*X[4]^2-B[eq]*X[3..." />
+<br />
+<img src="images/SEESAW67.gif" width="796" height="29" alt="Xqdd_solset_ser := {Xd[3] = (m[c]*D[T]*X[2]*g*m[sw]*D[c]-m[c]*D[T]*B[sw]*X[4]-2*m[c]^2*D[T]*X[1]*X[3]*X[4]-m[c]^2*D[T]*g*X[1]+m[c]*D[T]^2*U[1]-m[c]*D[T]^2*B[eq]*X[3]+m[c]^2*D[T]^2*X[1]*X[4]^2-B[eq]*X[3..." />
+<br />
+<img src="images/SEESAW68.gif" width="464" height="31" alt="Xqdd_solset_ser := {Xd[3] = (m[c]*D[T]*X[2]*g*m[sw]*D[c]-m[c]*D[T]*B[sw]*X[4]-2*m[c]^2*D[T]*X[1]*X[3]*X[4]-m[c]^2*D[T]*g*X[1]+m[c]*D[T]^2*U[1]-m[c]*D[T]^2*B[eq]*X[3]+m[c]^2*D[T]^2*X[1]*X[4]^2-B[eq]*X[3..." />
+<br />
+<img src="images/SEESAW69.gif" width="668" height="63" alt="Xqdd_solset_ser := {Xd[3] = (m[c]*D[T]*X[2]*g*m[sw]*D[c]-m[c]*D[T]*B[sw]*X[4]-2*m[c]^2*D[T]*X[1]*X[3]*X[4]-m[c]^2*D[T]*g*X[1]+m[c]*D[T]^2*U[1]-m[c]*D[T]^2*B[eq]*X[3]+m[c]^2*D[T]^2*X[1]*X[4]^2-B[eq]*X[3..." />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">assign( Xqdd_solset_ser );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">Moreover, for small angles and small displacements</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xd[3] := subs( X[1]^2 = 0, X[4]^2 = 0, Xd[3] ):<br />
+Xd[3] := algsubs( X[3]*X[4] = 0, Xd[3] );<br />
+</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW70.gif" width="62" height="27" alt="Xd[3] := 1/J[sw]/m[c]*(m[c]*D[T]*X[2]*g*m[sw]*D[c]-m[c]^2*D[T]*g*X[1]+m[c]*D[T]^2*U[1]-g*m[c]*X[2]*J[sw]+U[1]*J[sw]+(-B[eq]*J[sw]-m[c]*D[T]^2*B[eq])*X[3]-m[c]*D[T]*B[sw]*X[4])" />
+<br />
+<img src="images/SEESAW71.gif" width="834" height="61" alt="Xd[3] := 1/J[sw]/m[c]*(m[c]*D[T]*X[2]*g*m[sw]*D[c]-m[c]^2*D[T]*g*X[1]+m[c]*D[T]^2*U[1]-g*m[c]*X[2]*J[sw]+U[1]*J[sw]+(-B[eq]*J[sw]-m[c]*D[T]^2*B[eq])*X[3]-m[c]*D[T]*B[sw]*X[4])" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Xd[4] := subs( X[1]^2 = 0, X[4]^2 = 0, Xd[4] ):<br />
+Xd[4] := algsubs( X[3]*X[4] = 0, Xd[4] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW72.gif" width="434" height="59" alt="Xd[4] := 1/J[sw]*(X[2]*g*m[sw]*D[c]-B[sw]*X[4]-g*m[c]*X[1]+D[T]*U[1]-D[T]*B[eq]*X[3])" />
+</p>
+<p align="left">
+<font color="#000000">pretty display w.r.t. the named system states</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">diff( qd[1], t ) = collect( subs( subs_U_rev, subs_Xq_rev, subs_Xqd_rev, Xd[3] ), eom_collect_list );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<img src="images/SEESAW73.gif" width="93" height="63" alt="diff(x[c](t),`$`(t,2)) = -1/m[c]*B[eq]*diff(x[c](t),t)-g*theta(t)+1/m[c]*F[c]+(-D[T]*B[sw]*diff(theta(t),t)-D[T]^2*B[eq]*diff(x[c](t),t)+D[T]*g*m[sw]*D[c]*theta(t)-g*m[c]*D[T]*x[c](t)+D[T]^2*F[c])/J[sw..." />
+<br />
+<img src="images/SEESAW74.gif" width="825" height="77" alt="diff(x[c](t),`$`(t,2)) = -1/m[c]*B[eq]*diff(x[c](t),t)-g*theta(t)+1/m[c]*F[c]+(-D[T]*B[sw]*diff(theta(t),t)-D[T]^2*B[eq]*diff(x[c](t),t)+D[T]*g*m[sw]*D[c]*theta(t)-g*m[c]*D[T]*x[c](t)+D[T]^2*F[c])/J[sw..." />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">diff( qd[2], t ) = collect( subs( subs_U_rev, subs_Xq_rev, subs_Xqd_rev, Xd[4] ), eom_collect_list );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW75.gif" width="571" height="79" alt="diff(theta(t),`$`(t,2)) = 1/J[sw]*(theta(t)*g*m[sw]*D[c]-B[sw]*diff(theta(t),t)-g*m[c]*x[c](t)+D[T]*F[c]-D[T]*B[eq]*diff(x[c](t),t))" />
+</p>
+<p align="left">
+</p>
+</dl></dl><dl><a name="MapleAutoBookmark20" />
+<p align="left">
+<b><font color="#000000" size="5">Determine the System State-Space Matrices: A, B, C, and D</font></b>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">A_ss := Matrix( Nx, Nx ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">A_ss := deriveA( Xqdd, A_ss, Nq, subs_XUzero ): 'A' = A_ss;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW76.gif" width="540" height="190" alt="A = Matrix(%id = 138732092)" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#lprint( A_ss );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">B_ss := Matrix( Nx, Nu ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">B_ss := deriveB( Xqdd, B_ss, Nq, subs_XUzero ): 'B' = B_ss;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW77.gif" width="151" height="190" alt="B = Matrix(%id = 138732988)" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#lprint( B_ss );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">C_ss := IdentityMatrix( Nx, Nx );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW78.gif" width="187" height="110" alt="C_ss := Matrix(%id = 138733308)" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#lprint( C_ss );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">D_ss := Matrix( Nx, Nu, 0 );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW79.gif" width="106" height="110" alt="D_ss := Matrix(%id = 138733436)" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#lprint( D_ss );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+</p>
+</dl><p align="left">
+</p>
+<dl><a name="MapleAutoBookmark21" />
+<p align="left">
+<b><font color="#000000" size="5">Write A, B, C, and D to a Matlab file</font></b>
+</p>
+<p align="left">
+<font color="#000000">Save the state-space matrices A, B, C and D to a MATLAB file.</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Matlab_File_Name := "SEESAW_ABCD_eqns.m":</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">unassign variables, when necessary, for those present in the "Matlab_Notations" substitution set</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">if assigned( B[eq] ) then<br />
+&nbsp;&nbsp;unassign( 'B[eq]' );<br />
+end if;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">if assigned( B[sw] ) then<br />
+&nbsp;&nbsp;unassign( 'B[sw]' );<br />
+end if;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<font color="#000000">substitution set containing a notation consistent with that used in the MATLAB design script(s)</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Matlab_Notations := { m[c] = mc, m[sw] = msw, J[sw] = Jsw, D[T] = Dt, D[c] = Dc, B[sw] = Bsw, J[m] = Jm, B[eq] = Beq, K[g] = Kg, K[t] = Kt, K[m] = Km, R[m] = Rm, r[mp] = r_mp, eta[g] = eta_g, eta[m] = eta_m }:</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">Experiment_Name := "Seesaw":</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">write_ABCD_to_Mfile( Matlab_File_Name, Experiment_Name, Matlab_Notations, A_ss, B_ss, C_ss, D_ss );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+</p>
+</dl><dl><a name="MapleAutoBookmark22" />
+<p align="left">
+<b><font color="#000000" size="5">Procedure Printing</font></b>
+</p>
+<p align="left">
+<font color="#000000">default:</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">#interface( verboseproc = 1 );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">eval( lagrange_equations ):</font></b>
+</td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+<p align="left">
+</p>
+</dl><dl><a name="MapleAutoBookmark23" />
+<p align="left">
+<b><font color="#000000" size="5">Formula to Estimate J[sw] from the "inverted" seesaw free oscillations</font></b>
+</p>
+<p align="left">
+<font color="#000000">period of oscillation of a compound pendulum (free swing)</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EQN := T[osc] = 2 * pi * sqrt( J[pivot] / (m[sw] * g * D[c] ) );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW80.gif" width="241" height="62" alt="EQN := T[osc] = 2*pi*(J[pivot]/g/m[sw]/D[c])^(1/2)" />
+</p>
+<p align="left">
+<font color="#000000">parallel-axis theorem</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">J[pivot] := J[sw] + m[sw] * D[c]^2;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW81.gif" width="177" height="29" alt="J[pivot] := J[sw]+m[sw]*D[c]^2" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">EQN;</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW82.gif" width="228" height="64" alt="T[osc] = 2*pi*((J[sw]+m[sw]*D[c]^2)/g/m[sw]/D[c])^(1/2)" />
+</p>
+<p align="left">
+<font color="#000000">estimation of J[sw]</font>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"><b><font color="#FF0000">J[sw] = solve( EQN, J[sw] );</font></b>
+</td></tr>
+</table>
+</p>
+<p align="center">
+<img src="images/SEESAW83.gif" width="272" height="72" alt="J[sw] = 1/4*m[sw]*D[c]*(-4*D[c]*pi^2+T[osc]^2*g)/pi^2" />
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+<p align="left">
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+<tr>
+<td valign="top"><tt>&gt; &nbsp;&nbsp;</tt></td>
+<td width="100%" valign="top"></td></tr>
+</table>
+</p>
+<p align="left">
+</p>
+</dl><p align="left">
+<a href="SEESAW.html#Description">Click here to go back to top: Description Section</a><font color="#000000">.</font>
+</p>
+</basefont>
+</body>
+</html>
