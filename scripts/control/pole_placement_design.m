@@ -5,15 +5,6 @@
 %   x_c_dot   — cart velocity [m/s]
 %   theta     — seesaw tilt from horizontal [rad]
 %   theta_dot — seesaw angular velocity [rad/s]
-%
-% Control law:  V_m = -K*x  (full-state feedback, motor voltage)
-%
-% Design story:
-%   1. Baseline — mirror the unstable pole, keep everything else.
-%   2. Dominant-pole redesign — size a complex pair from Ts and zeta.
-%   3. Integral action — augment state with integral of theta to
-%      reject constant bias torques (e.g. an off-centre mass).
-%
 % Requires: seesaw_params.m (plant matrices), tuned_params.mat (B_eq)
 % Outputs:  controller_freq.mat, all report figures
 
