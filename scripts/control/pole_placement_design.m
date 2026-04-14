@@ -1,6 +1,21 @@
-%% Pole Placement Controller Design
-% Simple story: baseline stabilizing design -> dominant-pole redesign.
-% Produces all figures and saves the final controller.
+%% Pole Placement Controller Design for Quanser SEESAW-E + IP02
+%
+% State vector:  x = [x_c; x_c_dot; theta; theta_dot]
+%   x_c       — cart position along rail [m]
+%   x_c_dot   — cart velocity [m/s]
+%   theta     — seesaw tilt from horizontal [rad]
+%   theta_dot — seesaw angular velocity [rad/s]
+%
+% Control law:  V_m = -K*x  (full-state feedback, motor voltage)
+%
+% Design story:
+%   1. Baseline — mirror the unstable pole, keep everything else.
+%   2. Dominant-pole redesign — size a complex pair from Ts and zeta.
+%   3. Integral action — augment state with integral of theta to
+%      reject constant bias torques (e.g. an off-centre mass).
+%
+% Requires: seesaw_params.m (plant matrices), tuned_params.mat (B_eq)
+% Outputs:  controller_freq.mat, all report figures
 
 close all; clc
 
@@ -8,21 +23,25 @@ root   = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 figdir = fullfile(root, 'docs', 'figures');
 
 %% Load tuned plant
-% seesaw_params.m builds A_sw/B_sw with default B_eq = 5.0.
-% Patch in the tuned B_eq from frequency sweep.
+% seesaw_params.m builds A_sw, B_sw using the default cart friction
+% B_eq = 5.0 N*s/m.  The frequency-sweep experiment gave B_eq = 6.7217,
+% so we patch the three quantities that depend on it:
+%   B_total  = B_eq + B_emf        (total cart damping)
+%   G_rhs    = [... -B_total ...]   (damping column in the EOM RHS)
+%   A_sw     = f(M_inv, G_rhs)      (state matrix rebuilt)
+% B_sw is unchanged because the input gain alpha_f*eta_m has no B_eq term.
 run(fullfile(root, 'scripts', 'config', 'seesaw_params.m'))
 
-tuned = load(fullfile(root, 'data', 'tuned_params.mat'));
+tuned      = load(fullfile(root, 'data', 'tuned_params.mat'));
 B_eq       = tuned.B_eq;
 B_total    = B_eq + B_emf;
 G_rhs(1,2) = -B_total;
-A_sw = [0 1 0 0; M_inv(1,:)*G_rhs; 0 0 0 1; M_inv(2,:)*G_rhs];
-% B_sw unchanged (G_inp doesn't depend on B_eq)
+A_sw       = [0 1 0 0; M_inv(1,:)*G_rhs; 0 0 0 1; M_inv(2,:)*G_rhs];
 
 poles_ol = sort(eig(A_sw));
 fprintf('Tuned B_eq = %.4f\n', B_eq)
 fprintf('Open-loop poles: '); fprintf('%.4f  ', poles_ol); fprintf('\n')
-fprintf('Controllability: %d/4\n\n', rank(ctrb(A_sw, B_sw)))
+fprintf('Controllability rank: %d/4\n\n', rank(ctrb(A_sw, B_sw)))
 
 %% Open-loop pole map
 figure; hold on; grid on
@@ -31,12 +50,16 @@ xline(0, 'k--'); xlabel('Real'); ylabel('Imag'); title('Open-Loop Poles')
 saveas(gcf, fullfile(figdir, 'OL-Poles.png'))
 
 %% Simulation setup
-t  = 0:0.001:10;
-x0 = [0; 0; deg2rad(4.5); 0];   % 4.5 deg initial tilt
+theta_0 = deg2rad(4.5);                     % initial tilt disturbance
+x0      = [0; 0; theta_0; 0];               % cart at origin, tilted, at rest
+t       = 0:0.001:10;
 
-%% Attempt 1 -- mirror unstable pole, keep the rest
+%% ---- Attempt 1: mirror the unstable pole, keep the rest ----
+% Simplest stabilising controller: reflect each OL pole into the LHP.
+% All poles stay at their natural speeds — only the sign of the
+% unstable one (+2.61 → -2.61) changes.
 p1 = sort(-abs(poles_ol), 'descend');
-[K1, pcl1, y1, u1, m1] = run_regulator(A_sw, B_sw, p1, x0, t);
+[K1, pcl1, y1, u1, m1] = sim_regulator(A_sw, B_sw, p1, x0, t);
 
 figure; hold on; grid on
 plot(real(pcl1), imag(pcl1), 'rx', 'MarkerSize', 12, 'LineWidth', 2)
@@ -46,70 +69,95 @@ saveas(gcf, fullfile(figdir, 'CL-Poles-Att1.png'))
 plot_3panel(t, y1, u1, 'IC Response -- Attempt 1');
 saveas(gcf, fullfile(figdir, 'IC-Response-Att1.png'))
 
-%% Final design -- choose the dominant pair from the desired transient
-Ts_target = 2.0;
-zeta      = 0.7;
-wn_target = 4/(zeta*Ts_target);
-wn        = 3.0;   % round 2.86 to a simple value
+%% ---- Final design: dominant-pole placement from Ts and zeta ----
+% The baseline is too slow (>10 s settling).  Size a dominant complex pair
+% using the 2% settling-time formula:  Ts ≈ 4/(zeta*wn).
+% With Ts = 2 s and zeta = 0.7 → wn ≈ 2.86, rounded to 3.0 rad/s.
+%
+% The two already-stable OL poles (-2.25 and -36.50) are left unchanged —
+% they are fast enough not to limit the transient and moving them would
+% spend control effort for no benefit.
+Ts_des = 2.0;
+zeta   = 0.7;
+wn     = 3.0;                                % rounded from 4/(0.7*2) = 2.86
 
-p_dom  = -zeta*wn + 1j*wn*sqrt(1-zeta^2);
-p_keep = poles_ol(1:2);  % keep the already-fast stable poles
+p_dom   = -zeta*wn + 1j*wn*sqrt(1-zeta^2);  % dominant complex pair
+p_keep  = poles_ol(poles_ol < -1);            % the two fast stable OL poles
 p_final = [p_dom; conj(p_dom); p_keep];
 
-[Kf, pcl_f, yf, uf, mf] = run_regulator(A_sw, B_sw, p_final, x0, t);
+[Kf, pcl_f, yf, uf, mf] = sim_regulator(A_sw, B_sw, p_final, x0, t);
 
+% Frequency-domain margins (SISO loop transfer: break at plant input)
 L = tf(ss(A_sw, B_sw, Kf, 0));
 [Gm, Pm, ~, wgc] = margin(L);
 Gm_dB = 20*log10(Gm);
 
-[t_bias, x_bias, u_bias, mb] = run_bias_load(A_sw - B_sw*Kf, Kf, M_inv, D_T);
+%% ---- Constant bias torque test (no integral action) ----
+% A 100 g mass placed off-centre on the seesaw produces a constant
+% gravitational torque  tau_bias = m*g*D_T  about the pivot.
+% (D_T = pivot-to-rail distance, from seesaw_params.m)
+% This enters the EOM as an external torque on the seesaw DOF.
+% Without integral action, the controller reaches a non-zero theta_ss.
+[t_bias, x_bias, u_bias, mb] = sim_bias_load( ...
+    A_sw - B_sw*Kf, Kf, M_inv, D_T);
 
-%% Integral action on theta -- add one slow pole for the integrator state
-C_theta = [0 0 1 0];
-A_aug = [A_sw, zeros(4,1);
-         C_theta, 0];
-B_aug = [B_sw; 0];
+%% ---- Integral action: augment state with xi_dot = theta ----
+% To drive theta_ss → 0 under a constant disturbance, add an integrator
+% on theta.  The augmented state is x_a = [x_c; x_c_dot; theta;
+% theta_dot; xi], with xi_dot = theta.
+%
+% One extra pole is placed at -1.0 rad/s — slower than the dominant
+% pair (-2.10), so the transient shape is preserved.
+C_theta = [0 0 1 0];                         % picks theta from x
+A_aug   = [A_sw, zeros(4,1); C_theta, 0];
+B_aug   = [B_sw; 0];
 
 p_int = -1.0;
 p_aug = [p_final; p_int];
-[K_aug, yi, ui, mi] = run_integral_regulator(A_aug, B_aug, p_aug, t);
-[t_bias_i, x_bias_i, u_bias_i, mbi] = run_bias_load_integral(A_aug - B_aug*K_aug, K_aug, M_inv, D_T);
+
+x0_aug = [x0; 0];                            % integrator starts at zero
+[K_aug, ~, yi, ui, mi] = sim_regulator(A_aug, B_aug, p_aug, x0_aug, t);
+
+[t_bi, x_bi, u_bi, mbi] = sim_bias_load_aug( ...
+    A_aug - B_aug*K_aug, K_aug, M_inv, D_T);
 
 %% Print summary
 fprintf('%-18s %12s %12s\n', '', 'Attempt 1', 'Final')
 fprintf('%-18s %10.2f V  %10.2f V\n',   'Peak voltage', m1.peak_v, mf.peak_v)
-fprintf('%-18s %10.2f deg %10.2f deg\n','Peak theta',   m1.peak_theta, mf.peak_theta)
-fprintf('%-18s %10.2f cm  %10.2f cm\n', 'Peak cart',    m1.peak_cart, mf.peak_cart)
-fprintf('%-18s %10.2f s   %10.2f s\n',  'Settling',     m1.settle, mf.settle)
-fprintf('\nDominant pair from Ts ~= %.1f s and zeta = %.1f => wn ~= %.2f rad/s (using %.1f).\n', ...
-    Ts_target, zeta, wn_target, wn)
-fprintf('Remaining poles kept at open-loop values: %.2f and %.2f.\n', p_keep(2), p_keep(1))
+fprintf('%-18s %10.2f deg %10.2f deg\n', 'Peak theta',   m1.peak_th, mf.peak_th)
+fprintf('%-18s %10.2f cm  %10.2f cm\n',  'Peak cart',    m1.peak_xc, mf.peak_xc)
+fprintf('%-18s %10.2f s   %10.2f s\n',   'Settling',     m1.Ts,      mf.Ts)
+
+fprintf('\nDominant pair: Ts=%.1f s, zeta=%.1f => wn=%.2f (using %.1f)\n', ...
+    Ts_des, zeta, 4/(zeta*Ts_des), wn)
+fprintf('Kept OL poles: %.2f and %.2f\n', p_keep(2), p_keep(1))
 fprintf('\nKf = [%.2f  %.2f  %.2f  %.2f]\n', Kf)
-fprintf('Margins: PM = %.1f deg, GM = %.1f dB, wgc = %.2f rad/s\n', Pm, Gm_dB, wgc)
-fprintf('Bias load (100 g): theta_ss = %.2f deg, cart_ss = %.2f cm, V_ss = %.2f V\n', ...
+fprintf('Margins: PM=%.1f deg, GM=%.1f dB, wgc=%.2f rad/s\n', Pm, Gm_dB, wgc)
+fprintf('Bias (100 g): theta_ss=%.2f deg, cart_ss=%.2f cm, V_ss=%.2f V\n', ...
     mb.theta_ss, mb.cart_ss, mb.v_ss)
+
 fprintf('\nK_aug = [%.2f  %.2f  %.2f  %.2f  %.2f]\n', K_aug)
-fprintf('Integral pole: %.1f rad/s\n', p_int)
-fprintf('With integral action (100 g bias): theta_ss = %.4f deg, cart_ss = %.2f cm, V_ss = %.2f V\n', ...
+fprintf('Integrator pole: %.1f rad/s\n', p_int)
+fprintf('Bias w/ integral: theta_ss=%.4f deg, cart_ss=%.2f cm, V_ss=%.2f V\n', ...
     mbi.theta_ss, mbi.cart_ss, mbi.v_ss)
 
-%% Comparison figure
+%% ---- Generate all figures ----
+
+% Attempt 1 vs Final comparison
 figure
 subplot(3,1,1); hold on; grid on
 plot(t, y1(:,1)*100, t, yf(:,1)*100, 'LineWidth', 1.2)
 ylabel('Cart [cm]'); title('Pole Placement Evolution -- 4.5 deg Initial Tilt')
-legend('Attempt 1: baseline stabilizing', 'Final: dominant-pole design', 'Location', 'best')
-
+legend('Attempt 1: baseline stabilising', 'Final: dominant-pole design', 'Location', 'best')
 subplot(3,1,2); hold on; grid on
 plot(t, rad2deg(y1(:,3)), t, rad2deg(yf(:,3)), 'LineWidth', 1.2)
 ylabel('\theta [deg]'); yline([-11.5 11.5], 'k--')
-
 subplot(3,1,3); hold on; grid on
 plot(t, u1, t, uf, 'LineWidth', 1.2)
 ylabel('V_m [V]'); xlabel('Time [s]')
 saveas(gcf, fullfile(figdir, 'Pole-Comparison.png'))
 
-%% Final design figures
+% Final design CL poles + IC response
 figure; hold on; grid on
 plot(real(pcl_f), imag(pcl_f), 'rx', 'MarkerSize', 12, 'LineWidth', 2)
 xline(0, 'k--'); xlabel('Real'); ylabel('Imag'); title('CL Poles -- Final')
@@ -118,16 +166,18 @@ saveas(gcf, fullfile(figdir, 'CL-Poles-Final.png'))
 plot_3panel(t, yf, uf, 'IC Response -- Final Design');
 saveas(gcf, fullfile(figdir, 'IC-Response-Final.png'))
 
-plot_3panel(t_bias, x_bias, u_bias, 'Constant Bias Torque Test');
+% Bias torque tests
+plot_3panel(t_bias, x_bias, u_bias, 'Constant Bias Torque (100 g)');
 saveas(gcf, fullfile(figdir, 'repeated_disturbance.png'))
 
-plot_3panel(t_bias_i, x_bias_i(:,1:4), u_bias_i, 'Constant Bias Torque Test -- With Integral Action');
+plot_3panel(t_bi, x_bi(:,1:4), u_bi, 'Constant Bias Torque (100 g) -- With Integral');
 saveas(gcf, fullfile(figdir, 'bias_with_integral.png'))
 
+% Frequency-domain analysis
 plot_loop(L, A_sw - B_sw*Kf, B_sw, C_sw, D_sw, Pm, Gm_dB);
 saveas(gcf, fullfile(figdir, 'loop_analysis.png'))
 
-%% Save controller
+%% Save controller data
 save(fullfile(root, 'data', 'controller_freq.mat'), ...
     'Kf', 'p_final', 'K_aug', 'p_aug', 'p_int', 'A_aug', 'B_aug', ...
     'A_sw', 'B_sw', 'C_sw', 'D_sw')
@@ -136,70 +186,62 @@ fprintf('\nSaved to data/controller_freq.mat\n')
 
 %% ===== Helpers =====
 
-function [K, pcl, y, u, info] = run_regulator(A, B, p_des, x0, t)
+function [K, pcl, y, u, info] = sim_regulator(A, B, p_des, x0, t)
+% Place closed-loop poles at p_des, simulate initial-condition response.
+% Works for any state dimension (4-state or 5-state augmented).
+    n   = size(A, 1);
     K   = place(A, B, p_des);
     Acl = A - B*K;
     pcl = eig(Acl);
 
-    sys = ss(Acl, zeros(size(B)), eye(4), zeros(4,1));
-    y   = initial(sys, x0, t);
-    u   = (-K * y')';
+    y = initial(ss(Acl, zeros(n,1), eye(n), zeros(n,1)), x0, t);
+    u = (-K * y')';
 
+    % 2% settling time on theta (state 3)
     theta = abs(y(:,3));
     idx   = find(theta > 0.02*abs(x0(3)), 1, 'last');
-    if isempty(idx), ts = 0; else, ts = t(idx); end
 
-    info.peak_theta = rad2deg(max(theta));
-    info.peak_cart  = max(abs(y(:,1))) * 100;
-    info.peak_v     = max(abs(u));
-    info.settle     = ts;
+    info.peak_th = rad2deg(max(theta));
+    info.peak_xc = max(abs(y(:,1))) * 100;       % [cm]
+    info.peak_v  = max(abs(u));                   % [V]
+    info.Ts      = t(max(idx, 1));                % [s]
 end
 
-function [t, x, u, info] = run_bias_load(Acl, K, M_inv, D_T)
+function [t, x, u, info] = sim_bias_load(Acl, K, M_inv, D_T)
+% Simulate a constant gravitational torque from a 100 g offset mass.
+% The torque enters as  tau = m*g*D_T  on the seesaw DOF.
+%
+% Disturbance input vector B_tau maps the scalar torque into the
+% 4-state dynamics via the inverse inertia matrix:
+%   [x_c_ddot; theta_ddot] = M_inv * [0; tau]
     dt = 0.001;  t = (0:dt:15)';
 
-    m_bias = 0.100;                 % 100 g equivalent added mass
-    tau_bias = m_bias * 9.81 * D_T; % constant seesaw torque bias [N*m]
+    m_bias   = 0.100;                            % 100 g added mass [kg]
+    tau_bias = m_bias * 9.81 * D_T;              % constant torque [N*m]
+
+    % Torque enters only the seesaw EOM (second row of M_eff * q_ddot = ...)
     B_tau = [0; M_inv(1,:)*[0;1]; 0; M_inv(2,:)*[0;1]];
 
-    sys = ss(Acl, B_tau, eye(4), zeros(4,1));
-    x   = lsim(sys, tau_bias*ones(size(t)), t);
-    u   = (-K * x')';
+    x = lsim(ss(Acl, B_tau, eye(4), zeros(4,1)), tau_bias*ones(size(t)), t);
+    u = (-K * x')';
 
     info.theta_ss = rad2deg(x(end,3));
-    info.cart_ss  = x(end,1) * 100;
+    info.cart_ss  = x(end,1) * 100;              % [cm]
     info.v_ss     = u(end);
 end
 
-function [K_aug, y, u, info] = run_integral_regulator(A_aug, B_aug, p_aug, t)
-    x0_aug = [0; 0; deg2rad(4.5); 0; 0];
-    K_aug = place(A_aug, B_aug, p_aug);
-    Acl = A_aug - B_aug*K_aug;
-
-    sys = ss(Acl, zeros(size(B_aug)), eye(5), zeros(5,1));
-    y   = initial(sys, x0_aug, t);
-    u   = (-K_aug * y')';
-
-    theta = abs(y(:,3));
-    idx   = find(theta > 0.02*abs(x0_aug(3)), 1, 'last');
-    if isempty(idx), ts = 0; else, ts = t(idx); end
-
-    info.peak_theta = rad2deg(max(theta));
-    info.peak_cart  = max(abs(y(:,1))) * 100;
-    info.peak_v     = max(abs(u));
-    info.settle     = ts;
-end
-
-function [t, x, u, info] = run_bias_load_integral(Acl_aug, K_aug, M_inv, D_T)
+function [t, x, u, info] = sim_bias_load_aug(Acl, K, M_inv, D_T)
+% Same as sim_bias_load but for the 5-state augmented system.
+% The extra row in B_tau is zero (torque does not directly feed xi).
     dt = 0.001;  t = (0:dt:15)';
 
-    m_bias = 0.100;
+    m_bias   = 0.100;
     tau_bias = m_bias * 9.81 * D_T;
-    B_tau_aug = [0; M_inv(1,:)*[0;1]; 0; M_inv(2,:)*[0;1]; 0];
 
-    sys = ss(Acl_aug, B_tau_aug, eye(5), zeros(5,1));
-    x   = lsim(sys, tau_bias*ones(size(t)), t);
-    u   = (-K_aug * x')';
+    B_tau = [0; M_inv(1,:)*[0;1]; 0; M_inv(2,:)*[0;1]; 0];
+
+    x = lsim(ss(Acl, B_tau, eye(5), zeros(5,1)), tau_bias*ones(size(t)), t);
+    u = (-K * x')';
 
     info.theta_ss = rad2deg(x(end,3));
     info.cart_ss  = x(end,1) * 100;
