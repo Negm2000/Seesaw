@@ -79,16 +79,22 @@ plot_3panel(t, y1, u1, 'IC Response -- Attempt 1');
 saveas(gcf, fullfile(figdir, 'IC-Response-Att1.png'))
 
 %% ---- Final design: dominant-pole placement from Ts and zeta ----
-% For the heavier cart, keeping the OL stable poles near -1.6 rad/s makes
-% them dominate the transient. Place the real poles well left so the chosen
-% complex pair actually sets the response shape.
-Ts_des = 2.8;
-zeta   = 0.85;
-wn     = 1.9;
+% Tune Kf from the transient specs instead of hard-coding the final pole
+% set. Use the standard well-damped choice zeta = 1/sqrt(2), compute the
+% dominant-pair frequency from Ts ~= 4/(zeta*wn), and keep the already-fast
+% stable OL poles so Kf only retunes the slow/unstable dynamics.
+Ts_des       = 2.0;
+zeta         = 1/sqrt(2);
+keep_left_of = -1.0;
+wn           = 4/(zeta*Ts_des);
 
-p_dom   = -zeta*wn + 1j*wn*sqrt(1-zeta^2);  % dominant complex pair
-p_real  = [-7.0; -9.0];                     % non-dominant real poles
-p_final = [p_dom; conj(p_dom); p_real];
+p_dom  = -zeta*wn + 1j*wn*sqrt(1-zeta^2);   % dominant complex pair
+p_keep = poles_ol(real(poles_ol) < keep_left_of);
+if numel(p_keep) ~= 2
+    error('Expected 2 fast OL poles left of %.2f rad/s, found %d.', ...
+        keep_left_of, numel(p_keep))
+end
+p_final = [p_dom; conj(p_dom); p_keep];
 
 [Kf, pcl_f, yf, uf, mf] = sim_regulator(A_sw, B_sw, p_final, x0, t);
 
@@ -111,8 +117,8 @@ Gm_dB = 20*log10(Gm);
 % on theta.  The augmented state is x_a = [x_c; x_c_dot; theta;
 % theta_dot; xi], with xi_dot = theta.
 %
-% One extra pole is placed at -1.0 rad/s — slower than the dominant
-% pair (-2.10), so the transient shape is preserved.
+% One extra pole is placed at -1.0 rad/s — slower than the dominant pair,
+% so the transient shape is preserved.
 C_theta = [0 0 1 0];                         % picks theta from x
 A_aug   = [A_sw, zeros(4,1); C_theta, 0];
 B_aug   = [B_sw; 0];
@@ -133,9 +139,9 @@ fprintf('%-18s %10.2f deg %10.2f deg\n', 'Peak theta',   m1.peak_th, mf.peak_th)
 fprintf('%-18s %10.2f cm  %10.2f cm\n',  'Peak cart',    m1.peak_xc, mf.peak_xc)
 fprintf('%-18s %10.2f s   %10.2f s\n',   'Settling',     m1.Ts,      mf.Ts)
 
-fprintf('\nDominant pair: Ts=%.1f s, zeta=%.1f => wn=%.2f (using %.1f)\n', ...
-    Ts_des, zeta, 4/(zeta*Ts_des), wn)
-fprintf('Placed real poles: %.2f and %.2f\n', p_real(1), p_real(2))
+fprintf('\nDominant pair: Ts=%.1f s, zeta=%.3f => wn=%.2f\n', ...
+    Ts_des, zeta, wn)
+fprintf('Kept OL poles: %.2f and %.2f\n', p_keep(2), p_keep(1))
 fprintf('\nKf = [%.2f  %.2f  %.2f  %.2f]\n', Kf)
 fprintf('Margins: PM=%.1f deg, GM=%.1f dB, wgc=%.2f rad/s\n', Pm, Gm_dB, wgc)
 fprintf('Bias (100 g): theta_ss=%.2f deg, cart_ss=%.2f cm, V_ss=%.2f V\n', ...
