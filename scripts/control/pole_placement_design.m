@@ -25,12 +25,29 @@ run(fullfile(root, 'scripts', 'config', 'seesaw_params.m'))
 
 tuned      = load(fullfile(root, 'data', 'tuned_params.mat'));
 B_eq       = tuned.B_eq;
+
+% Pole placement is designed for the current cart configuration, which now
+% includes an extra 370 g mounted on the cart.
+M_c_base   = M_c;
+M_c_added  = 0.370;
+M_c        = M_c_base + M_c_added;
+
 B_total    = B_eq + B_emf;
 G_rhs(1,2) = -B_total;
+A_cart     = [0, 1; 0, -B_total/M_c];
+B_cart     = [0; alpha_f*eta_m/M_c];
+M_eff      = [M_c,          -M_c*D_T;
+              -M_c*D_T,      J_pivot + M_c*D_T^2];
+M_inv      = inv(M_eff);
+G_rhs      = [0, -B_total,  -g*M_c,                        0;
+              -g*M_c, 0,     g*(M_c*D_T + M_SW*D_C),  -B_SW];
 A_sw       = [0 1 0 0; M_inv(1,:)*G_rhs; 0 0 0 1; M_inv(2,:)*G_rhs];
+B_sw       = [0; M_inv(1,:)*[alpha_f*eta_m; 0]; 0; M_inv(2,:)*[alpha_f*eta_m; 0]];
 
 poles_ol = sort(eig(A_sw));
 fprintf('Tuned B_eq = %.4f\n', B_eq)
+fprintf('Cart mass for design: %.3f kg base + %.3f kg added = %.3f kg total\n', ...
+    M_c_base, M_c_added, M_c)
 fprintf('Open-loop poles: '); fprintf('%.4f  ', poles_ol); fprintf('\n')
 fprintf('Controllability rank: %d/4\n\n', rank(ctrb(A_sw, B_sw)))
 
@@ -46,10 +63,11 @@ x0      = [0; 0; theta_0; 0];               % cart at origin, tilted, at rest
 t       = 0:0.001:10;
 
 %% ---- Attempt 1: mirror the unstable pole, keep the rest ----
-% Simplest stabilising controller: reflect each OL pole into the LHP.
-% All poles stay at their natural speeds — only the sign of the
-% unstable one (+2.61 → -2.61) changes.
-p1 = sort(-abs(poles_ol), 'descend');
+% Simplest stabilising controller: reflect each unstable OL pole into the
+% LHP and keep the stable ones at roughly their natural speeds.
+p1 = poles_ol;
+p1(real(p1) > 0) = -abs(p1(real(p1) > 0));
+p1 = make_placeable_poles(p1);
 [K1, pcl1, y1, u1, m1] = sim_regulator(A_sw, B_sw, p1, x0, t);
 
 figure; hold on; grid on
@@ -61,20 +79,16 @@ plot_3panel(t, y1, u1, 'IC Response -- Attempt 1');
 saveas(gcf, fullfile(figdir, 'IC-Response-Att1.png'))
 
 %% ---- Final design: dominant-pole placement from Ts and zeta ----
-% The baseline is too slow (>10 s settling).  Size a dominant complex pair
-% using the 2% settling-time formula:  Ts ≈ 4/(zeta*wn).
-% With Ts = 2 s and zeta = 0.7 → wn ≈ 2.86, rounded to 3.0 rad/s.
-%
-% The two already-stable OL poles (-2.25 and -36.50) are left unchanged —
-% they are fast enough not to limit the transient and moving them would
-% spend control effort for no benefit.
-Ts_des = 2.0;
-zeta   = 0.7;
-wn     = 3.0;                                % rounded from 4/(0.7*2) = 2.86
+% For the heavier cart, keeping the OL stable poles near -1.6 rad/s makes
+% them dominate the transient. Place the real poles well left so the chosen
+% complex pair actually sets the response shape.
+Ts_des = 2.8;
+zeta   = 0.85;
+wn     = 1.9;
 
 p_dom   = -zeta*wn + 1j*wn*sqrt(1-zeta^2);  % dominant complex pair
-p_keep  = poles_ol(poles_ol < -1);            % the two fast stable OL poles
-p_final = [p_dom; conj(p_dom); p_keep];
+p_real  = [-7.0; -9.0];                     % non-dominant real poles
+p_final = [p_dom; conj(p_dom); p_real];
 
 [Kf, pcl_f, yf, uf, mf] = sim_regulator(A_sw, B_sw, p_final, x0, t);
 
@@ -121,7 +135,7 @@ fprintf('%-18s %10.2f s   %10.2f s\n',   'Settling',     m1.Ts,      mf.Ts)
 
 fprintf('\nDominant pair: Ts=%.1f s, zeta=%.1f => wn=%.2f (using %.1f)\n', ...
     Ts_des, zeta, 4/(zeta*Ts_des), wn)
-fprintf('Kept OL poles: %.2f and %.2f\n', p_keep(2), p_keep(1))
+fprintf('Placed real poles: %.2f and %.2f\n', p_real(1), p_real(2))
 fprintf('\nKf = [%.2f  %.2f  %.2f  %.2f]\n', Kf)
 fprintf('Margins: PM=%.1f deg, GM=%.1f dB, wgc=%.2f rad/s\n', Pm, Gm_dB, wgc)
 fprintf('Bias (100 g): theta_ss=%.2f deg, cart_ss=%.2f cm, V_ss=%.2f V\n', ...
@@ -169,9 +183,15 @@ plot_loop(L, A_sw - B_sw*Kf, B_sw, C_sw, D_sw, Pm, Gm_dB);
 saveas(gcf, fullfile(figdir, 'loop_analysis.png'))
 
 %% Save controller data
+K         = Kf;
+p_desired = p_final;
+wn_dom    = wn;
+zeta_dom  = zeta;
+p_unstable = max(real(poles_ol));
 save(fullfile(root, 'data', 'controller_freq.mat'), ...
     'Kf', 'p_final', 'K_aug', 'p_aug', 'p_int', 'A_aug', 'B_aug', ...
-    'A_sw', 'B_sw', 'C_sw', 'D_sw')
+    'A_sw', 'B_sw', 'C_sw', 'D_sw', 'K', 'p_desired', 'wn_dom', ...
+    'zeta_dom', 'p_unstable', 'M_c_base', 'M_c_added', 'M_c')
 fprintf('\nSaved to data/controller_freq.mat\n')
 
 
@@ -260,4 +280,17 @@ function plot_loop(L, Acl, B, C, D, Pm, Gm_dB)
     title('Root Locus'); xline(0, 'k--'); sgrid(0.5, []); grid on
     subplot(2,2,4); pzmap(ss(Acl, B, C, D))
     title('CL Pole-Zero Map'); sgrid; grid on
+end
+
+function p_out = make_placeable_poles(p_in)
+% Nudge repeated poles so SISO pole placement remains well posed.
+    p_out = p_in(:);
+    tol = 1e-6;
+    delta = 5e-3;
+
+    for i = 2:numel(p_out)
+        while any(abs(p_out(i) - p_out(1:i-1)) < tol)
+            p_out(i) = p_out(i) - delta;
+        end
+    end
 end

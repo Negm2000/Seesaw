@@ -29,6 +29,9 @@ indent.log
 !qsg.txt
 !requirements.txt
 
+# Generated figures
+*.png
+
 # QUARC build directories
 *_quarc_win64/
 *.rt-win64

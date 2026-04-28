@@ -32,7 +32,14 @@ seesaw_params;
 tuned = load(tp);
 B_eq = tuned.B_eq;
 
-% Recompute derived damping and rebuild state-space with tuned B_eq
+% Pole placement is designed for the current cart configuration, which now
+% includes an extra 370 g mounted on the cart.
+M_c_base  = M_c;
+M_c_added = 0.370;
+M_c       = M_c_base + M_c_added;
+
+% Recompute derived damping and rebuild state-space with tuned B_eq and the
+% heavier cart mass.
 B_emf   = alpha_f * K_g * k_m / r_mp;
 B_total = B_eq + B_emf;
 
@@ -48,6 +55,8 @@ C_sw = eye(4);
 D_sw = zeros(4,1);
 
 fprintf('\n=== Tuned Plant (B_eq = %.3f N*s/m) ===\n', B_eq);
+fprintf('Cart mass for design: %.3f kg base + %.3f kg added = %.3f kg total\n', ...
+    M_c_base, M_c_added, M_c);
 fprintf('State ordering: [x_c, x_c_dot, alpha, alpha_dot]\n\n');
 
 % Open-loop eigenvalues
@@ -95,23 +104,23 @@ fprintf('G_xc zeros:                   '); fprintf('%.3f  ', zero(G_xc)); fprint
 %
 %  Desired pole selection rationale:
 %    - The unstable pole at +2.61 rad/s must be moved into the LHP.
-%    - Dominant poles: a complex pair with ω_n ≈ 4 rad/s, ζ ≈ 0.7
-%      → settling time ≈ 4/(ζ*ω_n) ≈ 1.4 s, moderate overshoot.
-%    - Two faster real poles to handle the cart dynamics and the fast
-%      motor pole (which is already at ~-36.5 rad/s).
+%    - With the heavier cart, the old real poles were too slow and ended up
+%      dominating the transient.
+%    - Use a well-damped complex pair for the visible response, then place
+%      the two real poles well left so they stay non-dominant.
 %
 %  These are starting values — Section 5 iterates based on margins.
 %  -----------------------------------------------------------------------
 
 % Desired closed-loop poles
-wn_dom   = 3.0;     % dominant natural frequency [rad/s]
-zeta_dom = 0.7;     % dominant damping ratio
+wn_dom   = 1.9;     % dominant natural frequency [rad/s]
+zeta_dom = 0.85;    % dominant damping ratio
 p_dom = -zeta_dom * wn_dom + 1j * wn_dom * sqrt(1 - zeta_dom^2);
 
 p_desired = [p_dom;              % dominant complex pair
              conj(p_dom);
-             -2.5;               % real pole: cart centering
-             -20];               % fast pole: moderate (saves voltage)
+             -7.0;               % real pole: keep non-dominant
+             -9.0];              % real pole: keep non-dominant
 
 fprintf('\n=== Pole Placement Design ===\n');
 fprintf('Desired CL poles:\n');
@@ -432,6 +441,8 @@ fprintf('  Method:          Pole placement + frequency-domain verification\n');
 fprintf('  Feedback:        Full state (both encoders, SIMO)\n');
 fprintf('  Gains K:         [%.3f, %.3f, %.3f, %.3f]\n', K);
 fprintf('                    k_xc    k_xcdot  k_alpha  k_alphadot\n');
+fprintf('  Cart mass:       %.3f kg base + %.3f kg added = %.3f kg total\n', ...
+    M_c_base, M_c_added, M_c);
 fprintf('\n  DESIRED POLES\n');
 fprintf('  ─────────────\n');
 fprintf('  Dominant pair:   ω_n = %.1f rad/s, ζ = %.2f\n', wn_dom, zeta_dom);
@@ -458,7 +469,7 @@ fprintf('============================================================\n');
 save_path = fullfile(SEESAW_ROOT, 'data', 'controller_freq.mat');
 save(save_path, 'K', 'p_desired', 'wn_dom', 'zeta_dom', ...
     'Pm', 'Gm', 'wgc', 'wpc', 'A_sw', 'B_sw', 'C_sw', 'D_sw', ...
-    'A_cl', 'p_unstable');
+    'A_cl', 'p_unstable', 'M_c_base', 'M_c_added', 'M_c');
 fprintf('\n  Controller saved to: data/controller_freq.mat\n');
 fprintf('============================================================\n');
 
