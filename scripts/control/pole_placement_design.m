@@ -79,22 +79,19 @@ plot_3panel(t, y1, u1, 'IC Response -- Attempt 1');
 saveas(gcf, fullfile(figdir, 'IC-Response-Att1.png'))
 
 %% ---- Final design: dominant-pole placement from Ts and zeta ----
-% Tune Kf from the transient specs instead of hard-coding the final pole
-% set. Use the standard well-damped choice zeta = 1/sqrt(2), compute the
-% dominant-pair frequency from Ts ~= 4/(zeta*wn), and keep the already-fast
-% stable OL poles so Kf only retunes the slow/unstable dynamics.
-Ts_des       = 2.0;
-zeta         = 1/sqrt(2);
-keep_left_of = -1.0;
-wn           = 4/(zeta*Ts_des);
+% Build Kf from transient specs instead of baking in the final poles.
+% Use the standard well-damped choice zeta = 1/sqrt(2), compute the
+% dominant pair from Ts ~= 4/(zeta*wn), then place the two non-dominant
+% real poles as multiples of the dominant decay rate.
+Ts_des    = 2.0;
+zeta      = 1/sqrt(2);
+wn        = 4/(zeta*Ts_des);
+sigma_dom = zeta*wn;
+real_mult = [3.5; 4.5];
 
-p_dom  = -zeta*wn + 1j*wn*sqrt(1-zeta^2);   % dominant complex pair
-p_keep = poles_ol(real(poles_ol) < keep_left_of);
-if numel(p_keep) ~= 2
-    error('Expected 2 fast OL poles left of %.2f rad/s, found %d.', ...
-        keep_left_of, numel(p_keep))
-end
-p_final = [p_dom; conj(p_dom); p_keep];
+p_dom   = -sigma_dom + 1j*wn*sqrt(1-zeta^2);      % dominant complex pair
+p_real  = -real_mult * sigma_dom;                  % non-dominant real poles
+p_final = [p_dom; conj(p_dom); p_real];
 
 [Kf, pcl_f, yf, uf, mf] = sim_regulator(A_sw, B_sw, p_final, x0, t);
 
@@ -141,7 +138,8 @@ fprintf('%-18s %10.2f s   %10.2f s\n',   'Settling',     m1.Ts,      mf.Ts)
 
 fprintf('\nDominant pair: Ts=%.1f s, zeta=%.3f => wn=%.2f\n', ...
     Ts_des, zeta, wn)
-fprintf('Kept OL poles: %.2f and %.2f\n', p_keep(2), p_keep(1))
+fprintf('Placed real poles: %.2f and %.2f (%.1fx, %.1fx sigma)\n', ...
+    p_real(1), p_real(2), real_mult(1), real_mult(2))
 fprintf('\nKf = [%.2f  %.2f  %.2f  %.2f]\n', Kf)
 fprintf('Margins: PM=%.1f deg, GM=%.1f dB, wgc=%.2f rad/s\n', Pm, Gm_dB, wgc)
 fprintf('Bias (100 g): theta_ss=%.2f deg, cart_ss=%.2f cm, V_ss=%.2f V\n', ...
