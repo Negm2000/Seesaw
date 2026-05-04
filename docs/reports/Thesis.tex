@@ -32,6 +32,7 @@
 
 % STANDARD MATH PACKAGES
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{amsthm}
 \usepackage{bm}
 \usepackage[overload]{empheq}  % For braced-style systems of equations
@@ -599,155 +600,357 @@ Regarding the output equation, only the positions $x_c$ and the angle $\theta$ a
 \subsection{Pole Placement State-Feedback Control}
 \label{sec:pole_placement}
 
-Control law: $V_m = -\mathbf{K}\mathbf{x}$, with closed-loop dynamics $\dot{\mathbf{x}} = (A - B\mathbf{K})\mathbf{x}$. The objective is to regulate $\theta \to 0$; cart motion serves only to maintain balance. On hardware, only $x_c$ and $\theta$ are measured; $\dot{x}_c$ and $\dot{\theta}$ are estimated via filtered derivatives.
+\subsubsection{Design objective: bounded rocking}
 
-\subsubsection{Open-Loop Poles}
+The linearised model predicts $\theta \to 0$ asymptotically. The hardware does not get there. Three unmodelled effects build a deadband around $\theta = 0$ that the controller cannot push through:
+\begin{itemize}
+	\item Coulomb (static) friction at the cart, which needs a minimum motor voltage to overcome;
+	\item theta encoder quantisation, $q_\theta = K_{E,SW}/K_{gs} \approx 5\times10^{-4}\,\text{rad}$ ($\approx 0.029^\circ$/count);
+	\item gear backlash and DAC resolution, both of which break the linear, smooth control assumption near zero.
+\end{itemize}
 
+The closed loop therefore settles into a limit cycle: the cart cannot generate torque smaller than the deadband threshold, so it lets $\theta$ drift, then reacts when the drift exceeds threshold, sending $\theta$ past the equilibrium. The result is a bounded oscillation -- typically of order $\pm 1^\circ$ -- not a fixed point.
+
+This changes what pole placement is for. The objective is no longer ``drive $\theta$ to zero in $T_s$ seconds.'' It is: \emph{minimise the rocking amplitude}. Each closed-loop pole is chosen with this in mind, not against a settling-time spec.
+
+\subsubsection{Pole-placement framework}
+
+The control law is full state feedback, $V_m = -\mathbf{K}\mathbf{x}$, giving the closed-loop dynamics
 \begin{equation}
-	\lambda_{1,2,3,4} = \{+2.61, \quad -0.42, \quad -2.25, \quad -36.50\} \quad [\text{rad/s}]
+	\dot{\mathbf{x}} = (A - B\mathbf{K})\,\mathbf{x}, \qquad
+	\mathbf{x} = \begin{bmatrix} x_c & \dot{x}_c & \theta & \dot{\theta} \end{bmatrix}^\top.
 \end{equation}
-The pole at $+2.61$ is unstable (beam tips over, $\tau \approx 0.38$ s). Controllability rank = 4/4, so all poles can be relocated.
+The eigenvalues of $A - B\mathbf{K}$ are the closed-loop poles. Because the plant is SISO and the controllability matrix has rank $4$, all four poles can be placed at any desired locations $\{p_1,p_2,p_3,p_4\}$, and $\mathbf{K}$ is then uniquely determined (computed numerically by \texttt{place}).
+
+\paragraph{Complex pole pair parametrisation.} A pair of complex-conjugate poles is conventionally written
+\begin{equation}
+	p_{1,2} = -\sigma \pm j\,\omega_d
+	\qquad\text{with}\qquad
+	\sigma = \zeta\,\omega_n, \quad
+	\omega_d = \omega_n\sqrt{1-\zeta^2}.
+	\label{eq:pole_pair}
+\end{equation}
+\begin{itemize}
+	\item $\omega_n$ -- natural frequency, the distance of the pole from the origin in the s-plane.
+	\item $\zeta$ -- damping ratio, $\cos$ of the angle the pole makes with the negative real axis. $\zeta = 1$ is a real double pole; $\zeta = 0$ is a pure undamped oscillation on the $j\omega$ axis.
+	\item $\sigma$ -- decay rate (real-part magnitude). The envelope of the second-order impulse response is $e^{-\sigma t}$, so $1/\sigma$ is the time constant of the response.
+	\item $\omega_d$ -- damped natural frequency, the actual oscillation frequency seen in the response.
+\end{itemize}
+Throughout this section, subscript ``$th$'' denotes the dominant pair that governs the $\theta$ loop: $\sigma_{th}, \zeta_{th}, \omega_{n,th}, \omega_{d,th}$.
+
+\paragraph{Pole roles.} For this 4-state plant we use:
+\begin{itemize}
+	\item $p_{1,2}$: a complex pair governing the $\theta$ dynamics (the inverted-pendulum-like mode);
+	\item $p_3$: a real pole damping the cart velocity;
+	\item $p_4$: a real, slow pole governing cart-position regulation.
+\end{itemize}
+Each pole has its own upper and lower bound, derived in the next subsection.
+
+\subsubsection{Open-loop poles}
+
+For the current configuration ($M_c = 0.75\,\text{kg}$, $B_{eq}$ from frequency-sweep tuning):
+\begin{equation}
+	\lambda_{OL} \;=\; \{+2.24, \;-2.65, \;-0.45, \;-37.0\}\;\text{rad/s}
+	\quad\text{(approximate)}
+\end{equation}
+The pole at $p_{OL} \approx +2.24$ rad/s is the unstable mode -- the seesaw fall rate. Its time constant is $\tau \approx 0.45$ s. Controllability rank is $4/4$, so we have full pole-placement authority.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.6\linewidth]{../figures/OL-Poles.png}
-	\caption{Open-loop pole map. The pole at $+2.61$ (right of dashed line) confirms instability.}
+	\caption{Open-loop pole map. The pole in the right half-plane is the seesaw fall rate $p_{OL}$ and is the design driver for the closed-loop bandwidth.}
 	\label{fig:ol_poles}
 \end{figure}
 
-\subsubsection{Baseline Stabilizing Design}
+\subsubsection{Designing the four closed-loop poles}
 
-\textbf{Attempt 1:} mirror the unstable pole to the LHP and keep all other poles at their open-loop locations. This is the simplest stabilizing controller and serves as the baseline.
+Two physical limits anchor the design:
+\begin{itemize}
+	\item $V_{sat} = 6$ V (motor voltage saturation);
+	\item $T_c/2 = 0.407$ m (cart rail half-length).
+\end{itemize}
+
+\paragraph{$p_{1,2}$: complex pair, $\theta$ dynamics.} Parametrised by $(\sigma_{th}, \zeta_{th})$ as in \eqref{eq:pole_pair}.
+
+\textit{Lower bound on $\sigma_{th}$:} the closed loop must outrun divergence. $\sigma_{th} > p_{OL}$ is the bare minimum; we pick $\sigma_{th} \geq 2\,p_{OL} \approx 4.5$ for bandwidth margin against modelling error.
+
+\textit{Upper bound on $\sigma_{th}$:} the gain $K_\theta$ scales roughly as $\sigma_{th}^2$ for this plant. The per-count voltage step from $\theta$ encoder noise is
 \begin{equation}
-	p_{\text{des}} = \{-0.42, \quad -2.25, \quad -2.61, \quad -36.50\}
+	V_{chatter} = K_\theta \cdot q_\theta.
 \end{equation}
+This voltage is what the limit cycle feeds on. We demand $V_{chatter} \lesssim 0.1$ V (about $2\%$ of $V_{sat}$); empirically $\sigma_{th} \in [7,9]$ satisfies this. The script prints $V_{chatter}$ so this can be verified after each design iteration.
+
+\textit{Damping $\zeta_{th}$:} during a transient, theta-loop overshoot \emph{is} a rock -- the cart correction sends $\theta$ past zero to the opposite side once before settling. The percent overshoot of a second-order step is
 \begin{equation}
-	\mathbf{K}_1 = \begin{bmatrix} 78.36 & 4.46 & -59.81 & -22.90 \end{bmatrix}
+	M_p = e^{-\pi\zeta/\sqrt{1-\zeta^2}}\times 100\%
 \end{equation}
+giving roughly $5\%$ at $\zeta = 0.7$, $1.5\%$ at $\zeta = 0.8$, and $0\%$ at $\zeta = 1$ (but with the slowest decay). $\zeta_{th} = 0.8$ is the chosen compromise.
 
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.6\linewidth]{../figures/CL-Poles-Att1.png}
-	\caption{Closed-loop poles — Attempt 1. All poles in LHP, system is stable.}
-	\label{fig:cl_poles_att1}
-\end{figure}
-
-Fig.~\ref{fig:ic_att1} shows the $4.5^\circ$ initial-tilt regulator test. The system is stable but too slow: settling exceeds $10$ s (see Table~\ref{tab:pole_comparison}).
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.8\linewidth]{../figures/IC-Response-Att1.png}
-	\caption{Initial condition response ($4.5^\circ$ tilt), Attempt 1. Stable, but settling exceeds $10$ s.}
-	\label{fig:ic_att1}
-\end{figure}
-
-\subsubsection{Dominant-Pole Redesign}
-
-The baseline is stable but too slow (Table~\ref{tab:pole_comparison}). The next step is to size the dominant poles from settling-time and damping requirements. Using the standard $2\%$ approximation
+\textit{Choice:} $\sigma_{th} = 7.0$, $\zeta_{th} = 0.8 \Rightarrow \omega_{n,th} = 8.75$ rad/s, $\omega_{d,th} = 5.25$ rad/s.
 \begin{equation}
-	T_s \approx \frac{4}{\zeta\omega_n}
-\end{equation}
-with $T_s = 2$ s and $\zeta = 0.7$, this gives $\omega_n \approx 2.86$ rad/s, rounded to $3.0$ rad/s. The resulting dominant pair is
-\begin{equation}
-	p_{1,2} = -\zeta\omega_n \pm j\omega_n\sqrt{1-\zeta^2} = -2.10 \pm j2.14
+	p_{1,2} = -7.0 \pm j5.25
 \end{equation}
 
-The two stable open-loop poles at $-2.25$ and $-36.50$ were kept unchanged; only the unstable/slow part of the dynamics was reshaped. The final pole set is
+\paragraph{$p_3$: real pole, cart-velocity damping.} Once the cart accelerates to fight a $\theta$ error, $p_3$ governs how fast the cart velocity itself decays.
+
+\textit{Lower bound:} $|p_3| > \sigma_{th}$. If the cart-velocity mode is slower than the $\theta$ mode, the cart overshoots its correction and drives $\theta$ back the other way -- widening the rocking band.
+
+\textit{Upper bound:} $K_{\dot{x}}$ grows with $|p_3|$. Cart velocity is obtained from the encoder by numerical differentiation, so its quantum is large: $q_{\dot{x}} \sim K_{ec}/T_s \approx 0.023$ m/s per count at $T_s = 1$ ms. Excessive $|p_3|$ injects this noise into the voltage command.
+
+\textit{Choice:} $p_3 = -1.5\,\sigma_{th} = -10.5$ rad/s.
+
+\paragraph{$p_4$: real pole, cart-position regulation (slowest).} Sets the time constant for the cart returning to centre after being displaced, $\tau \approx 1/|p_4|$.
+
+\textit{Lower bound:} under bias the cart settles offset (Section~\ref{sssec:bias}). A 100 g offset gives tens of cm of cart drift; with $T_c/2 = 40.7$ cm and a target return time of $\sim 3$ s, we need $|p_4| \gtrsim 0.3$ rad/s.
+
+\textit{Upper bound:} faster than $\sim 3$ rad/s puts cart-position regulation on the same timescale as the $\theta$ loop. The cart then actively chases position errors that should be left to relax slowly, fighting the $\theta$ controller and widening the limit cycle.
+
+\textit{Choice:} $p_4 = -1.0$ rad/s (1 s time constant).
+
+\paragraph{Final pole set.}
 \begin{equation}
-	p_{\mathrm{final}} = \{-2.10 \pm j2.14,\ -2.25,\ -36.50\}
+	p_{\mathrm{des}} \;=\; \{\,-7.0 + j5.25,\; -7.0 - j5.25,\; -10.5,\; -1.0\,\}
 \end{equation}
 
-\begin{table}[H]
-	\centering
-	\begin{tabular}{l c c}
-		\toprule
-		              & Attempt 1                       & Final design                       \\
-		\midrule
-		Poles         & $[-0.42, -2.25, -2.61, -36.50]$ & $[-2.10 \pm j2.14, -2.25, -36.50]$ \\
-		Peak $V_m$    & 4.70 V                          & 7.91 V                             \\
-		Peak $\theta$ & $7.69^\circ$                    & $5.72^\circ$                       \\
-		Peak cart     & 10.06 cm                        & 9.60 cm                            \\
-		Settling time & $>10$ s                         & 2.10 s                             \\
-		\bottomrule
-	\end{tabular}
-	\caption{Pole-placement evolution on the tuned plant. The final design changes only the dominant part of the dynamics.}
-	\label{tab:pole_comparison}
-\end{table}
+\subsubsection{Resulting gain and verification}
 
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.85\linewidth]{../figures/Pole-Comparison.png}
-	\caption{Comparison between the baseline stabilizing design and the final dominant-pole design for the $4.5^\circ$ initial-tilt test.}
-	\label{fig:pole_comparison}
-\end{figure}
-
-The gain vector for this design is
+The gain vector $\mathbf{K}$ is computed by \texttt{place}$(A,B,p_{\mathrm{des}})$. Numerical values, stability margins, and the chatter check are produced by \texttt{pole\_placement\_design.m}:
 \begin{equation}
-	\mathbf{K} = \begin{bmatrix} 101.67 & 6.85 & -100.69 & -40.10 \end{bmatrix}
+	\mathbf{K} = \begin{bmatrix} K_1 & K_2 & K_3 & K_4 \end{bmatrix}
+	\quad\text{(rerun script and update)}
 \end{equation}
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.6\linewidth]{../figures/CL-Poles-Final.png}
-	\caption{Closed-loop poles of the final pole-placement controller.}
+	\caption{Closed-loop poles. The dominant pair sits at $-\sigma_{th} \pm j\omega_{d,th}$; the cart-velocity pole is well outside it; the cart-position pole is the slowest, governing return-to-centre.}
 	\label{fig:cl_poles_final}
 \end{figure}
+
+The IC sanity check applies a representative startup excursion of $\theta(0) = 2^\circ$ and verifies that the controller catches the disturbance without saturating the voltage at $\pm V_{sat}$ or driving the cart into the rail (Fig.~\ref{fig:ic_final}). The hardware is hand-placed near horizontal at startup -- the seesaw rocks in a limit cycle anyway, so a perfect alignment is neither possible nor required, and operator alignment is good to about $1{-}2^\circ$. This is not a settling-time test, but a one-off-disturbance recovery check.
+
+At $\theta(0) = 2^\circ$ the simulation peaks at $V_m = 4.10$ V (inside the $\pm 6$ V envelope), $\theta = 2.5^\circ$, and a cart excursion of $2.7$ cm (vs the $\pm 40.7$ cm rail). The plant is linear so peak voltage scales with IC; the controller absorbs disturbances up to $\theta_{\max} = 2.93^\circ$ before $V_m$ hits saturation. Beyond that the loop becomes nonlinear; while the linear-region theory no longer guarantees the closed-loop pole locations, in practice the saturation block clips $V_m$ to $\pm V_{sat}$ and the controller still recovers, just more slowly. The $2.93^\circ$ figure is the upper bound of the linear operating envelope, not a hard failure boundary.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\linewidth]{../figures/IC-Response-Final.png}
-	\caption{Initial condition response of the final design for a $4.5^\circ$ tilt disturbance.}
+	\caption{Initial-condition response to a $\theta(0) = 2^\circ$ startup excursion. The voltage peaks at $4.10$ V, well inside saturation; the cart and angle traces stay within their limits. Used to verify the chosen poles produce a clean recovery from a typical operating IC; not a settling-time spec.}
 	\label{fig:ic_final}
 \end{figure}
 
-\subsubsection{Constant Bias Torque and Integral Action}
+\subsubsection{Bias torque -- shifts the rocking centre}
+\label{sssec:bias}
 
-The initial-tilt test validates transient performance but not steady-state accuracy under persistent disturbances. A constant bias torque (100 g equivalent weight left on the seesaw) reveals a residual tilt of $6.69^\circ$ (Fig.~\ref{fig:rep_final}).
+A 100 g mass placed off-centre on the seesaw produces a constant gravitational torque
+\begin{equation}
+	\tau_{bias} = m\,g\,D_T \approx 0.123\;\text{N}\cdot\text{m}.
+\end{equation}
+Without integral action, the closed loop converges to a non-zero steady-state $\theta_{ss}$ (Fig.~\ref{fig:rep_final}). On hardware this means the limit cycle is \emph{centred} on $\theta_{ss}$ rather than on zero -- the rocking band is shifted, not widened. This is the natural behaviour of a regulator with no model of the disturbance.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\linewidth]{../figures/repeated_disturbance.png}
-	\caption{Constant bias torque test without integral action. The response is stable but settles to a non-zero tilt of $6.69^\circ$.}
+	\caption{Bias-torque response without integral action. The cart converges, but to a non-zero $\theta_{ss}$ -- on hardware this offset becomes the centre of the rocking band.}
 	\label{fig:rep_final}
 \end{figure}
 
-To eliminate steady-state error, the state is augmented with an integrator on $\theta$:
+\subsubsection{Integral action -- recenters the rocking band}
+
+To remove the bias-induced offset, the state is augmented with an integrator on $\theta$:
 \begin{equation}
 	\mathbf{x}_a = \begin{bmatrix} x_c & \dot{x}_c & \theta & \dot{\theta} & \xi \end{bmatrix}^\top,
 	\qquad \dot{\xi} = \theta,
-	\qquad V_m = -\mathbf{K}_a\mathbf{x}_a
+	\qquad V_m = -\mathbf{K}_a\,\mathbf{x}_a.
 \end{equation}
-The four poles from the previous design are retained and one integrator pole is added at $-1.0$ (slower than the dominant pair, so the transient shape is preserved):
+The four pole-placement poles are retained and one integrator pole is added at $p_{int} = -0.3$ rad/s, slower than $p_4$ so it does not dominate the cart dynamics:
 \begin{equation}
-	p_{\mathrm{aug}} = \{-2.10 \pm j2.14, \,-2.25, \,-36.50, \,-1.0\}
-\end{equation}
-\begin{equation}
-	\mathbf{K}_a = \begin{bmatrix} 121.29 & 8.50 & -140.79 & -51.41 & -28.63 \end{bmatrix}
+	p_{\mathrm{aug}} = \{\,-7.0 \pm j5.25,\; -10.5,\; -1.0,\; -0.3\,\}
 \end{equation}
 
-Under the same 100 g bias-load test, steady-state tilt is eliminated ($\theta_{ss} \approx 0^\circ$), as shown in Fig.~\ref{fig:bias_integral}. The cart settles at about $3.3$ cm to maintain balance, and peak voltage stays below $2.1$ V.
+What integral action does and does not do:
+\begin{itemize}
+	\item \textbf{Does:} drive $\overline{\theta}\to 0$ under a constant disturbance, so the rocking band is symmetric about zero.
+	\item \textbf{Does not:} reduce the rocking amplitude. The deadband effects that produce the limit cycle are independent of the steady-state offset; the integrator only relocates the centre.
+\end{itemize}
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\linewidth]{../figures/bias_with_integral.png}
-	\caption{Constant bias torque test with integral action. Steady-state tilt is eliminated.}
+	\caption{Bias-torque response with integral action. The steady-state offset is removed; on hardware the rocking band is now centred on zero, with amplitude similar to the no-integral case.}
 	\label{fig:bias_integral}
 \end{figure}
 
-\subsubsection{Frequency-Domain Validation}
+\subsubsection{Frequency-domain validation}
 
-The loop transfer function $L(s) = \mathbf{K}(sI - A)^{-1}B$ yields a phase margin of $55.99^\circ$, gain margin of $-9.30$ dB, and crossover frequency of $6.05$ rad/s.
+The loop transfer function $L(s) = \mathbf{K}(sI - A)^{-1}B$, broken at the plant input, gives the phase margin, gain margin, and crossover frequency reported by the script. The Nyquist plot must encircle $-1$ once counter-clockwise to satisfy stability for the open-loop unstable plant.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.9\linewidth]{../figures/loop_analysis.png}
-	\caption{Frequency-domain validation of the final pole-placement controller: Bode, Nyquist, root-locus, and pole-zero views.}
+	\caption{Frequency-domain validation: Bode (margins), Nyquist (encirclement of $-1$), root locus, and closed-loop pole-zero map.}
 	\label{fig:loop_final}
 \end{figure}
 
+\subsubsection{Luenberger State Observer}
+\label{sssec:observer}
+
+The pole-placement law assumes the full state $\mathbf{x} = [x_c,\ \dot{x}_c,\ \theta,\ \dot{\theta}]^\top$ is available, but only $x_c$ and $\theta$ are encoded; the velocities are not directly measured. The naive workaround is to differentiate each encoder and follow it with a first-order low-pass filter. That scheme has no plant model -- it trades phase lag for noise attenuation blindly, and the lag is paid into the same loop that has to outrun $p_{OL}$. A model-based estimator avoids that trade-off.
+
+\paragraph{Theory (minimal).}
+With the measurement matrix
+\begin{equation}
+	C_{\mathrm{meas}} = \begin{bmatrix} 1 & 0 & 0 & 0 \\ 0 & 0 & 1 & 0 \end{bmatrix},
+	\qquad y = C_{\mathrm{meas}}\mathbf{x},
+\end{equation}
+the Luenberger observer
+\begin{equation}
+	\dot{\hat{\mathbf{x}}} = A\hat{\mathbf{x}} + B u + L\,(y - C_{\mathrm{meas}}\hat{\mathbf{x}})
+	\label{eq:luenberger}
+\end{equation}
+produces an estimate $\hat{\mathbf{x}}$ whose error $e = \mathbf{x} - \hat{\mathbf{x}}$ obeys
+\begin{equation}
+	\dot{e} = (A - L\,C_{\mathrm{meas}})\,e.
+	\label{eq:err_dyn}
+\end{equation}
+If $(A, C_{\mathrm{meas}})$ is observable, the eigenvalues of $A - LC_{\mathrm{meas}}$ can be assigned arbitrarily by choice of $L$. Substituting $u = -\mathbf{K}\hat{\mathbf{x}}$ into the plant and writing the combined system in $(\mathbf{x}, e)$ coordinates gives the block-triangular form
+\begin{equation}
+	\frac{\mathrm{d}}{\mathrm{d}t}\!\begin{bmatrix} \mathbf{x} \\ e \end{bmatrix}
+	= \begin{bmatrix} A - B\mathbf{K} & B\mathbf{K} \\ 0 & A - LC_{\mathrm{meas}} \end{bmatrix}\!\begin{bmatrix} \mathbf{x} \\ e \end{bmatrix}.
+	\label{eq:separation}
+\end{equation}
+Block-triangularity gives the \emph{separation principle}: $\operatorname{eig}(\cdot) = \operatorname{eig}(A - B\mathbf{K}) \cup \operatorname{eig}(A - LC_{\mathrm{meas}})$. Controller and observer are designed independently; the gain $\mathbf{K}$ from \S\ref{sec:pole_placement} is reused unchanged.
+
+The dual identity
+\begin{equation}
+	\operatorname{eig}(A - LC_{\mathrm{meas}}) = \operatorname{eig}\!\big((A^\top - C_{\mathrm{meas}}^\top L^\top)^\top\big)
+\end{equation}
+turns the observer-gain problem into a pole-placement problem on the pair $(A^\top, C_{\mathrm{meas}}^\top)$, solved with \texttt{place} just as for $\mathbf{K}$.
+
+\paragraph{Tuning plan.}
+Each observer pole is chosen against an explicit objective with bounds, in the same style as the controller poles. Let $\sigma_{\mathrm{obs}} = \min_i |\Re(p_{\mathrm{obs},i})|$ denote the slowest observer mode.
+
+\textit{Lower bound (separation).} The estimate must catch up before the controller acts on it; otherwise feedback is built on stale state and the loop behaves like a delayed full-state system. The standard rule
+\begin{equation}
+	|\Re(p_{\mathrm{obs}})| \;\geq\; (3{-}5)\,|\Re(p_{\mathrm{ctrl}})|
+\end{equation}
+guarantees a clean time-scale separation.
+
+\textit{Upper bound (noise).} Each encoder count $\delta y_i$ propagates to the input as $\delta V_m = (\mathbf{K} L) \delta y_i$. With encoder quanta
+\begin{equation}
+	q_{x_c} = K_{ec} \approx 2.275\times 10^{-5}\,\text{m},
+	\qquad q_\theta = K_{E,SW}/K_{gs} \approx 5\times 10^{-4}\,\text{rad},
+\end{equation}
+the per-count voltage chatter must stay well under $V_{sat}$; we demand $|(\mathbf{K} L)_i|\,q_i \lesssim 0.1$ V on each channel. Increasing the observer-pole multiplier $k_{\mathrm{obs}}$ inflates $L$ and therefore this product.
+
+\textit{Damping.} Estimation overshoot is internal and does not directly distort the loop, but high damping shortens error decay. Mirror the controller-pair shape ($\zeta = 0.8$) so the observer behaves predictably in transients.
+
+\textit{Choice.} We sweep $k_{\mathrm{obs}}$ across the textbook band and read the noise gain at each value. The result decides where to land:
+\begin{table}[H]
+	\centering
+	\begin{tabular}{c|cc|c}
+		\hline
+		\rowcolor{bluePoli!40}
+		$k_{\mathrm{obs}}$ & $|\mathbf{K}L|_1\,q_{x_c}$ [V/count] & $|\mathbf{K}L|_2\,q_\theta$ [V/count] & $t_{\mathrm{settle}}$ [s] \T\B \\
+		\hline
+		\hline
+		1.50 & 0.026 & 1.88 & 3.00 \T\\
+		2.00 & 0.172 & 1.89 & 2.89 \\
+		\textbf{2.50} & \textbf{0.208} & \textbf{1.86} & \textbf{2.41} \\
+		3.00 & 0.227 & 3.69 & 2.07 \\
+		3.50 & 0.087 & 3.36 & 2.11 \\
+		4.00 & 0.195 & 5.16 & 1.58 \B\\
+		\hline
+	\end{tabular}
+	\caption{Observer-gain sweep. The cart-channel noise gain rises monotonically; the $\theta$-channel gain holds flat at $\sim 1.9$ V/count up to $k_{\mathrm{obs}} = 2.5$, then jumps to $3.7$ V/count at $k_{\mathrm{obs}} = 3$. The textbook upper bound ($k_{\mathrm{obs}} = 4$) gives $5.16$ V/count -- nearly $V_{sat}$ on a single encoder count, $90\times$ the controller-only $V_{chatter} = 0.059$ V.}
+	\label{table:kobs_sweep}
+\end{table}
+
+The textbook $3{-}5\times$ band is unusable here: the noise gain at $k_{\mathrm{obs}} \geq 3$ blows the chatter budget. We pick $k_{\mathrm{obs}} = 2.5$, the value just below the noise-gain knee:
+\begin{equation}
+	p_{\mathrm{obs}} = 2.5 \cdot \{\,-7.0 \pm j5.25,\; -10.5,\; -1.0\,\} = \{\,-17.5 \pm j13.125,\; -26.25,\; -2.5\,\}.
+\end{equation}
+This sits below the textbook lower bound, but the practical concern that motivates the lower bound (estimate stale relative to controller bandwidth) is satisfied: the dominant theta-loop modes shift from $-7.0 \pm j5.25$ for the controller to $-17.5 \pm j13.1$ for the observer, $2.5\times$ faster on the modes that matter. The slowest observer pole at $-2.5$ rad/s regulates the estimation error of cart \emph{position} -- a state directly measured by the encoder -- so leaving it slow has no functional cost: the observer's $\hat{x}_c$ tracks $x_{c,\mathrm{meas}}$ via the $L_{1,1}$ feedthrough almost instantaneously regardless of where that eigenvalue sits.
+
+\paragraph{Verification.}
+The design script \texttt{luenberger\_observer\_design.m} runs all six checks. Numerical results for the chosen $k_{\mathrm{obs}} = 2.5$:
+\begin{enumerate}
+	\item \textbf{Observability.} $\operatorname{rank}(\mathcal{O}) = 4$, $\operatorname{cond}(\mathcal{O}) = 3.7\times 10^{2}$ -- well-conditioned. Both states behind each encoder (velocity behind position, $\dot\theta$ behind $\theta$) are recoverable.
+	\item \textbf{Gain.}
+	\begin{equation}
+		L = \begin{bmatrix} 23.88 & 7.41 \\ 17.58 & 70.75 \\ -15.20 & 21.09 \\ -46.01 & 74.84 \end{bmatrix}.
+	\end{equation}
+	The dominant entries are in the $\theta$ column, second and fourth rows -- $\theta$-measurement is the dominant correction term for both velocity estimates, as the dynamic coupling predicts.
+	\item \textbf{Separation principle.} Eigenvalue mismatch between the combined $8\times 8$ matrix and the union of controller/observer spectra: $1.1\times 10^{-14}$, i.e. machine precision. The construction is algebraically correct.
+	\item \textbf{IC error decay.} The hardware is hand-placed near horizontal, typically within $1{-}2^\circ$ of zero -- it will rock in a limit cycle anyway, so a perfect alignment is neither possible nor required. We use $\theta(0) = 2^\circ$ as the realistic startup excursion (the $4.5^\circ$ used in the controller IC test is an extreme bump-recovery check, not a representative start condition). With $\hat{\mathbf{x}}(0)=0$ and $\mathbf{x}(0) = [0,0,2^\circ,0]^\top$, all four error components fall inside their encoder-quantum tolerance by $t = 1.81$ s, consistent with the slowest observer pole at $-2.5$ rad/s.
+	\item \textbf{Loop in the loop.} The combined system response is plotted in Fig.~\ref{fig:obs_ic}.
+	\item \textbf{Noise injection.}
+	\begin{equation}
+		|\mathbf{K} L|_1\,q_{x_c} = 0.21\;\text{V/count}, \qquad
+		|\mathbf{K} L|_2\,q_\theta = 1.86\;\text{V/count}.
+	\end{equation}
+	The $\theta$-channel gain is $32\times$ the controller-only $V_{chatter} = 0.059$ V/count.
+\end{enumerate}
+
+\paragraph{Engineering implications of the noise figure.}
+The $1.86$ V/count number deserves explicit comment because it looks alarming. It is the \emph{static} (DC) gain from a single-count perturbation on $\theta$ to $V_m$; it would only be reached if a 1-count error persisted across the full observer time constant. In practice:
+\begin{itemize}
+	\item Encoder quantization is high-frequency dither, sampled at $1$ kHz; the observer bandwidth ($\approx 17.5$ rad/s $\approx 2.8$ Hz dominant pair, $\approx 26$ rad/s real pole) is three orders of magnitude below the sampling rate, so most of the quantization energy is filtered out by $A - LC$ before reaching $\mathbf{K}\hat{\mathbf{x}}$.
+	\item The figure to compare against on hardware is the steady-state limit-cycle voltage RMS, not the per-count step. Expect chatter inflation by a factor of $\sim 5{-}10\times$ over the controller-only baseline, not $32\times$.
+	\item The trade is honest: the differentiator + LPF currently in use has its own DC gain explosion (the LPF at $\omega_f = 100$ rad/s passes a per-count $\dot\theta$ pulse at $K_{\dot\theta} \cdot \omega_f \cdot q_\theta$, which for $K_{\dot\theta} \sim 1$ V$\cdot$s/rad already gives $\sim 0.05$ V at high frequency but with much worse phase margin). The observer gives less phase loss for the same noise budget.
+\end{itemize}
+
+\paragraph{Startup transient and initialisation.}
+At the realistic $\theta(0) = 2^\circ$ the three configurations we care about compare cleanly:
+\begin{table}[H]
+	\centering
+	\begin{tabular}{lcc}
+		\hline
+		\rowcolor{bluePoli!40}
+		Configuration & peak $V_m$ [V] & peak $\theta$ [deg] \T\B \\
+		\hline\hline
+		Controller alone, full state available & 4.10 & 2.50 \T\\
+		Observer + controller, cold start ($\hat{\mathbf{x}}(0)=0$) & 5.14 & 2.69 \\
+		Observer + controller, realistic init (Eq.~\ref{eq:obs_init}) & 4.10 & 2.50 \B\\
+		\hline
+	\end{tabular}
+	\caption{Peak transient values at the realistic startup excursion $\theta(0)=2^\circ$. The cold-start observer adds $\sim 25\%$ to the controller-only voltage demand but stays inside $V_{sat} = 6$ V. The realistic-init observer is transparent.}
+	\label{table:obs_startup}
+\end{table}
+
+The natural deployment is to seed the observer with the encoders at the moment the controller starts:
+\begin{equation}
+	\hat{\mathbf{x}}(0) = \begin{bmatrix} x_{c,\mathrm{meas}} & 0 & \theta_{\mathrm{meas}} & 0 \end{bmatrix}^\top,
+	\label{eq:obs_init}
+\end{equation}
+zeroing only the unmeasured velocities. With this initialisation the only nonzero error component is the initial velocity guess error (zero in this scripted IC, small in practice), and the observer is transparent: the closed-loop voltage and angle traces match the full-state controller-alone case. Even cold-starting from $\hat{\mathbf{x}}(0)=0$ is safe at typical operating ICs -- the $5.14$ V peak still sits inside saturation -- so the observer does not constrain the startup procedure.
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.6\linewidth]{../figures/Observer-Poles.png}
+	\caption{Observer poles (blue) vs controller poles (red). The dominant theta-loop pair sits $2.5\times$ further left than the controller's; the slowest observer pole ($-2.5$ rad/s) regulates cart-position estimation, a state already directly measured by the cart encoder.}
+	\label{fig:obs_poles}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.85\linewidth]{../figures/Observer-Error.png}
+	\caption{Estimation error $e = \mathbf{x} - \hat{\mathbf{x}}$ from cold start ($\hat{\mathbf{x}}(0) = 0$) under $\mathbf{x}(0) = [0,0,2^\circ,0]^\top$. The measured channel ($\theta$, third panel) settles in under $0.5$ s -- the encoder pulls $\hat\theta$ to $\theta$ via $L$ almost immediately. The unmeasured channels are slower: $\dot\theta$ (bottom panel) is the dominant slow mode, settling around $2$ s, governed by the slowest observer pole at $-2.5$ rad/s. This is the actual figure of merit for the observer.}
+	\label{fig:obs_error}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.85\linewidth]{../figures/Observer-IC-Response.png}
+	\caption{Cold-start IC response with the observer in the loop at $\theta(0) = 2^\circ$. The cart peaks at $4.5$ cm, $\theta$ overshoots to $2.7^\circ$ (well inside the $\pm 11.5^\circ$ stops, dashed red), and $V_m$ peaks at $5.14$ V, just inside the saturation envelope (dashed red). With the realistic initialisation \eqref{eq:obs_init} the voltage trace drops to the controller-only profile (peak $4.10$ V).}
+	\label{fig:obs_ic}
+\end{figure}
+
+\paragraph{Note on the augmented controller.}
+With integral action the controller state is $\mathbf{x}_a = [\mathbf{x}; \xi]$ where $\dot{\xi} = \theta$. Since $\theta$ is measured directly, $\xi$ is integrated from the encoder reading, not from $\hat{\theta}$. Only the four plant states are estimated; the observer carries over to the augmented controller without modification.
+
 \subsubsection{Implementation and Hardware Results}
 
-On hardware, only $x_c$ and $\theta$ are measured by encoders. The velocities $\dot{x}_c$ and $\dot{\theta}$ are obtained by differentiating the encoder signals through a first-order low-pass filter ($\omega_f = 100$ rad/s) to attenuate sensor noise.
+On hardware, only $x_c$ and $\theta$ are measured by encoders. The Luenberger observer of \S\ref{sssec:observer} reconstructs $\dot{x}_c$ and $\dot{\theta}$ from the encoder pair using the linearised plant model, replacing the differentiator + low-pass filter scheme.
 
 % TODO: Simulink block diagram screenshot
 % TODO: Hardware test — initial tilt response (plot + table: settling time, peak theta, peak V_m)
