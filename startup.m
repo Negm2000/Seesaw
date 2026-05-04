@@ -23,6 +23,13 @@ end
 % Set the project root as a base workspace variable for scripts to use
 assignin('base', 'SEESAW_ROOT', root_dir);
 
+% Configure Simulink build artifacts redirection
+build_dir = fullfile(root_dir, 'build');
+if ~exist(build_dir, 'dir')
+    mkdir(build_dir);
+end
+Simulink.fileGenControl('set', 'CacheFolder', build_dir, 'CodeGenFolder', build_dir);
+
 % Load system parameters
 seesaw_params;
 
