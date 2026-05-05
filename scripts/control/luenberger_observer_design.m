@@ -12,6 +12,7 @@
 %
 % Requires: seesaw_params.m, tuned_params.mat, controller_freq.mat
 % Outputs:  data/observer.mat, docs/figures/Observer-*.png
+%           observer.mat includes A_obs/B_obs/C_obs/D_obs for Simulink.
 
 close all; clc
 
@@ -71,6 +72,14 @@ k_obs  = 2.0;
 p_obs  = make_placeable_poles(k_obs * p_ctrl);
 L      = place(A_sw', C_meas', p_obs)';
 
+%% Simulink Observer State-Space Matrices
+% Input vector:  [u; x_c_measured; theta_measured]
+% Output vector: xhat = [x_c; x_c_dot; theta; theta_dot]
+A_obs = A_sw - L*C_meas;
+B_obs = [B_sw L];
+C_obs = eye(4);
+D_obs = zeros(4, 3);
+
 %% Separation Principle Verification
 A_combined = [A_sw - B_sw*Kf,   B_sw*Kf;
               zeros(4,4),       A_sw - L*C_meas];
@@ -112,7 +121,9 @@ ylabel('V_m [V]'); xlabel('Time [s]')
 saveas(gcf, fullfile(figdir, 'Observer-IC-Response.png'))
 
 %% Save
-save(fullfile(root, 'data', 'observer.mat'), 'L', 'p_obs', 'k_obs', 'A_sw', 'B_sw', 'Kf');
+save(fullfile(root, 'data', 'observer.mat'), ...
+     'L', 'p_obs', 'k_obs', 'A_sw', 'B_sw', 'Kf', ...
+     'A_obs', 'B_obs', 'C_obs', 'D_obs');
 fprintf('Saved data/observer.mat\n')
 
 %% Helpers
