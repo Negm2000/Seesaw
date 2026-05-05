@@ -43,10 +43,11 @@ fprintf('Observability rank: %d / 4\n', O_rank);
 assert(O_rank == 4, 'Plant is not observable.');
 
 %% Pole Selection
-% Separation ratio: k_obs = 2.0 (observer bandwidth ~ 2x controller).
-% Higher k_obs increases noise amplification (KL gain).
+% Observer poles should be faster than the controller poles, but not blindly
+% scaled as a group: that can create poorly conditioned L gains and amplify
+% encoder noise. Use a separate, faster observer pole set instead.
 theta0_deg = 2.0;
-k_sweep = [1.5, 2.0, 2.5, 3.0];
+k_sweep = [1.00, 1.50, 2.00, 2.50, 3.00];
 p_ctrl  = ctrl.p_final;
 q_xc    = K_ec;
 q_theta = K_E_SW / K_gs;
@@ -68,8 +69,13 @@ for i = 1:numel(k_sweep)
         k_sweep(i), abs(KL_i(1))*q_xc, abs(KL_i(2))*q_theta, ts);
 end
 
+% About 2x faster than the controller's dominant theta pair while avoiding
+% the pathological KL gain produced by direct scaling of all controller poles.
 k_obs  = 2.0;
-p_obs  = make_placeable_poles(k_obs * p_ctrl);
+p_obs  = [-9.0 + 6.75i;
+          -9.0 - 6.75i;
+          -10.8;
+          -13.5];
 L      = place(A_sw', C_meas', p_obs)';
 
 %% Simulink Observer State-Space Matrices
@@ -90,7 +96,10 @@ fprintf('\nSeparation principle mismatch: %.2e\n', err_eig);
 
 %% Simulation
 x0     = [0; 0; deg2rad(theta0_deg); 0];
-xhat0  = [0; 0; 0; 0];
+% In hardware, only positions are measured at startup. Initialize the
+% observer with measured positions and zero velocities to avoid an
+% unrealistic cold-start transient in the linear, unsaturated simulation.
+xhat0  = [x0(1); 0; x0(3); 0];
 dt = 0.001; t = (0:dt:3)';
 sys_combined = ss(A_combined, zeros(8,1), eye(8), zeros(8,1));
 z = initial(sys_combined, [x0; x0-xhat0], t);
@@ -113,7 +122,7 @@ saveas(gcf, fullfile(figdir, 'Observer-Poles.png'))
 
 figure
 subplot(3,1,1); plot(t, x_hist(:,1)*100, 'LineWidth', 1.2); grid on
-ylabel('Cart [cm]'); title('Observer IC Response (Cold Start)')
+ylabel('Cart [cm]'); title('Observer IC Response (Position-Initialized)')
 subplot(3,1,2); plot(t, rad2deg(x_hist(:,3)), 'LineWidth', 1.2); grid on
 ylabel('\theta [deg]')
 subplot(3,1,3); plot(t, u_hist, 'LineWidth', 1.2); grid on
