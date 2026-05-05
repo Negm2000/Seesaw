@@ -61,7 +61,7 @@ saveas(gcf, fullfile(figdir, 'OL-Poles.png'))
 % sigma_th (= -Re of pair) governs error correction rate.
 %   Lower bound: > p_OL to outrun divergence; 2*p_OL recommended.
 %   zeta_th = 0.8: balances settling time and stability margins.
-sigma_th = 4.5;
+sigma_th = 5.5;
 zeta_th  = 0.8;
 
 % --- p3: real pole, cart-velocity damping (non-dominant) ---
