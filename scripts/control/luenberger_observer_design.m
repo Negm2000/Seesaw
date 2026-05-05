@@ -71,11 +71,16 @@ end
 
 % About 2x faster than the controller's dominant theta pair while avoiding
 % the pathological KL gain produced by direct scaling of all controller poles.
-k_obs  = 2.0;
-p_obs  = [-9.0 + 6.75i;
-          -9.0 - 6.75i;
-          -10.8;
-          -13.5];
+k_obs  = 5.0;
+p_obs = k_obs*real(p_ctrl);
+
+delta = 0.1;
+p_obs = [
+    p_obs(1) + delta;
+    p_obs(2) - delta;
+    p_obs(3) + delta;
+    p_obs(4) - delta;
+];
 L      = place(A_sw', C_meas', p_obs)';
 
 %% Simulink Observer State-Space Matrices
