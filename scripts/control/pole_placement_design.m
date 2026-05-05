@@ -179,15 +179,17 @@ save(fullfile(root, 'data', 'controller_freq.mat'), ...
 fprintf('Saved data/controller_freq.mat\n')
 
 %% Helpers
-function [t, x, v, m] = sim_regulator(A, B, p, x0, t)
+function [K, poles_cl, x, v, m] = sim_regulator(A, B, p, x0, t)
     K = place(A, B, p);
-    sys = ss(A - B*K, zeros(size(A,1), 1), eye(size(A,1)), zeros(size(A,1), 1));
+    Acl = A - B*K;
+    poles_cl = eig(Acl);
+    sys = ss(Acl, zeros(size(A,1), 1), eye(size(A,1)), zeros(size(A,1), 1));
     [y, t] = initial(sys, x0, t);
-    v = -K * y';
-    m.peak_v = max(abs(v));
+    voltage = -K * y';
+    m.peak_v = max(abs(voltage));
     m.peak_y = max(abs(y));
     x.t = t; x.x = y;
-    v.t = t; v.v = v';
+    v.t = t; v.v = voltage';
 end
 
 function [t, x, v, m] = sim_bias_load(Acl, K, M_inv, D_T)
@@ -222,4 +224,16 @@ function p_out = make_placeable_poles(p_in)
             p_out(i) = p_out(i) - delta;
         end
     end
+end
+
+function margins = loop_analysis(A, B, K, figdir)
+    L = tf(ss(A, B, K, 0));
+    [Gm, Pm, ~, wgc] = margin(L);
+    margins.gain_margin_db = 20*log10(Gm);
+    margins.phase_margin_deg = Pm;
+    margins.crossover_rad_s = wgc;
+
+    margin(L); grid on
+    title('Loop Transfer Function Margin Analysis')
+    saveas(gcf, fullfile(figdir, 'loop_analysis.png'))
 end

@@ -522,23 +522,37 @@ Regarding the output equation, only the positions $x_c$ and the angle $\theta$ a
 \subsection{Pole Placement State-Feedback Control}
 \label{sec:pole_placement}
 
-\subsubsection{Control Objective}
-
 \subsubsection{Design Objective}
 
-The controller stabilizes the system and minimizes the steady-state limit cycle caused by friction and quantization. Asymptotic convergence is precluded by these nonlinearities.
+The pole-placement controller is designed for the identified linear model around the horizontal equilibrium,
+\begin{equation}
+	\dot{\mathbf{x}} = A\mathbf{x} + B u, \qquad
+	\mathbf{x} = \begin{bmatrix} x_c & \dot{x}_c & \theta & \dot{\theta} \end{bmatrix}^\top.
+\end{equation}
+With full-state feedback,
+\begin{equation}
+	u = -\mathbf{K}\mathbf{x},
+\end{equation}
+the closed-loop matrix is $A - B\mathbf{K}$. If the pair $(A,B)$ is controllable, the eigenvalues of $A-B\mathbf{K}$ can be assigned by pole placement \cite{chen1999linear}. This is a local, linear-model result: it does not prove global stability of the hardware, and it does not remove friction, backlash, encoder quantisation, rail limits, or voltage saturation. Therefore the controller is validated by checking that the measured hardware response remains bounded and respects the physical limits in the tested operating range.
 
 \subsubsection{Pole Selection Rationale}
 
-The gain vector $\mathbf{K}$ is computed by placing the closed-loop poles $\{p_1,p_2,p_3,p_4\}$ to satisfy performance requirements. Complex poles are characterized by decay rate $\sigma$ and damping ratio $\zeta$ to map directly to settling time ($t_s \approx 4/\sigma$) and overshoot ($M_p = f(\zeta)$). Subscript ``$th$'' denotes the dominant balancing modes.
+The gain vector $\mathbf{K}$ is computed by assigning the closed-loop poles $\{p_1,p_2,p_3,p_4\}$ of $A-B\mathbf{K}$. The pole locations should be interpreted as a design target for the linearised model. In the real plant the measured response also depends on unmodelled nonlinearities and on the observer used to reconstruct the velocity states.
 
-\paragraph{Pole roles.} For this 4-state plant we use:
+The complex pair is described by
+\begin{equation}
+	p_{1,2} = -\sigma_{th} \pm j\omega_{d,th}, \qquad
+	\zeta_{th} = \frac{\sigma_{th}}{\sqrt{\sigma_{th}^2 + \omega_{d,th}^2}}.
+\end{equation}
+For a pure second-order system, $t_s \approx 4/\sigma_{th}$ and $M_p \approx \exp(-\pi\zeta_{th}/\sqrt{1-\zeta_{th}^2})$. These formulas are used only as tuning guidance; the seesaw is a coupled fourth-order plant, so the final performance is checked in simulation and on hardware.
+
+\paragraph{Pole roles.} The selected pole pattern is:
 \begin{itemize}
-	\item $p_{1,2}$: a complex pair governing the $\theta$ dynamics (the unstable balancing mode);
-	\item $p_3$: a real pole damping the cart velocity;
-	\item $p_4$: a real, slow pole governing cart-position regulation.
+	\item $p_{1,2}$: a complex pair chosen as the dominant closed-loop mode associated with balancing the unstable angular motion;
+	\item $p_3$: a real pole placed faster than the dominant pair to avoid a slow cart-velocity transient;
+	\item $p_4$: a real pole placed slightly faster than the dominant pair to return the cart without making the voltage demand excessive.
 \end{itemize}
-Each pole has its own upper and lower bound, derived in the next subsection.
+Because the states are coupled, these labels are not independent single-state modes. They describe the intended dominant behaviour, not a diagonal decomposition of the physical system.
 
 \subsubsection{Open-loop poles}
 
@@ -547,7 +561,7 @@ For the current configuration ($M_c = 0.75\,\text{kg}$, $B_{eq}$ from frequency-
 	\lambda_{OL} \;=\; \{+2.24, \;-2.65, \;-0.45, \;-37.0\}\;\text{rad/s}
 	\quad\text{(approximate)}
 \end{equation}
-The pole at $p_{OL} \approx +2.24$ rad/s is the unstable mode -- the seesaw fall rate. Its time constant is $\tau \approx 0.45$ s. Controllability rank is $4/4$, so we have full pole-placement authority.
+The pole at $p_{OL} \approx +2.24$ rad/s is the unstable mode of the linearised model. Its time constant is approximately $1/p_{OL} = 0.45$ s, which gives the natural fall time of the seesaw near the equilibrium. The controllability matrix of the identified model has rank $4$, so all four linear-model poles are assignable for this parameter set. This statement is restricted to the linear model; if an operating point or parameter set were not controllable or not stabilisable, the uncontrollable unstable modes could not be moved by state feedback.
 
 \begin{figure}[H]
 	\centering
@@ -558,24 +572,24 @@ The pole at $p_{OL} \approx +2.24$ rad/s is the unstable mode -- the seesaw fall
 
 \paragraph{$p_{1,2}$: Dominant balancing mode.} Poles $p_{1,2}$ govern the unstable angular dynamics.
 \begin{itemize}
-	\item \textbf{Decay rate $\sigma_{th}$:} Set to $4.5$ rad/s to provide a 2x stability margin over the unstable open-loop pole $p_{OL} \approx 2.24$ rad/s.
-	\item \textbf{Damping $\zeta_{th}$:} Set to $0.8$ to ensure a transient overshoot of $1.5\%$ while maintaining fast recovery.
+	\item \textbf{Decay rate $\sigma_{th}$:} Set to $4.5$ rad/s, approximately twice the open-loop divergence rate. This makes the linear closed-loop response faster than the natural fall dynamics without requiring unnecessarily high gain.
+	\item \textbf{Damping $\zeta_{th}$:} Set to $0.8$. The equivalent second-order overshoot is about $1.5\%$, but the actual overshoot is verified from the complete state-space simulation.
 \end{itemize}
 
-\paragraph{$p_3, p_4$: Non-dominant modes.} These poles are placed further into the left half-plane than $p_{1,2}$ to ensure the balancing pair remains the dominant system response.
+\paragraph{$p_3, p_4$: Non-dominant modes.} These real poles are placed further left than the dominant pair so that they do not introduce slower transients.
 \begin{itemize}
-	\item $p_3 = -6.75$ rad/s: Damps the cart velocity transient.
-	\item $p_4 = -5.4$ rad/s: Regulates the cart return-to-center.
+	\item $p_3 = -6.75$ rad/s: a faster real pole used to damp the cart-velocity component of the response.
+	\item $p_4 = -5.4$ rad/s: a real pole used to return the cart toward the centre while keeping the controller less aggressive than a much faster placement.
 \end{itemize}
 
-\paragraph{Final pole set and Gain.}
+\paragraph{Final pole set and gain.}
 \begin{equation}
 	p_{\mathrm{des}} = \{-4.5 \pm j3.37,\; -6.75,\; -5.4\} \quad \Rightarrow \quad \mathbf{K} = \begin{bmatrix} 147.43 & 9.83 & -111.00 & -36.71 \end{bmatrix}
 \end{equation}
 
 \subsubsection{Resulting gain and verification}
 
-The gain vector $\mathbf{K}$ is computed by \texttt{place}$(A,B,p_{\mathrm{des}})$. Numerical values, stability margins, and the chatter check are produced by \texttt{pole\_placement\_design.m}:
+The gain vector $\mathbf{K}$ is computed by \texttt{place}$(A,B,p_{\mathrm{des}})$. Numerical values and simulation checks are produced by \texttt{pole\_placement\_design.m}:
 \begin{equation}
 	\mathbf{K} = \begin{bmatrix} 147.43 & 9.83 & -111.00 & -36.71 \end{bmatrix}. \T\B
 \end{equation}
@@ -583,15 +597,15 @@ The gain vector $\mathbf{K}$ is computed by \texttt{place}$(A,B,p_{\mathrm{des}}
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.6\linewidth]{../figures/CL-Poles-Final.png}
-	\caption{Closed-loop poles. The dominant balancing pair sits at $-\sigma_{th} \pm j\omega_{d,th}$, closest to the imaginary axis. Both cart poles ($p_3$, $p_4$) are further from the jw-axis, ensuring the complex pair genuinely governs the system's overall settling time.}
+	\caption{Closed-loop poles of the identified linear model. The complex pair is closest to the imaginary axis and is therefore the intended dominant mode. The real poles are faster, so they should not set the slowest linear transient.}
 	\label{fig:cl_poles_final}
 \end{figure}
 
-The initial condition test uses $\theta(0) = 2^\circ$ (Fig.~\ref{fig:ic_final}). This represents a realistic hardware startup configuration, accounting for the limit-cycle behavior and manual alignment precision. Peak values from the linear simulation:
+The initial-condition test uses $\theta(0) = 2^\circ$ (Fig.~\ref{fig:ic_final}). This is a small-angle test inside the linearisation region and close to a realistic manual startup error. Peak values from the linear simulation are:
 \begin{equation*}
 	V_m = 3.87\;\text{V}, \qquad \theta = 2.55^\circ, \qquad x_c = 3.26\;\text{cm}.
 \end{equation*}
-All well inside $\pm 6$ V, $\pm 11.5^\circ$. Peak voltage scales linearly with IC, so the linear envelope reaches $\theta_{\max} = 3.10^\circ$ before $V_m$ hits saturation. Beyond that the saturation block clips $V_m$, the placed pole locations no longer hold, and the controller still recovers but with degraded margins. The $3.10^\circ$ figure bounds the linear regime, not the recovery capability.
+These values are inside the nominal limits of $\pm 6$ V and $\pm 11.5^\circ$. In the linear simulation, the peak voltage scales with the initial angle, giving $\theta_{\max} = 3.10^\circ$ before $V_m$ reaches saturation. Above this value the actuator saturation changes the closed-loop dynamics, so the assigned poles no longer describe the actual response. The $3.10^\circ$ value is therefore a conservative bound for the unsaturated linear regime, not a guarantee of recovery for larger disturbances.
 
 \begin{figure}[H]
 	\centering
@@ -603,7 +617,7 @@ All well inside $\pm 6$ V, $\pm 11.5^\circ$. Peak voltage scales linearly with I
 \subsubsection{Steady-state bias analysis}
 \label{sssec:bias}
 
-An off-center mass (100 g) induces a constant torque $\tau_{bias} \approx 0.123$ Nm. Without integral action, the system settles at a steady-state offset $\theta_{ss}$ (Fig.~\ref{fig:rep_final}). On hardware, this shifts the center of the limit-cycle oscillation.
+An off-centre mass of 100 g induces a constant torque $\tau_{bias} \approx 0.123$ Nm. Pure state feedback does not include a disturbance model or integral state, so a constant torque bias produces a nonzero equilibrium angle $\theta_{ss}$ (Fig.~\ref{fig:rep_final}). On hardware, friction and quantisation can turn this offset into a bounded oscillation around a shifted centre.
 
 \begin{figure}[H]
 	\centering
@@ -618,7 +632,7 @@ The state is augmented with $\dot{\xi} = \theta$ to eliminate steady-state error
 \begin{equation}
 	\mathbf{x}_a = \begin{bmatrix} x_c & \dot{x}_c & \theta & \dot{\theta} & \xi \end{bmatrix}^\top.
 \end{equation}
-An integrator pole is placed at $p_{int} = -0.5$ rad/s. Integral action restores the oscillation center to $\theta=0$ but does not reduce the limit-cycle amplitude.
+An integrator pole is placed at $p_{int} = -0.5$ rad/s. The integral state rejects constant torque bias in the linear model by driving the average angle back to zero. It should not be interpreted as removing the hardware limit cycle itself; it mainly shifts the centre of the bounded motion back toward $\theta=0$.
 
 \begin{figure}[H]
 	\centering
@@ -629,12 +643,16 @@ An integrator pole is placed at $p_{int} = -0.5$ rad/s. Integral action restores
 
 \subsubsection{Frequency-domain validation}
 
-The loop transfer function $L(s) = \mathbf{K}(sI - A)^{-1}B$, broken at the plant input, gives the phase margin, gain margin, and crossover frequency reported by the script. The Nyquist plot must encircle $-1$ once counter-clockwise to satisfy stability for the open-loop unstable plant.
+For state feedback there is no unique scalar open-loop transfer function unless the loop-breaking point is specified. The reported frequency plot uses the loop broken at the plant input,
+\begin{equation}
+	L(s) = \mathbf{K}(sI - A)^{-1}B.
+\end{equation}
+The Bode and Nyquist plots are therefore local linear robustness checks for this specific loop opening. They are useful for comparing gain and phase margins of the implemented design, but they are not a substitute for hardware validation with saturation, quantisation, and observer dynamics present. On the real setup, the corresponding controller frequency response can be estimated from logged data as $C_{hw}(j\omega) \approx U(j\omega)/E(j\omega)$, where $E$ is the controller input signal and $U$ is the commanded motor voltage.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.9\linewidth]{../figures/loop_analysis.png}
-	\caption{Frequency-domain validation: Bode (margins), Nyquist (encirclement of $-1$), root locus, and closed-loop pole-zero map.}
+	\caption{Frequency-domain checks for the linear model with the loop broken at the plant input: Bode plot, Nyquist plot, root locus, and closed-loop pole-zero map. These plots support the linear design but do not replace hardware validation.}
 	\label{fig:loop_final}
 \end{figure}
 
@@ -732,7 +750,7 @@ The design script \texttt{luenberger\_observer\_design.m} runs all six checks. N
 \end{enumerate}
 
 \paragraph{Noise and bandwidth trade-off.}
-At $k_{\mathrm{obs}} = 2.0$, the $\theta$-channel noise gain is $0.055$ V/count, matching the full-state baseline. The observer bandwidth ($\approx 9$ rad/s) is three orders of magnitude below the sampling rate (1 kHz), providing inherent low-pass filtering of encoder quantization noise. This provides superior phase margin compared to a differentiator-LPF scheme for the same noise budget.
+At $k_{\mathrm{obs}} = 2.0$, the $\theta$-channel noise gain is $0.055$ V/count, matching the full-state baseline. The observer bandwidth ($\approx 9$ rad/s) is three orders of magnitude below the sampling rate (1 kHz), so encoder quantisation noise is not passed directly into the control input. On hardware this must be validated against a differentiated encoder signal and a causally low-pass filtered differentiated signal; the expected advantage of the observer is a smoother velocity estimate without the delay required by an aggressively filtered differentiator.
 
 \paragraph{Startup transient.}
 The observer is validated for a $2.0^\circ$ startup excursion. Peak transient values are compared in Table~\ref{table:obs_startup}.
