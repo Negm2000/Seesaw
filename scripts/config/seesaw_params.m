@@ -10,6 +10,9 @@
 %    [3] VoltPAQ-X1 User Manual v1.1 (Quanser, 2013)
 %  -----------------------------------------------------------------------
 
+%% ===== Matlab constants =====
+s = tf('s');
+
 %% ===== Physical Constants =====
 g = 9.81;                   % Gravitational acceleration [m/s^2]
 
@@ -41,6 +44,7 @@ eta_g  = 0.90;              % Gearbox efficiency [-] (+/- 10%)
 
 %% ===== IP02 Cart and Rack [2] =====
 M_c    = 0.38;              % Cart mass (no weight, no pendulum) [kg]
+M_w    = 0.37;              % Additionnal mass [kg]
 r_mp   = 6.35e-3;           % Motor pinion radius [m]
 r_pp   = 0.01483;           % Position (encoder) pinion radius [m]
 B_eq_c = 4.3;               % Equivalent viscous damping, cart only [N*m*s/rad]
@@ -74,6 +78,9 @@ J_pivot = J_SW_cg + M_SW * D_C^2;
 fprintf('  J_pivot = %.4f kg*m^2 (J_cg + M*Dc^2 = %.3f + %.4f)\n', ...
     J_pivot, J_SW_cg, M_SW * D_C^2);
 
+% Equivalent mass seen by the motor
+M_e = M_c + M_w + J_rotor * K_g^2 / r_mp^2;
+
 % Cart force from motor voltage (Good ref Eq. 2.3, reduced model with L_m = 0):
 %   F_c = (eta_g * K_g * k_t) / (R_m * r_mp) * (-K_g * k_m * x_c_dot / r_mp + eta_m * V_m)
 %
@@ -102,6 +109,22 @@ fprintf('  B_emf = %.2f N*s/m (inside F_c, not added separately)\n', B_emf);
 B_total = B_eq + B_emf;
 fprintf('  B_total = %.2f N*s/m (B_eq + B_emf)\n', B_total);
 
+%% ===== Transfer Function Model 1: Cart on Table =====
+%
+% Input:  V_m (motor voltage, after amplifier + saturation)
+% Output: x_c
+%
+% eom:  M_e * x_ddot + B_tot * x_dot = alpha * V_m
+% 
+% tf :  Gx(s) = X_c(s) / V_m(s)
+%             = alpha / (M_e * s^2 + B_tot * s)
+
+num_x = alpha_f;
+den_x = [M_e, B_total, 0];
+
+Gx = minreal(alpha_f / (M_e*s + B_total) / s);
+fprintf('  [Phase 1] Gx(s) computed.\n');
+
 %% ===== Linear State-Space Model 1: Cart on Table =====
 % QUARC-compatible: uses standard State-Space block (no S-function/TLC needed)
 %
@@ -113,57 +136,78 @@ fprintf('  B_total = %.2f N*s/m (B_eq + B_emf)\n', B_total);
 %   y     = C_cart * x + D_cart * V_m
 %
 A_cart = [0,  1;
-          0, -B_total/M_c];
-B_cart = [0;  alpha_f*eta_m/M_c];
+          0, -B_total/M_e];
+B_cart = [0;  alpha_f*eta_m/M_e];
 C_cart = eye(2);        % output both states [x_c; x_c_dot]
 D_cart = zeros(2, 1);
 fprintf('  [Phase 1] A_cart, B_cart, C_cart, D_cart computed.\n');
 
+%% ===== Transfer Function Model 2: Cart on Seesaw (Coupled, Linearised) =====
+% Linearised around equilibrium: x_c=0, x_c_dot=0, alpha=0, alpha_dot=0
+%
+% Input:  V_m (motor voltage, after amplifier + saturation)
+% Output: [x_c; theta]
+%
+% Equations of motion (Quanser Seesaw Lab Guide, linearised about
+%   x_c=0, x_c_dot=0, theta=0, theta_dot=0, L_m=0):
+%
+%   Seesaw EOM:
+%     (J_pivot + M_c*D_T^2)*theta_ddot - M_c*D_T*x_c_ddot
+%         + g*M_c*x_c - g*(M_c*D_T + M_SW*D_C)*theta
+%         = -B_SW*theta_dot
+
+P21 =  -M_e*D_T*s^2 + g*M_e;
+P22 = (J_pivot + M_e*D_T^2)*s^2 + B_SW*s - g*(M_e*D_T + M_SW*D_C);
+
+Gt = minreal(-P21/P22);
+num_t = [M_e*D_T, 0, -g*M_e];
+den_t = [(J_pivot + M_e*D_T^2), B_SW, -g*(M_e*D_T + M_SW*D_C)]; 
+
 %% ===== Linear State-Space Model 2: Cart on Seesaw (Coupled, Linearised) =====
-% Linearised about equilibrium: x_c=0, x_c_dot=0, alpha=0, alpha_dot=0
+% Linearised around equilibrium: x_c=0, x_c_dot=0, theta=0, theta_dot=0
 % QUARC-compatible: uses standard State-Space block (no S-function/TLC needed)
 %
 % Input:  V_m (motor voltage, after amplifier + saturation)
-% States: [x_c; x_c_dot; alpha; alpha_dot]
-% Output: [x_c; x_c_dot; alpha; alpha_dot]
+% States: [x_c; x_c_dot; theta; theta_dot]
+% Output: [x_c; x_c_dot; theta; theta_dot]
 %
 % Equations of motion (Quanser Seesaw Lab Guide, linearised about
-%   x_c=0, x_c_dot=0, alpha=0, alpha_dot=0, L_m=0):
+%   x_c=0, x_c_dot=0, theta=0, theta_dot=0, L_m=0):
 %
 %   Cart EOM:
-%     M_c*x_c_ddot - M_c*D_T*alpha_ddot + B_total*x_c_dot + g*M_c*alpha
+%     M_c*x_c_ddot - M_c*D_T*theta_ddot + B_total*x_c_dot + g*M_c*theta
 %         = alpha_f * eta_m * V_m
 %
 %   Seesaw EOM:
-%     (J_pivot + M_c*D_T^2)*alpha_ddot - M_c*D_T*x_c_ddot
-%         + g*M_c*x_c - g*(M_c*D_T + M_SW*D_C)*alpha
-%         = -B_SW*alpha_dot
+%     (J_pivot + M_c*D_T^2)*theta_ddot - M_c*D_T*x_c_ddot
+%         + g*M_c*x_c - g*(M_c*D_T + M_SW*D_C)*theta
+%         = -B_SW*theta_dot
 %
-% Solve for [x_c_ddot; alpha_ddot] via effective inertia matrix:
+% Solve for [x_c_ddot; theta_ddot] via effective inertia matrix:
 %
 %   M_eff = [ M_c,        -M_c*D_T            ]
 %           [ -M_c*D_T,    J_pivot+M_c*D_T^2  ]
 %
-%   G_rhs (state [x_c; x_c_dot; alpha; alpha_dot]):
+%   G_rhs (state [x_c; x_c_dot; theta; theta_dot]):
 %     row 1 (cart):   [0, -B_total, -g*M_c,                   0     ]
 %     row 2 (seesaw): [-g*M_c, 0,   g*(M_c*D_T+M_SW*D_C), -B_SW   ]
 %
-%   [x_c_ddot; alpha_ddot] = inv(M_eff) * G_rhs * z + inv(M_eff) * G_inp * V_m
+%   [x_c_ddot; theta_ddot] = inv(M_eff) * G_rhs * z + inv(M_eff) * G_inp * V_m
 
-M_eff = [M_c,          -M_c*D_T;
-         -M_c*D_T,      J_pivot + M_c*D_T^2];
+M_eff = [M_e,          -M_e*D_T;
+         -M_e*D_T,      J_pivot + M_e*D_T^2];
 
 % Inverse of effective inertia matrix
 M_inv = inv(M_eff);
 
 % G_rhs encodes the state-dependent (damping + gravity) right-hand sides.
-%   state vector: z = [x_c; x_c_dot; alpha; alpha_dot]
-%   cart row   : gravity coupling -g*M_c in alpha column
+%   state vector: z = [x_c; x_c_dot; theta; theta_dot]
+%   cart row   : gravity coupling -g*M_c in theta column
 %   seesaw row : gravity coupling -g*M_c in x_c column;
 %                restoring moment g*(M_c*D_T + M_SW*D_C) in alpha column
 
-G_rhs = [0, -B_total,  -g*M_c,                        0;   % cart EOM RHS
-         -g*M_c, 0,     g*(M_c*D_T + M_SW*D_C),  -B_SW];   % seesaw EOM RHS
+G_rhs = [0, -B_total,  -g*M_e,                        0;   % cart EOM RHS
+         -g*M_e, 0,     g*(M_e*D_T + M_SW*D_C),  -B_SW];   % seesaw EOM RHS
 
 % Full A_sw (4x4):  state derivative = M_inv * G_rhs * z
 %   rows 1,3 (positions) are just velocities; rows 2,4 are accelerations
@@ -215,5 +259,5 @@ fprintf('Amplifier gain K_a = %d (VERIFY switch on VoltPAQ!)\n', K_a);
 fprintf('Voltage saturation = +/- %.1f V\n', V_sat);
 fprintf('Max angle = +/- %.1f deg (= physical stops)\n', alpha_max * 180/pi);
 fprintf('Motor model: L_m = 0 (reduced, matches Good ref Eq. 2.3)\n');
-fprintf('  Cart mass m_c = %.3f kg (no reflected rotor inertia -- matches Good ref)\n', M_c);
+fprintf('  Cart mass m_c = %.3f kg (no reflected rotor inertia -- matches Good ref)\n', M_e);
 fprintf('SS matrices ready: A_cart/B_cart/C_cart/D_cart (Phase 1), A_sw/B_sw/C_sw/D_sw (Phase 2)\n');
