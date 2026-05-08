@@ -16,16 +16,6 @@ s = tf('s');
 %% ===== Physical Constants =====
 g = 9.81;                   % Gravitational acceleration [m/s^2]
 
-%% ===== VoltPAQ-X1 Amplifier [3] =====
-K_a   = 1;                  % Amplifier gain [V/V] -- SET SWITCH TO 1x!
-V_sat = 6.0;                % Motor nominal voltage limit [V] (IP02 Manual Table 3.1)
-                             % VoltPAQ can output up to 22V but motor is rated for 6V.
-                             % NOTE: No current limiting circuit exists in this
-                             % signal chain. VoltPAQ is a linear voltage amp
-                             % (up to 4A continuous). Motor current is governed
-                             % entirely by the electrical dynamics (Ohm's law +
-                             % back-EMF). I_max = 1A is a thermal rating only.
-
 %% ===== IP02 DC Motor (Faulhaber 2338S006) [2] =====
 R_m      = 2.6;             % Armature resistance [Ohm] (+/- 12%)
 L_m      = 0.18e-3;         % Armature inductance [H]
@@ -38,6 +28,15 @@ I_max    = 1.0;             % Maximum continuous current [A]
 I_peak   = 3.0;             % Maximum peak current [A]
 f_max    = 50;              % Maximum input voltage frequency [Hz]
 
+%% ===== VoltPAQ-X1 Amplifier [3] =====
+K_a   = 1;                  % Amplifier gain [V/V] -- SET SWITCH TO 1x!
+V_sat = V_nom * sqrt(3);    % Motor nominal voltage limit [V] (IP02 Manual Table 3.1)
+                             % VoltPAQ can output up to 22V but motor is rated for 6V.
+                             % NOTE: No current limiting circuit exists in this
+                             % signal chain. VoltPAQ is a linear voltage amp
+                             % (up to 4A continuous). Motor current is governed
+                             % entirely by the electrical dynamics (Ohm's law +
+                             % back-EMF). I_max = 1A is a thermal rating only.
 %% ===== IP02 Gearbox (Faulhaber Planetary 23/1) [2] =====
 K_g    = 3.71;              % Gearbox gear ratio [-]
 eta_g  = 0.90;              % Gearbox efficiency [-] (+/- 10%)
@@ -50,6 +49,7 @@ r_pp   = 0.01483;           % Position (encoder) pinion radius [m]
 B_eq_c = 4.3;               % Equivalent viscous damping, cart only [N*m*s/rad]
                              % NOTE: This is referenced to the motor shaft.
                              % At the cart: B_cart = B_eq_c * eta_g * K_g / r_mp
+B_eq_w = 5.4;               % Equivalent viscous damping, cart and mass [N*m*s/rad]
 L_track = 0.990;            % Track length [m]
 T_c     = 0.814;            % Cart travel (usable) [m]
 x_c_max = T_c / 2;          % Max cart displacement from center [m]
@@ -68,7 +68,7 @@ B_SW    = 0.0;              % Viscous damping at pivot [N*m*s/rad]
                              % Manual says ~0; increase if model overshoots.
                              % Try 0.01-0.1 if needed during tuning.
 K_E_SW  = 0.0015;           % Seesaw encoder resolution [rad/count]
-alpha_max = 11.5 * pi/180;  % Maximum seesaw tilt angle [rad]
+theta_max = 11.5 * pi/180;  % Maximum seesaw tilt angle [rad]
 
 %% ===== Derived Parameters =====
 
@@ -94,7 +94,7 @@ M_e = M_c + M_w + J_rotor * K_g^2 / r_mp^2;
 % Equivalent damping at cart [N*s/m] (maps to B_eq in Good ref Eq. 2.1)
 % This is the mechanical friction only -- back-EMF damping is already inside F_c.
 % TUNE THIS against hardware step response data.
-B_eq = 5.0;
+B_eq = B_eq_w;
 fprintf('  B_eq = %.2f N*s/m (cart friction, tunable -- Good ref Eq. 2.1)\n', B_eq);
 
 % Motor force gain factor (Good ref Eq. 2.3 prefactor)
@@ -124,6 +124,10 @@ den_x = [M_e, B_total, 0];
 
 Gx = minreal(alpha_f / (M_e*s + B_total) / s);
 fprintf('  [Phase 1] Gx(s) computed.\n');
+
+% Pre-computing to anticipate
+Gv = s * Gx;        % Volt to Velocity tf
+Ga = s^2 * Gx;      % Volt to Acceleration tf
 
 %% ===== Linear State-Space Model 1: Cart on Table =====
 % QUARC-compatible: uses standard State-Space block (no S-function/TLC needed)
@@ -257,7 +261,7 @@ end
 fprintf('\nAll parameters loaded successfully.\n');
 fprintf('Amplifier gain K_a = %d (VERIFY switch on VoltPAQ!)\n', K_a);
 fprintf('Voltage saturation = +/- %.1f V\n', V_sat);
-fprintf('Max angle = +/- %.1f deg (= physical stops)\n', alpha_max * 180/pi);
+fprintf('Max angle = +/- %.1f deg (= physical stops)\n', theta_max * 180/pi);
 fprintf('Motor model: L_m = 0 (reduced, matches Good ref Eq. 2.3)\n');
 fprintf('  Cart mass m_c = %.3f kg (no reflected rotor inertia -- matches Good ref)\n', M_e);
 fprintf('SS matrices ready: A_cart/B_cart/C_cart/D_cart (Phase 1), A_sw/B_sw/C_sw/D_sw (Phase 2)\n');

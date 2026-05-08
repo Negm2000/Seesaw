@@ -14,60 +14,21 @@
 seesaw_params;
 
 B_eq_nominal = B_eq;  % save for comparison later
-fprintf('\n--- Nominal Model ---\n');
+eta_g_nominal = eta_g;
+fprintf('\n----- Nominal Model -----\n');
 fprintf('  B_eq     = %.2f N*s/m (will be tuned)\n', B_eq);
-fprintf('  B_emf    = %.2f N*s/m (from back-EMF)\n', B_emf);
+fprintf('  eta_g    = %.2f N*s/m (will be tuned)\n', eta_g);
+fprintf('--- Impacted Parameters ---\n');
 fprintf('  B_total  = %.2f N*s/m\n', B_total);
 fprintf('  alpha_f  = %.4f (motor force constant)\n', alpha_f);
-
-%% 2. ANALYTICAL TRANSFER FUNCTION
-%  Derive and plot the cart position transfer function G(s) = X_c(s)/V_m(s).
-%  This is the "prediction" we'll compare against hardware.
-
-s_tf = tf('s');
-G_xc    = K_a * alpha_f * eta_m / (M_c * s_tf^2 + B_total * s_tf);
-G_xcdot = K_a * alpha_f * eta_m / (M_c * s_tf + B_total);
-
-freq_range = logspace(log10(f_chirp_start), log10(f_chirp_end), 200);
-[mag_an, phase_an] = bode(G_xc, 2*pi*freq_range);
-mag_an_dB   = 20*log10(squeeze(mag_an) * 100);  % convert m/V to cm/V
-phase_an_deg = squeeze(phase_an);
-
-figure('Name', 'Analytical Bode: Cart on Table', 'Position', [50 50 1000 600]);
-subplot(2,1,1);
-semilogx(freq_range, mag_an_dB, 'b-', 'LineWidth', 2);
-grid on; ylabel('Magnitude [dB cm/V]');
-title('Analytical Model: V_{cmd} \rightarrow x_c');
-subplot(2,1,2);
-semilogx(freq_range, phase_an_deg, 'b-', 'LineWidth', 2);
-grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
-sgtitle(sprintf('Nominal Model (B_{eq} = %.1f N{\\cdot}s/m)', B_eq));
-
-fprintf('\nDC gain (velocity): %.4f (cm/s)/V\n', dcgain(G_xcdot)*100);
-fprintf('Velocity pole: %.2f Hz\n', B_total/M_c / (2*pi));
-
-%% 3. BUILD QUARC FREQUENCY TEST MODEL
-%  Programmatically build IP02_FreqTest.slx with chirp input.
-%  This model runs on hardware via QUARC External Mode.
-
-frequency_setup;  % builds models/IP02_FreqTest.slx
-
-fprintf('\n========================================\n');
-fprintf(' NEXT STEP: Go to hardware!\n');
-fprintf('========================================\n');
-fprintf(' 1. Open models/IP02_FreqTest.slx\n');
-fprintf(' 2. Connect to QUARC (External Mode)\n');
-fprintf(' 3. Run the model — wait %d seconds\n', chirp_duration);
-fprintf(' 4. Data saves automatically to data/data.mat\n');
-fprintf(' 5. Come back here and run Section 4\n');
-fprintf('========================================\n');
+fprintf('-------------------------\n');
 
 %% 4. LOAD & INSPECT HARDWARE DATA
 %  Load the frequency sweep data collected from QUARC.
 %  Plot raw time traces to sanity-check before analysis.
 
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-data_file = fullfile(SEESAW_ROOT, 'data', 'data.mat');
+data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'step_3V.mat');
 
 if ~exist(data_file, 'file')
     error('data/data.mat not found. Run Section 3 on hardware first.');
@@ -90,9 +51,17 @@ end
 t_hw      = raw(1, :)';
 V_cmd_hw  = raw(2, :)';
 xc_hw     = raw(3, :)';      % [m] — with corrected encoder gain
-xcdot_hw  = raw(4, :)';      % [m/s]
 dt_hw     = mean(diff(t_hw));
 Fs_hw     = 1 / dt_hw;
+
+% Compute the velocity in post-processing to avoid phase-lag
+cutoff_freq = B_total/M_e * 2;
+[b, a] = butter(2, cutoff_freq / (Fs_hw/2));
+xc_hw_clean = filtfilt(b, a, xc_hw);
+
+% Because of the differential we "lose" the last data point
+tdot_hw = t_hw(1:end-1);
+xcdot_hw = diff(xc_hw_clean)/dt_hw;
 
 fprintf('  Duration: %.1f s | Fs: %.0f Hz | Samples: %d\n', t_hw(end), Fs_hw, length(t_hw));
 fprintf('  x_c range: [%.1f, %.1f] cm\n', min(xc_hw)*100, max(xc_hw)*100);
@@ -108,68 +77,125 @@ end
 figure('Name', 'Raw Hardware Data', 'Position', [100 100 1000 700]);
 subplot(3,1,1);
 plot(t_hw, V_cmd_hw, 'k-'); ylabel('V_{cmd} [V]'); title('Chirp Input');
+ylim([-V_sat, V_sat]);
 grid on;
 subplot(3,1,2);
 plot(t_hw, xc_hw*100, 'r-'); ylabel('x_c [cm]'); title('Cart Position (Hardware)');
 grid on;
 subplot(3,1,3);
-plot(t_hw, xcdot_hw*100, 'r-'); ylabel('dx_c/dt [cm/s]'); title('Cart Velocity (Hardware)');
+plot(tdot_hw, xcdot_hw*100, 'r-'); ylabel('dx_c/dt [cm/s]'); title('Cart Velocity (Hardware)');
 xlabel('Time [s]'); grid on;
-sgtitle('Raw Hardware Frequency Sweep Data');
+sgtitle('Raw Hardware Step Response Data');
 
-%% 5. FREQUENCY RESPONSE COMPARISON (UNTUNED)
-%  Compute the empirical FRF from hardware data using Welch's method,
-%  then overlay against the analytical model.
+%% TUNE BASED ON VELOCITY STEADY-STATE AFTER STEP RESPONSE
+% Mathematically tuning eta_g and B_eq.
+% This does not mean that their real physical values will be these ones.
+% It means that we consider that the model behave as it would if the
+% hardware had these values.
 
-[hw_freq, hw_H_xc, ~] = compute_frf(t_hw, V_cmd_hw, xc_hw, xcdot_hw, dt_hw);
+V_step = 3;              % The step input applied
 
-figure('Name', 'FRF: Model vs Hardware (Untuned)', 'Position', [100 100 1000 600]);
-subplot(2,1,1);
-semilogx(freq_range, mag_an_dB, 'b-', 'LineWidth', 1.5); hold on;
-semilogx(hw_freq, 20*log10(abs(hw_H_xc)*100), 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Magnitude [dB cm/V]'); xlim([f_chirp_start f_chirp_end]);
-title('V_{cmd} \rightarrow x_c');
-legend('Analytical (nominal)', 'Hardware', 'Location', 'best');
-subplot(2,1,2);
-semilogx(freq_range, phase_an_deg, 'b-', 'LineWidth', 1.5); hold on;
-semilogx(hw_freq, unwrap(angle(hw_H_xc))*180/pi, 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]'); xlim([f_chirp_start f_chirp_end]);
-sgtitle(sprintf('Frequency Response — BEFORE Tuning (B_{eq} = %.1f)', B_eq));
+% keep datasheet limits
+etag_min = eta_g_nominal * 0.9; % -10%
+etag_max = eta_g_nominal * 1.1; % +10%
 
-%% 6. AUTO-TUNE B_eq
-%  Use fminsearch to find the B_eq that minimizes time-domain RMS error
-%  between the linear model simulation and hardware position data.
-%  eta_g is FIXED at the hardware spec (0.90).
+% Define the gain and time constant of hardware
+pulse_start_time = 0;
+pulse_end_time = 1.0;
+pulse_indices = tdot_hw >= pulse_start_time & tdot_hw <= pulse_end_time;
 
-fprintf('\n--- Auto-Tuning B_eq ---\n');
-fprintf('  Initial B_eq = %.2f N*s/m\n', B_eq);
-fprintf('  eta_g = %.2f (FIXED at hardware spec)\n', eta_g);
+ss_indices = tdot_hw >= (pulse_end_time - 0.2) & tdot_hw <= pulse_end_time;
+V_ss = mean(xcdot_hw(ss_indices));
+V_target = 0.632 * V_ss;
 
-p_tune = struct('K_a',K_a, 'V_sat',V_sat, 'R_m',R_m, 'k_t',k_t, ...
-    'k_m',k_m, 'eta_m',eta_m, 'eta_g',eta_g, 'K_g',K_g, 'r_mp',r_mp, 'M_c',M_c);
+crossing_index = find(xcdot_hw(pulse_indices) >= V_target, 1, 'first');
 
-% Cost function: RMS velocity error (skip first 2s of transient)
-% Velocity is used because B_eq is a damping coefficient -- it directly
-% governs the velocity dynamics, and velocity is immune to DC drift from
-% static friction or track tilt that would bias a position-based cost.
-mask = t_hw > 2.0;
-cost_fn = @(B) tune_cost_Beq(B, V_cmd_hw, t_hw, xcdot_hw, mask, p_tune);
+t_pulse_window = tdot_hw(pulse_indices);
+tau_meas = t_pulse_window(crossing_index) - pulse_start_time;
+K_meas = V_ss / V_step;
 
-opts = optimset('Display', 'iter', 'TolX', 1e-3, 'TolFun', 1e-6);
-[B_eq_opt, cost_opt] = fminsearch(cost_fn, B_eq, opts);
+% 3. Define the Simulation Logic using Anonymous Functions
+% The algorithm will only tweak these two values:
+% p(1) = eta_g (Gearbox Efficiency)
+% p(2) = B_eq (Equivalent Viscous Friction)
+calc_alpha = @(p) (k_t * K_g * p(1) * eta_m) / (r_mp * R_m);
+calc_Btot  = @(p) ((k_t * k_m * K_g^2 * p(1)) / (r_mp^2 * R_m)) + p(2);
 
-fprintf('\n  RESULT: B_eq = %.4f N*s/m (was %.2f)\n', B_eq_opt, B_eq_nominal);
-fprintf('  Change: %+.1f%%\n', (B_eq_opt - B_eq_nominal)/B_eq_nominal * 100);
-fprintf('  RMS velocity error: %.4f cm/s\n', cost_opt * 100);
+% Helper functions for Gain and Time Constant to keep equations clean
+calc_K   = @(p) calc_alpha(p) / calc_Btot(p);
+calc_tau = @(p) M_e / calc_Btot(p);
+
+% Step Responses Calculation
+v_sim = @(p) V_step * (calc_alpha(p) / calc_Btot(p)) * (1 - exp(-(calc_Btot(p) / M_e) * tdot_hw));
+x_sim = @(p) V_step * calc_K(p) * (t_hw - calc_tau(p) * (1 - exp(-t_hw / calc_tau(p))));
+
+% 4. Define the Cost Function (Mean Squared Error)
+% We calculate the normal error, and add a massive penalty if it goes out of bounds
+costFunction = @(p) mean((xcdot_hw - v_sim(p)).^2) + ...
+                    1e6 * (p(1) < etag_min) + ...  % Penalty if too low
+                    1e6 * (p(1) > etag_max);       % Penalty if too high
+
+% 5. Initial Guesses for the 2 Unknowns
+% Provide realistic starting points.
+initial_params = [eta_g_nominal, 6.7217];
+model_params = [eta_g_nominal, B_eq_nominal];
+
+% 6. Run Optimization (Nelder-Mead)
+options = optimset('Display', 'iter', 'TolFun', 1e-6, 'TolX', 1e-6);
+disp('Hunting for optimal gearbox efficiency and friction...');
+best_params = fminsearch(costFunction, initial_params, options);
+
+% 7. Extract and Display Results
+eta_g = best_params(1);
+B_eq   = best_params(2);
+
+% Calculate the final transfer function metrics using the locked eta_m
+alpha_f = calc_alpha(best_params);
+B_total  = calc_Btot(best_params);
+Kdc_opt   = alpha_f / B_total;
+tau_opt   = M_e / B_total;
+
+rmse_init = sqrt(mean((xc_hw - x_sim(model_params)).^2));
+rmse_tuned     = sqrt(mean((xc_hw - x_sim(best_params)).^2));
+
+fprintf('\n--- Optimized Physical Parameters ---\n');
+fprintf('Gearbox Efficiency (eta_g):    %.2f %%\n', eta_g*100);
+fprintf('Viscous Friction (Bc):         %.4f N*s/m\n', B_eq);
+
+fprintf('\n--- Resulting Plant Dynamics ---\n');
+fprintf('DC Gain (K):      %.4f (m/s)/V\n', Kdc_opt);
+fprintf('Time Const (tau): %.4f s\n', tau_opt);
+fprintf('Equivalent Pole:  %.4f rad/s\n', B_total / M_e);
+
+fprintf('\n--- Cross-Validation: Position Error ---\n');
+fprintf('Initial Model Position MSE:   %.4e m\n', rmse_init);
+fprintf('Optimized Model Position MSE: %.4e m\n', rmse_tuned);
+fprintf('Improvement Factor:           %.1fx better\n', rmse_init / rmse_tuned);
+
+% STEP RESPONSE TUNING INSPECTION
+figure
+subplot(2, 1, 1);
+plot(tdot_hw, xcdot_hw, 'k.', 'DisplayName', 'Hardware Data (diff)'); hold on;
+plot(tdot_hw, v_sim(model_params), 'b--', 'LineWidth', 1.5, 'DisplayName', 'Initial Model');
+plot(tdot_hw, v_sim(best_params), 'r-', 'LineWidth', 2.5, 'DisplayName', 'Optimized Model');
+title('Velocity Tracking');
+xlabel('Time (s)'); ylabel('Velocity (m/s)');
+legend('Location', 'southeast'); grid on;
+
+% --- Subplot 2: Position ---
+subplot(2, 1, 2);
+plot(t_hw, xc_hw, 'k.', 'DisplayName', 'Hardware Data (Raw)'); hold on;
+plot(t_hw, x_sim(model_params), 'b--', 'LineWidth', 1.5, 'DisplayName', 'Initial Model');
+plot(t_hw, x_sim(best_params), 'r-', 'LineWidth', 2.5, 'DisplayName', 'Optimized Model');
+title('Position Tracking');
+xlabel('Time (s)'); ylabel('Position (m)');
+legend('Location', 'southeast'); grid on;
 
 %% 7. APPLY TUNED PARAMETERS & REBUILD MODEL
 %  Overwrite B_eq with the tuned value, recompute all derived quantities,
 %  and rebuild both state-space models (cart-only and full seesaw).
 
 fprintf('\n--- Applying Tuned Parameters ---\n');
-
-% Overwrite
-B_eq = B_eq_opt;
 
 % Recompute total damping (alpha_f and B_emf are constants -- not affected by B_eq)
 B_total = B_eq + B_emf;
@@ -203,9 +229,12 @@ C_sw = eye(4);
 D_sw = zeros(4,1);
 
 % Updated transfer functions
-s_tf = tf('s');
-G_xc_tuned    = K_a * alpha_f * eta_m / (M_c * s_tf^2 + B_total * s_tf);
-G_xcdot_tuned = K_a * alpha_f * eta_m / (M_c * s_tf + B_total);
+Gx = minreal(Kdc_opt / (tau_opt*s^2 + s));
+Gv = s * Gx;
+Ga = s^2 * Gx;
+
+num_x = alpha_f;
+den_x = [M_e B_total 0];
 
 fprintf('  State-space models rebuilt (A_cart, B_cart, A_sw, B_sw)\n');
 
@@ -252,7 +281,7 @@ x0 = [xc_hw(1); xcdot_hw(1)];  % match hardware initial conditions
 xc_sim = y_sim(:,1);  % position [m]
 
 err_cm = (xc_sim - xc_hw) * 100;
-rms_err = rms(err_cm(mask));
+rmse_tuned = rms(err_cm(mask));
 
 figure('Name', 'Time-Domain Validation', 'Position', [100 100 1000 700]);
 subplot(3,1,1);
@@ -265,7 +294,7 @@ grid on;
 subplot(3,1,2);
 plot(t_hw, err_cm, 'k-', 'LineWidth', 1);
 ylabel('Error [cm]');
-title(sprintf('Position Error (RMS = %.3f cm, excluding first 2s)', rms_err));
+title(sprintf('Position Error (RMS = %.3f cm, excluding first 2s)', rmse_tuned));
 grid on;
 
 subplot(3,1,3);
@@ -280,7 +309,7 @@ sgtitle('Time-Domain Validation', 'FontWeight', 'bold');
 
 fprintf('\n');
 fprintf('============================================================\n');
-fprintf('  MODELING PIPELINE COMPLETE\n');
+fprintf('  MODELING OF CART COMPLETE\n');
 fprintf('============================================================\n');
 fprintf('\n  Parameter          Nominal    Tuned      Change\n');
 fprintf('  -----------------  ---------  ---------  ------\n');
@@ -288,14 +317,14 @@ fprintf('  B_eq [N*s/m]       %8.3f   %8.3f   %+.1f%%\n', ...
     B_eq_nominal, B_eq, (B_eq-B_eq_nominal)/B_eq_nominal*100);
 fprintf('  B_total [N*s/m]    %8.3f   %8.3f\n', ...
     B_eq_nominal + B_emf, B_total);
-fprintf('  eta_g [-]          %8.3f   %8.3f   (fixed)\n', eta_g, eta_g);
+fprintf('  eta_g [-]          %8.3f   %8.3f   (fixed)\n', eta_g_nominal, eta_g);
 fprintf('\n  Validation:\n');
-fprintf('    RMS position error = %.3f cm\n', rms_err);
-fprintf('    Velocity pole      = %.2f Hz\n', B_total/M_c/(2*pi));
+fprintf('    RMS position error = %.3f cm\n', rmse_tuned);
+fprintf('    Velocity pole      = %.2f Hz\n', B_total/M_e/(2*pi));
 
-if rms_err < 1.0
+if rmse_tuned < 1.0
     fprintf('\n  MODEL VALIDATED (RMS < 1 cm)\n');
-    fprintf('    Ready for LQR controller design.\n');
+    fprintf('    Ready for controller design.\n');
 else
     fprintf('\n  WARNING: RMS error > 1 cm -- consider:\n');
     fprintf('    - Reducing chirp amplitude (currently %.1f V)\n', A_chirp);
@@ -305,11 +334,11 @@ end
 
 % Save tuned parameters
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-save_file = fullfile(SEESAW_ROOT, 'data', 'tuned_params.mat');
+save_file = fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat');
 save(save_file, 'B_eq', 'B_eq_nominal', 'B_total', 'alpha_f', 'B_emf', ...
      'eta_g', 'A_cart', 'B_cart', 'C_cart', 'D_cart', ...
-     'A_sw', 'B_sw', 'C_sw', 'D_sw', 'rms_err');
-fprintf('\n  Tuned parameters saved to: data/tuned_params.mat\n');
+     'Gx', 'num_x', 'den_x', 'rmse_tuned');
+fprintf('\n  Tuned parameters saved to: data/tuned_cart.mat\n');
 fprintf('============================================================\n');
 
 %% === LOCAL FUNCTIONS ===
