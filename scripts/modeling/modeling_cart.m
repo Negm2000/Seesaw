@@ -6,7 +6,10 @@
 %
 %  To convert to Live Script: right-click this file → Open as Live Script
 %  =====================================================================
-
+% setting default parameter with LaTeX interpreter
+set(groot, 'defaultAxesTickLabelInterpreter', 'latex');
+set(groot, 'defaultLegendInterpreter', 'latex');
+set(groot, 'defaultTextInterpreter', 'latex');
 %% 1. LOAD SYSTEM PARAMETERS
 %  Load all Quanser hardware specs from seesaw_params.m.
 %  This populates ~30 variables including B_eq (tuning target).
@@ -31,7 +34,7 @@ if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath'));
 data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'step_3V.mat');
 
 if ~exist(data_file, 'file')
-    error('data/data.mat not found. Run Section 3 on hardware first.');
+    error('data not found. Run on hardware first.');
 end
 
 fprintf('Loading %s ...\n', data_file);

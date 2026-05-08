@@ -9,7 +9,10 @@
 %    [2] IP02 Base Unit User Manual v1.0 (Quanser, 2012)
 %    [3] VoltPAQ-X1 User Manual v1.1 (Quanser, 2013)
 %  -----------------------------------------------------------------------
-
+% setting default parameter with LaTeX interpreter
+set(groot, 'defaultAxesTickLabelInterpreter', 'latex');
+set(groot, 'defaultLegendInterpreter', 'latex');
+set(groot, 'defaultTextInterpreter', 'latex');
 %% ===== Matlab constants =====
 s = tf('s');
 
