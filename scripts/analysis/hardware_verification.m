@@ -16,34 +16,49 @@
 %  HARDWARE DATA COLLECTION (before running this script):
 %  =====================================================================
 %
-%  Experiment A — Free-Run (unperturbed rocking):
-%    1. Build Seesaw_StateFB.slx (QUARC External mode)
-%    2. Hold seesaw level, Start controller, release gently
-%    3. Let run for 30-60 s, logging:
-%         t, x_c [m], alpha [rad], V_m [V]
-%    4. Save as: data/hw_free_run.mat
+%  Model:   models/PolePlacementObserver2024.slx
+%  Control: u = -K*x (regulator — drives x_c to zero by default)
+%
+%  For Experiments B & C you need a one-time model modification:
+%    Replace u = -K*xhat with u = -K*(xhat - [r; 0; 0; 0]).
+%    Add a "From Workspace" block for r and a manual switch so you
+%    can toggle between r=0 (normal operation) and an injected signal
+%    (step or chirp).  Log r alongside everything else.
+%
+%  Experiment A — Free-Run (unperturbed rocking, DD-in-loop):
+%    1. Open models/PolePlacementObserver2024.slx (QUARC External)
+%    2. Set r=0 (no reference injection)
+%    3. Hold seesaw level, Start controller, release gently
+%    4. Let run for 30-60 s, logging: t, x_c, alpha, V_m
+%    5. Save as: data/hw_free_run.mat
 %       Variables: hw_t, hw_xc, hw_alpha, hw_vm  (each Nx1)
 %
-%  Experiment B — Step Response (cart reference step):
-%    1. Modify x_c_ref step block: After = 0.05 (5 cm step)
-%    2. Hold seesaw level, Start controller, release gently
-%    3. Wait 5 s for steady rocking, then step occurs at t=2 s
-%    4. Let run 20 s, logging same signals + x_c_ref
+%  Experiment B — Step Response (cart step, observer-in-loop):
+%    1. Switch to observer-in-loop variant of model
+%    2. Inject a step via r: 0 -> 5 cm at t=2 s
+%    3. Hold seesaw level, Start controller, release gently
+%    4. Let run 20 s, logging: t, r, x_c, alpha, V_m
 %    5. Save as: data/hw_step_response.mat
-%       Variables: hw_t, hw_xc_ref, hw_xc, hw_alpha, hw_vm
+%       Variables: hw_t, hw_r, hw_xc, hw_alpha, hw_vm
 %
 %  Experiment C — Chirp Perturbation (frequency response):
-%    1. Inject a small-amplitude chirp into x_c_ref:
+%    1. Same model as B. Replace step with chirp:
 %       - Amplitude: 2-3 cm (too large may destabilize)
 %       - Frequency: 0.1 to 10 Hz (linear chirp)
 %       - Duration: 60 s
-%    2. Hold seesaw level, Start controller, release gently
-%    3. Log: t, x_c_ref, x_c, alpha, V_m
-%    4. Save as: data/hw_chirp_response.mat
-%       Variables: hw_t, hw_xc_ref, hw_xc, hw_alpha, hw_vm
+%    2. Log: t, r, x_c, alpha, V_m
+%    3. Save as: data/hw_chirp_response.mat
+%       Variables: hw_t, hw_r, hw_xc, hw_alpha, hw_vm
 %
-%  If you ran all three, run all sections below. Otherwise run
-%  individual sections (Ctrl+Enter) as data is available.
+%  Experiment D — Observer free-run (observer-in-loop, for Section F):
+%    1. Observer-in-loop variant, r=0
+%    2. Log observer outputs alongside measurements:
+%         xc_hat, xcdot_hat, alpha_hat, alphadot_hat
+%    3. Free-run 30-60 s, save as: data/hw_obs_free.mat
+%       Variables: hw_t, hw_xc, hw_alpha, hw_vm,
+%                  hw_xc_hat, hw_xcdot_hat, hw_alpha_hat, hw_alphadot_hat
+%
+%  Run individual sections (Ctrl+Enter) as data is available.
 %  =====================================================================
 %
 %  Requires:  startup.m  (or at minimum  seesaw_params.m and path setup)
@@ -93,15 +108,16 @@ fprintf('\n');
 has_free_run  = exist(fullfile(root, 'data', 'hw_free_run.mat'), 'file') == 2;
 has_step      = exist(fullfile(root, 'data', 'hw_step_response.mat'), 'file') == 2;
 has_chirp     = exist(fullfile(root, 'data', 'hw_chirp_response.mat'), 'file') == 2;
+has_obs       = exist(fullfile(root, 'data', 'hw_obs_free.mat'), 'file') == 2;
 
-if ~has_free_run && ~has_step && ~has_chirp
+if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
     fprintf('No hardware verification data found in data/.\n');
     fprintf('Run at least one experiment (see header comments) then re-run.\n');
     return;
 end
 
-fprintf('Data available:  free-run=%d  step=%d  chirp=%d\n', ...
-    has_free_run, has_step, has_chirp);
+fprintf('Data available:  free-run=%d  step=%d  chirp=%d  obs=%d\n', ...
+    has_free_run, has_step, has_chirp, has_obs);
 
 
 %% =====================================================================
@@ -327,7 +343,7 @@ else
     d = load(fullfile(root, 'data', 'hw_step_response.mat'));
 
     t       = d.hw_t(:);
-    xc_ref  = d.hw_xc_ref(:);
+    xc_ref  = d.hw_r(:);
     xc      = d.hw_xc(:);
     alpha   = d.hw_alpha(:);
     vm      = d.hw_vm(:);
@@ -493,7 +509,7 @@ else
     d = load(fullfile(root, 'data', 'hw_chirp_response.mat'));
 
     t       = d.hw_t(:);
-    xc_ref  = d.hw_xc_ref(:);
+    xc_ref  = d.hw_r(:);
     xc      = d.hw_xc(:);
     alpha   = d.hw_alpha(:);
     vm      = d.hw_vm(:);
@@ -738,7 +754,7 @@ end
 if has_step
     subplot(3,3,4);
     d = load(fullfile(root, 'data', 'hw_step_response.mat'));
-    t_s = d.hw_t(:); xc_s = d.hw_xc(:)*100; ref_s = d.hw_xc_ref(:)*100;
+    t_s = d.hw_t(:); xc_s = d.hw_xc(:)*100; ref_s = d.hw_r(:)*100;
     [~, si] = max(abs(diff(ref_s)));
     t_s = t_s - d.hw_t(si);
     mask = t_s >= -1 & t_s <= 4;
@@ -800,33 +816,311 @@ summary_lines = {
     sprintf('Controller:  σ=%.1f, ζ=%.1f', ctrl.sigma_th, ctrl.zeta_th);
     '';
     'FREE-RUN:';
-    sprintf('  Angle RMS:     %.2f deg', rad2deg(alpha_rms));
-    sprintf('  Angle P-P:     %.2f deg', rad2deg(alpha_pp));
-    sprintf('  95%% bound:     %.2f deg', rad2deg(alpha_p95));
-    sprintf('  Bound score:   %.1f/100', bound_score);
-    '';
-    'STEP RESPONSE:';
-    sprintf('  Rise time:     %s', dash_val(has_step, t_rise, '%.3f s'));
-    sprintf('  Overshoot:     %s', dash_val(has_step, xc_overshoot, '%.1f%%%%'));
-    '';
-    'FREQUENCY:';
-    sprintf('  CL bandwidth:  %s', dash_val(has_chirp, bw_hz, '%.2f Hz'));
-    sprintf('  Model-HW err:  %s', dash_val(has_chirp, mag_err_rms, '%.2f dB'));
-    '';
-    'PASS CRITERIA:';
-    sprintf('  RMS < 2 deg?   %s', str_if(rad2deg(alpha_rms) < 2, 'PASS', 'FAIL'));
-    sprintf('  Peak V < 5 V?  %s', str_if(vm_max < 5, 'PASS', 'FAIL'));
-    sprintf('  BW > 1 Hz?     %s', str_if(has_chirp && bw_hz > 1, 'PASS', 'N/A'));
-};
+    };
+li = length(summary_lines);
+if has_free_run
+    li = li + 1; summary_lines{li} = sprintf('  Angle RMS:     %.2f deg', rad2deg(alpha_rms));
+    li = li + 1; summary_lines{li} = sprintf('  Angle P-P:     %.2f deg', rad2deg(alpha_pp));
+    li = li + 1; summary_lines{li} = sprintf('  95%% bound:     %.2f deg', rad2deg(alpha_p95));
+    li = li + 1; summary_lines{li} = sprintf('  Bound score:   %.1f/100', bound_score);
+else
+    li = li + 1; summary_lines{li} = '  (no data)';
+end
+
+li = li + 1; summary_lines{li} = '';
+li = li + 1; summary_lines{li} = 'STEP RESPONSE:';
+if has_step
+    li = li + 1; summary_lines{li} = sprintf('  Rise time:     %.3f s', t_rise);
+    li = li + 1; summary_lines{li} = sprintf('  Overshoot:     %.1f%%%%', xc_overshoot);
+else
+    li = li + 1; summary_lines{li} = '  (no data)';
+end
+
+if has_obs
+    li = li + 1; summary_lines{li} = '';
+    li = li + 1; summary_lines{li} = 'OBSERVER:';
+    li = li + 1; summary_lines{li} = sprintf('  RMS err xc:    %.3f cm', e_xc_rms*100);
+    li = li + 1; summary_lines{li} = sprintf('  RMS err alpha: %.3f deg', rad2deg(e_alpha_rms));
+    li = li + 1; summary_lines{li} = sprintf('  Conv time:     %.2f s', t_conv);
+end
+
+li = li + 1; summary_lines{li} = '';
+li = li + 1; summary_lines{li} = 'FREQUENCY:';
+if has_chirp
+    li = li + 1; summary_lines{li} = sprintf('  CL bandwidth:  %.2f Hz', bw_hz);
+    li = li + 1; summary_lines{li} = sprintf('  Model-HW err:  %.2f dB', mag_err_rms);
+else
+    li = li + 1; summary_lines{li} = '  (no data)';
+end
+
+li = li + 1; summary_lines{li} = '';
+li = li + 1; summary_lines{li} = 'PASS CRITERIA:';
+if has_free_run
+    li = li + 1; summary_lines{li} = sprintf('  RMS < 2 deg?   %s', cond_str(rad2deg(alpha_rms) < 2));
+    li = li + 1; summary_lines{li} = sprintf('  Peak V < 5 V?  %s', cond_str(vm_max < 5));
+else
+    li = li + 1; summary_lines{li} = '  (no free-run data)';
+end
+if has_chirp
+    li = li + 1; summary_lines{li} = sprintf('  BW > 1 Hz?     %s', cond_str(bw_hz > 1));
+else
+    li = li + 1; summary_lines{li} = '  BW > 1 Hz?     N/A';
+end
+
 for i = 1:length(summary_lines)
-    text(0.05, 1 - i*0.045, summary_lines{i}, 'FontName', 'FixedWidth', ...
-        'FontSize', 9, 'VerticalAlignment', 'top');
+    if ~isempty(summary_lines{i})
+        text(0.05, 1 - i*0.045, summary_lines{i}, 'FontName', 'FixedWidth', ...
+            'FontSize', 9, 'VerticalAlignment', 'top');
+    end
 end
 
 sgtitle('Seesaw Hardware Verification — Composite Dashboard', ...
     'FontWeight', 'bold', 'FontSize', 14);
 saveas(gcf, fullfile(figdir, 'Verification-Dashboard.png'));
 fprintf('  Saved: docs/figures/Verification-Dashboard.png\n');
+
+
+%% =====================================================================
+%  SECTION F — OBSERVER VERIFICATION
+%  =====================================================================
+%  Compares observer estimates against encoder measurements and assesses
+%  estimation quality: tracking error, convergence time, innovation
+%  (evidence of model mismatch), and noise floor via PSD.
+%
+%  Observer State-Space block (from data/observer.mat):
+%    Inputs:  [u; x_c_measured; theta_measured]
+%    Outputs: xhat = [x_c_hat; x_c_dot_hat; theta_hat; theta_dot_hat]
+%  =====================================================================
+
+if ~has_obs
+    fprintf('\n*** SECTION F SKIPPED — hw_obs_free.mat not found ***\n');
+else
+    fprintf('\n========================================\n');
+    fprintf(' SECTION F: Observer Verification\n');
+    fprintf('========================================\n');
+
+    obs = load(fullfile(root, 'data', 'hw_obs_free.mat'));
+
+    t       = obs.hw_t(:);
+    xc      = obs.hw_xc(:);
+    alpha   = obs.hw_alpha(:);
+    vm      = obs.hw_vm(:);
+    xc_hat  = obs.hw_xc_hat(:);
+    xcd_hat = obs.hw_xcdot_hat(:);
+    al_hat  = obs.hw_alpha_hat(:);
+    ald_hat = obs.hw_alphadot_hat(:);
+
+    dt = mean(diff(t));
+    Fs = 1/dt;
+    fprintf('  Duration: %.1f s  |  Fs: %.0f Hz  |  N: %d\n', t(end), Fs, length(t));
+
+    %% F1. Tracking error: observer estimate vs encoder measurement
+    % The observer should converge to x_c_meas and alpha_meas within its
+    % time constant (≈ 20/k_obs/σ_th ~ 0.8 s for k_obs=5).
+    e_xc    = xc_hat - xc;
+    e_alpha = al_hat - alpha;
+
+    e_xc_rms    = rms(e_xc);
+    e_alpha_rms = rms(e_alpha);
+    e_xc_max    = max(abs(e_xc));
+    e_alpha_max = max(abs(e_alpha));
+
+    % Convergence time: time until both errors drop below encoder resolution
+    % (K_ec = 2.54e-4 m/count for cart, K_E_SW / K_gs for alpha)
+    q_xc    = K_ec;
+    q_theta = K_E_SW / K_gs;
+    e_combined = abs(e_xc) / q_xc + abs(e_alpha) / q_theta;
+    idx_conv = find(e_combined < 3, 1, 'first');
+    if ~isempty(idx_conv)
+        t_conv = t(idx_conv);
+    else
+        t_conv = t(end);
+    end
+
+    fprintf('\n  --- Observer Tracking Error ---\n');
+    fprintf('    Cart RMS error:   %.4f cm  (encoder res = %.4f cm)\n', ...
+        e_xc_rms*100, q_xc*100);
+    fprintf('    Cart max |error|: %.4f cm\n', e_xc_max*100);
+    fprintf('    Alpha RMS error:  %.4f deg  (encoder res = %.4f deg)\n', ...
+        rad2deg(e_alpha_rms), rad2deg(q_theta));
+    fprintf('    Alpha max |err|:  %.4f deg\n', rad2deg(e_alpha_max));
+    fprintf('    Convergence time: %.2f s  (error < 3× encoder res)\n', t_conv);
+
+    %% F2. Innovation analysis (y - C_meas * xhat)
+    % The innovation is the difference between the measurement and the
+    % observer's prediction. If the linear model is accurate and
+    % friction is negligible, the innovation should be zero-mean white
+    % noise. Systematic patterns = model mismatch (wrong B_eq, inertia,
+    % or unmodeled friction).
+    innov_xc    = xc - xc_hat;
+    innov_alpha = alpha - al_hat;
+
+    innov_xc_rms    = rms(innov_xc);
+    innov_alpha_rms = rms(innov_alpha);
+    innov_xc_bias   = mean(innov_xc);
+    innov_alpha_bias = mean(innov_alpha);
+
+    % Whiteness check via autocorrelation lag-1
+    innov_xc_dm = innov_xc - mean(innov_xc);
+    innov_alpha_dm = innov_alpha - mean(innov_alpha);
+    rho_xc_lag1    = innov_xc_dm(2:end)' * innov_xc_dm(1:end-1) / (innov_xc_dm' * innov_xc_dm);
+    rho_alpha_lag1 = innov_alpha_dm(2:end)' * innov_alpha_dm(1:end-1) / (innov_alpha_dm' * innov_alpha_dm);
+
+    fprintf('\n  --- Innovation (Measurement - Prediction) ---\n');
+    fprintf('    Cart innov RMS:    %.4f cm  | bias: %+.4f cm  | lag-1 ρ: %+.3f\n', ...
+        innov_xc_rms*100, innov_xc_bias*100, rho_xc_lag1);
+    fprintf('    Alpha innov RMS:   %.4f deg | bias: %+.4f deg | lag-1 ρ: %+.3f\n', ...
+        rad2deg(innov_alpha_rms), rad2deg(innov_alpha_bias), rho_alpha_lag1);
+
+    if abs(rho_xc_lag1) > 0.3 || abs(rho_alpha_lag1) > 0.3
+        fprintf('    ⚠ High innovation autocorrelation — model mismatch suspected.\n');
+        fprintf('      Possible causes: B_eq error, unmodeled Coulomb friction,\n');
+        fprintf('      incorrect pivot inertia, or D_C error.\n');
+    end
+
+    %% F3. PSD of observer velocity vs numerical derivative
+    % Compare the noise floor of the observer's velocity estimate with
+    % a filtered numerical derivative of the encoder signal.
+    n_fft = 2^nextpow2(length(t));
+
+    % Observer velocity PSD
+    win_len = min(length(t), 4096);
+    win = hanning(win_len);
+    n_seg_psd = max(win_len/2, 256);
+    [P_xcd_obs, f_psd] = pwelch(xcd_hat, win, n_seg_psd, n_fft, Fs);
+    [P_ald_obs, ~]     = pwelch(ald_hat, win, n_seg_psd, n_fft, Fs);
+
+    % Filtered numerical derivative for comparison
+    fc_diff = 30;  % Hz — same as dirty-derivative LPF cutoff
+    [b_diff, a_diff] = butter(2, fc_diff/(Fs/2));
+    xc_filt  = filtfilt(b_diff, a_diff, xc);
+    al_filt  = filtfilt(b_diff, a_diff, alpha);
+    xcd_num  = [diff(xc_filt); 0] / dt;
+    ald_num  = [diff(al_filt); 0] / dt;
+    xcd_num  = filtfilt(b_diff, a_diff, xcd_num);
+    ald_num  = filtfilt(b_diff, a_diff, ald_num);
+
+    [P_xcd_num, ~] = pwelch(xcd_num, win, n_seg_psd, n_fft, Fs);
+    [P_ald_num, ~] = pwelch(ald_num, win, n_seg_psd, n_fft, Fs);
+
+    % RMS velocity (power in the motion band 0.1-10 Hz)
+    band_mask = f_psd >= 0.05 & f_psd <= 15;
+    v_xc_obs_rms = sqrt(trapz(f_psd(band_mask), P_xcd_obs(band_mask)));
+    v_xc_num_rms = sqrt(trapz(f_psd(band_mask), P_xcd_num(band_mask)));
+    v_al_obs_rms = sqrt(trapz(f_psd(band_mask), P_ald_obs(band_mask)));
+    v_al_num_rms = sqrt(trapz(f_psd(band_mask), P_ald_num(band_mask)));
+
+    fprintf('\n  --- Velocity Estimate Comparison ---\n');
+    fprintf('    Cart vel RMS (observer):  %.3f m/s  |  (numerical): %.3f m/s\n', ...
+        v_xc_obs_rms, v_xc_num_rms);
+    fprintf('    Alpha vel RMS (observer): %.3f rad/s |  (numerical): %.3f rad/s\n', ...
+        v_al_obs_rms, v_al_num_rms);
+
+    %% F4. Figures — Observer Verification
+    figure('Name', 'Verification: Observer Tracking', ...
+        'Position', [50 50 1100 800]);
+
+    subplot(4,1,1);
+    yyaxis left;
+    plot(t, xc*100, 'b-', 'LineWidth', 1.0); hold on;
+    plot(t, xc_hat*100, 'r--', 'LineWidth', 1.2);
+    ylabel('x_c [cm]');
+    yyaxis right;
+    plot(t, e_xc*100, 'k-', 'LineWidth', 0.5);
+    ylabel('Error [cm]');
+    grid on; legend('Measured', 'Observer', 'Error', 'Location', 'best');
+    title(sprintf('Cart Tracking (RMS err = %.3f cm)', e_xc_rms*100));
+
+    subplot(4,1,2);
+    yyaxis left;
+    plot(t, rad2deg(alpha), 'b-', 'LineWidth', 1.0); hold on;
+    plot(t, rad2deg(al_hat), 'r--', 'LineWidth', 1.2);
+    ylabel('\alpha [deg]');
+    yyaxis right;
+    plot(t, rad2deg(e_alpha), 'k-', 'LineWidth', 0.5);
+    ylabel('Error [deg]');
+    grid on; legend('Measured', 'Observer', 'Error', 'Location', 'best');
+    title(sprintf('Alpha Tracking (RMS err = %.3f deg)', rad2deg(e_alpha_rms)));
+
+    subplot(4,1,3);
+    plot(t, e_xc*100, 'b-', 'LineWidth', 0.6); hold on;
+    plot(t, rad2deg(e_alpha), 'r-', 'LineWidth', 0.6); grid on;
+    yline(0, 'k-');
+    ylabel('Error');
+    legend('Cart [cm]', 'Alpha [deg]', 'Location', 'best');
+    title(sprintf('Innovation: convergence in %.2f s', t_conv));
+    xline(t_conv, 'g--', sprintf('%.1f s', t_conv));
+
+    subplot(4,1,4);
+    semilogy(f_psd, P_xcd_obs, 'b-', 'LineWidth', 1.2); hold on;
+    semilogy(f_psd, P_xcd_num, 'k--', 'LineWidth', 1.0);
+    semilogy(f_psd, P_ald_obs, 'r-', 'LineWidth', 1.2);
+    semilogy(f_psd, P_ald_num, 'm--', 'LineWidth', 1.0);
+    grid on; xlim([0.05 30]);
+    ylabel('PSD'); xlabel('Frequency [Hz]');
+    legend('x_c-dot (obs)', 'x_c-dot (num)', '\alpha-dot (obs)', '\alpha-dot (num)');
+    title('Velocity Estimate PSD: Observer vs Numerical Derivative');
+
+    sgtitle('Hardware Verification — Observer Performance', 'FontWeight', 'bold');
+    saveas(gcf, fullfile(figdir, 'Verification-Observer.png'));
+    fprintf('  Saved: docs/figures/Verification-Observer.png\n');
+
+    %% F5. Track each observer state
+    figure('Name', 'Verification: Observer Full State', ...
+        'Position', [100 100 1100 700]);
+
+    subplot(2,2,1);
+    plot(t, xc*100, 'b-', 'LineWidth', 1.0); hold on;
+    plot(t, xc_hat*100, 'r--', 'LineWidth', 1.2); grid on;
+    ylabel('x_c [cm]'); legend('Enc', 'Obs');
+    title('Cart Position');
+
+    subplot(2,2,2);
+    plot(t, xcd_hat, 'r-', 'LineWidth', 1.2); grid on;
+    ylabel('x_c-dot [m/s]');
+    title('Cart Velocity (observer only)');
+
+    subplot(2,2,3);
+    plot(t, rad2deg(alpha), 'b-', 'LineWidth', 1.0); hold on;
+    plot(t, rad2deg(al_hat), 'r--', 'LineWidth', 1.2); grid on;
+    ylabel('\alpha [deg]'); xlabel('Time [s]');
+    legend('Enc', 'Obs');
+    title('Seesaw Angle');
+
+    subplot(2,2,4);
+    plot(t, rad2deg(ald_hat), 'r-', 'LineWidth', 1.2); grid on;
+    ylabel('\alpha-dot [deg/s]'); xlabel('Time [s]');
+    title('Angular Velocity (observer only)');
+
+    sgtitle('Full Observer State Estimation', 'FontWeight', 'bold');
+    saveas(gcf, fullfile(figdir, 'Verification-ObserverState.png'));
+    fprintf('  Saved: docs/figures/Verification-ObserverState.png\n');
+
+    %% F6. Observer PSD detail (cart velocity noise floor comparison)
+    figure('Name', 'Verification: Observer Velocity PSD Detail', ...
+        'Position', [100 100 1000 500]);
+
+    subplot(1,2,1);
+    loglog(f_psd, P_xcd_obs, 'b-', 'LineWidth', 1.5); hold on;
+    loglog(f_psd, P_xcd_num, 'k--', 'LineWidth', 1.0); grid on;
+    xlim([0.05 30]);
+    xlabel('Frequency [Hz]'); ylabel('PSD [(m/s)^2/Hz]');
+    legend('Observer', 'Numerical diff', 'Location', 'best');
+    title(sprintf('Cart Velocity PSD (obs RMS = %.3f m/s)', v_xc_obs_rms));
+
+    subplot(1,2,2);
+    loglog(f_psd, P_ald_obs, 'r-', 'LineWidth', 1.5); hold on;
+    loglog(f_psd, P_ald_num, 'm--', 'LineWidth', 1.0); grid on;
+    xlim([0.05 30]);
+    xlabel('Frequency [Hz]'); ylabel('PSD [(rad/s)^2/Hz]');
+    legend('Observer', 'Numerical diff', 'Location', 'best');
+    title(sprintf('Angular Velocity PSD (obs RMS = %.3f rad/s)', v_al_obs_rms));
+
+    sgtitle('Velocity PSD: Observer vs Filtered Numerical Derivative', ...
+        'FontWeight', 'bold');
+    saveas(gcf, fullfile(figdir, 'Verification-ObserverPSD.png'));
+    fprintf('  Saved: docs/figures/Verification-ObserverPSD.png\n');
+end
 
 
 %% =====================================================================
@@ -891,6 +1185,46 @@ if has_chirp
     end
 end
 
+% Observer metrics
+if has_obs
+    results.observer = struct(...
+        'e_xc_rms_cm',        e_xc_rms*100, ...
+        'e_alpha_rms_deg',    rad2deg(e_alpha_rms), ...
+        'e_xc_max_cm',        e_xc_max*100, ...
+        'e_alpha_max_deg',    rad2deg(e_alpha_max), ...
+        't_conv_s',           t_conv, ...
+        'innov_xc_rms_cm',    innov_xc_rms*100, ...
+        'innov_alpha_rms_deg', rad2deg(innov_alpha_rms), ...
+        'innov_xc_bias_cm',   innov_xc_bias*100, ...
+        'innov_alpha_bias_deg', rad2deg(innov_alpha_bias), ...
+        'rho_xc_lag1',        rho_xc_lag1, ...
+        'rho_alpha_lag1',     rho_alpha_lag1, ...
+        'v_xc_obs_rms',       v_xc_obs_rms, ...
+        'v_xc_num_rms',       v_xc_num_rms, ...
+        'v_al_obs_rms',       v_al_obs_rms, ...
+        'v_al_num_rms',       v_al_num_rms);
+end
+
+% Observer metrics
+if has_obs
+    results.observer = struct(...
+        'e_xc_rms_cm',        e_xc_rms*100, ...
+        'e_alpha_rms_deg',    rad2deg(e_alpha_rms), ...
+        'e_xc_max_cm',        e_xc_max*100, ...
+        'e_alpha_max_deg',    rad2deg(e_alpha_max), ...
+        't_conv_s',           t_conv, ...
+        'innov_xc_rms_cm',    innov_xc_rms*100, ...
+        'innov_alpha_rms_deg', rad2deg(innov_alpha_rms), ...
+        'innov_xc_bias_cm',   innov_xc_bias*100, ...
+        'innov_alpha_bias_deg', rad2deg(innov_alpha_bias), ...
+        'rho_xc_lag1',        rho_xc_lag1, ...
+        'rho_alpha_lag1',     rho_alpha_lag1, ...
+        'v_xc_obs_rms',       v_xc_obs_rms, ...
+        'v_xc_num_rms',       v_xc_num_rms, ...
+        'v_al_obs_rms',       v_al_obs_rms, ...
+        'v_al_num_rms',       v_al_num_rms);
+end
+
 % Controller info
 results.controller = struct(...
     'sigma_th', ctrl.sigma_th, ...
@@ -911,10 +1245,6 @@ fprintf('========================================\n\n');
 
 function s = cond_str(cond)
     if cond, s = 'PASS'; else, s = 'FAIL'; end
-end
-
-function s = str_if(cond, val, alt)
-    if cond, s = val; else, s = alt; end
 end
 
 function s = skewness(x)
