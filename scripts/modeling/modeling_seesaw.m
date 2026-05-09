@@ -159,37 +159,29 @@ den_t = [(J_pivot + M_total*D_T^2), B_SW, -g*(M_total*D_T + M_SW*D_C)];
 M_eff = [M_e,          -M_total*D_T;
          -M_total*D_T,      J_pivot + M_total*D_T^2];
 
-% Inverse of effective inertia matrix
-M_inv = inv(M_eff);
+State_matrix = [ 0,         -g*M_total,                 -B_total,   0;
+                -g*M_total, g*(M_total*D_T + M_SW*D_C),     0,    -B_SW];
 
-% G_rhs encodes the state-dependent (damping + gravity) right-hand sides.
-%   state vector: z = [x_c; x_c_dot; theta; theta_dot]
-%   cart row   : gravity coupling -g*M_c in theta column
-%   seesaw row : gravity coupling -g*M_c in x_c column;
-%                restoring moment g*(M_c*D_T + M_SW*D_C) in alpha column
+Input_matrix = [alpha_f*eta_m;
+                   0];
 
-G_rhs = [0, -B_total,  -g*M_total,                        0;   % cart EOM RHS
-         -g*M_total, 0,     g*(M_total*D_T + M_SW*D_C),  -B_SW];   % seesaw EOM RHS
+State_matrix = M_eff \ State_matrix;
+Input_matrix = M_eff \ Input_matrix;
 
-% Full A_sw (4x4):  state derivative = M_inv * G_rhs * z
-%   rows 1,3 (positions) are just velocities; rows 2,4 are accelerations
-A_sw = [0, 1, 0, 0;
-        M_inv(1,:) * G_rhs;
-        0, 0, 0, 1;
-        M_inv(2,:) * G_rhs];
+% Augment the matrices to get X = [xc; \theta; \dot{xc}; \dot{\theta}]
+A_sw = [ zeros(2), eye(2);
+        State_matrix ];
+B_sw = [ zeros(2,1);
+        Input_matrix];
+C_sw = [eye(2), zeros(2)];
+D_sw = zeros(2,1);
 
-% B matrix for voltage input V_m
-%   Only cart EOM has input: rhs_x_input = alpha_f*eta_m*V_m
-G_inp = [alpha_f*eta_m;
-                     0];        % seesaw EOM has no direct voltage input
-
-B_sw = [0;
-        M_inv(1,:) * G_inp;
-        0;
-        M_inv(2,:) * G_inp];
-
-C_sw = eye(4);                  % output all four states
-D_sw = zeros(4, 1);
+A5 = [A_sw, zeros(4,1);
+      0, 1, 0, 0, 0];
+B5 = [B_sw;
+      0];
+C5 = [C_sw, zeros(2,1)];
+D5 = D_sw;
 
 %% 10. SUMMARY & SAVE
 fprintf('\n');
@@ -202,7 +194,8 @@ fprintf('  D_C [m]          %8.3f   %8.3f     %+.1f%%\n', ...
     D_C_nominal, D_C, (D_C-D_C_nominal)/D_C_nominal*100);
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
 save_file = fullfile(SEESAW_ROOT, 'data', 'tuned_seesaw.mat');
-save(save_file, 'D_C', 'A_sw', 'B_sw', 'C_sw', 'D_sw', ...
-     'Gt', 'num_t', 'den_t');
+save(save_file, 'D_C', 'Gt', 'num_t', 'den_t', ...
+    'A_sw', 'B_sw', 'C_sw', 'D_sw', ...
+    'A5', 'B5', 'C5', 'D5');
 fprintf('\n  Tuned parameters saved to: data/tuned_seesaw.mat\n');
 fprintf('============================================================\n');

@@ -232,7 +232,7 @@ Gx = minreal(Kdc_opt / (tau_opt*s^2 + s));
 Gv = s * Gx;
 Ga = s^2 * Gx;
 
-num_x = alpha_f;
+num_x = alpha_f*eta_m;
 den_x = [M_e B_total 0];
 
 fprintf(' Transfer Function and State-space model rebuilt (Gx, A_cart, B_cart)\n');
