@@ -17,41 +17,45 @@
 %  =====================================================================
 %
 %  Model:   models/PolePlacementObserver2024.slx
-%  Control: u = -K*x (regulator — drives x_c to zero by default)
+%  Control: u = -K*x (regulator — drives state to zero)
 %
 %  For Experiments B & C you need a one-time model modification:
-%    Replace u = -K*xhat with u = -K*(xhat - [r; 0; 0; 0]).
-%    Add a "From Workspace" block for r and a manual switch so you
-%    can toggle between r=0 (normal operation) and an injected signal
-%    (step or chirp).  Log r alongside everything else.
+%    Inject a disturbance signal d(t) into the control voltage, after
+%    the feedback gain and before saturation: u_sat = sat(-K*x + d).
+%    Add a "From Workspace" block for d and a manual switch to toggle
+%    between d=0 (normal) and an injected signal (step or chirp).
+%    Log d alongside everything else.
+%    (Do NOT inject as cart/angle reference — commanding arbitrary
+%     positions on an unstable seesaw is nonsense. Disturbance injection
+%     excites the plant while the regulator still does its job.)
 %
 %  Experiment A — Free-Run (unperturbed rocking, DD-in-loop):
 %    1. Open models/PolePlacementObserver2024.slx (QUARC External)
-%    2. Set r=0 (no reference injection)
+%    2. Set d=0 (no disturbance injected)
 %    3. Hold seesaw level, Start controller, release gently
 %    4. Let run for 30-60 s, logging: t, x_c, alpha, V_m
 %    5. Save as: data/hw_free_run.mat
 %       Variables: hw_t, hw_xc, hw_alpha, hw_vm  (each Nx1)
 %
-%  Experiment B — Step Response (cart step, observer-in-loop):
+%  Experiment B — Step Response (disturbance step, observer-in-loop):
 %    1. Switch to observer-in-loop variant of model
-%    2. Inject a step via r: 0 -> 5 cm at t=2 s
+%    2. Inject a disturbance step via d: 0 -> ±0.5 V at t=2 s
 %    3. Hold seesaw level, Start controller, release gently
-%    4. Let run 20 s, logging: t, r, x_c, alpha, V_m
+%    4. Let run 20 s, logging: t, d, x_c, alpha, V_m
 %    5. Save as: data/hw_step_response.mat
-%       Variables: hw_t, hw_r, hw_xc, hw_alpha, hw_vm
+%       Variables: hw_t, hw_d, hw_xc, hw_alpha, hw_vm
 %
 %  Experiment C — Chirp Perturbation (frequency response):
 %    1. Same model as B. Replace step with chirp:
-%       - Amplitude: 2-3 cm (too large may destabilize)
+%       - Amplitude: 0.5-1.0 V (too large may destabilize)
 %       - Frequency: 0.1 to 10 Hz (linear chirp)
 %       - Duration: 60 s
-%    2. Log: t, r, x_c, alpha, V_m
+%    2. Log: t, d, x_c, alpha, V_m
 %    3. Save as: data/hw_chirp_response.mat
-%       Variables: hw_t, hw_r, hw_xc, hw_alpha, hw_vm
+%       Variables: hw_t, hw_d, hw_xc, hw_alpha, hw_vm
 %
 %  Experiment D — Observer free-run (observer-in-loop, for Section F):
-%    1. Observer-in-loop variant, r=0
+%    1. Observer-in-loop variant, d=0
 %    2. Log observer outputs alongside measurements:
 %         xc_hat, xcdot_hat, alpha_hat, alphadot_hat
 %    3. Free-run 30-60 s, save as: data/hw_obs_free.mat
@@ -324,49 +328,51 @@ end
 
 
 %% =====================================================================
-%  SECTION B — TIME-DOMAIN: STEP RESPONSE
+%  SECTION B — TIME-DOMAIN: DISTURBANCE REJECTION STEP
 %  =====================================================================
-%  A cart position step tests tracking performance.  The step size must
-%  be small (3-5 cm) — larger steps may destabilize the seesaw.
+%  A small disturbance voltage step is injected into the control signal:
+%    u = sat(-K*x + d),   d = 0 -> ±0.5 V step at t ≈ 2 s.
+%  This tests disturbance rejection: how does the controller respond to
+%  an external perturbation?
 %
-%  Metrics: rise time, overshoot of x_c, peak alpha excursion during the
-%  transient, and oscillation envelope before/after the step.
+%  Metrics: peak angle excursion during transient, cart displacement from
+%  zero, control effort to reject the disturbance, and oscillation
+%  envelope before/after the transient.
 %  =====================================================================
 
 if ~has_step
     fprintf('\n*** SECTION B SKIPPED — hw_step_response.mat not found ***\n');
 else
     fprintf('\n========================================\n');
-    fprintf(' SECTION B: Step Response\n');
+    fprintf(' SECTION B: Disturbance Rejection Step\n');
     fprintf('========================================\n');
 
     d = load(fullfile(root, 'data', 'hw_step_response.mat'));
 
-    t       = d.hw_t(:);
-    xc_ref  = d.hw_r(:);
-    xc      = d.hw_xc(:);
-    alpha   = d.hw_alpha(:);
-    vm      = d.hw_vm(:);
+    t      = d.hw_t(:);
+    d_inj  = d.hw_d(:);
+    xc     = d.hw_xc(:);
+    alpha  = d.hw_alpha(:);
+    vm     = d.hw_vm(:);
 
     dt = mean(diff(t));
     fprintf('  Duration: %.1f s  |  Fs: %.0f Hz\n', t(end), 1/dt);
 
-    %% B1. Detect step time from reference
-    % Find when x_c_ref changes (rise above noise floor)
-    dref = diff(xc_ref);
-    [~, step_idx] = max(abs(dref));
+    %% B1. Detect step time from disturbance signal
+    dd = diff(d_inj);
+    [~, step_idx] = max(abs(dd));
     t_step = t(step_idx);
-    step_amp = xc_ref(end) - xc_ref(1);
+    d_amp  = d_inj(end) - d_inj(1);
 
-    fprintf('\n  Step detected at t = %.2f s, amplitude = %.2f cm\n', ...
-        t_step, step_amp * 100);
+    fprintf('\n  Step detected at t = %.2f s, amplitude = %.3f V\n', ...
+        t_step, d_amp);
 
     %% B2. Pre-step and post-step bounded oscillation
     pre_mask  = t >= 1.0 & t < t_step - 0.2;
     post_mask = t > t_step + 1.0;
 
-    alpha_pre_pp  = max(alpha(pre_mask))  - min(alpha(pre_mask));
-    alpha_post_pp = max(alpha(post_mask)) - min(alpha(post_mask));
+    alpha_pre_pp   = max(alpha(pre_mask))  - min(alpha(pre_mask));
+    alpha_post_pp  = max(alpha(post_mask)) - min(alpha(post_mask));
     alpha_pre_rms  = rms(alpha(pre_mask));
     alpha_post_rms = rms(alpha(post_mask));
 
@@ -379,50 +385,48 @@ else
         rad2deg(alpha_post_pp - alpha_pre_pp), ...
         rad2deg(alpha_post_rms - alpha_pre_rms));
 
-    %% B3. Step response on x_c: rise time, overshoot, steady-state bound
-    % Trim to step window ± 5 s
+    %% B3. Disturbance rejection metrics on cart and angle
     step_window = t >= t_step - 0.5 & t <= t_step + 5.0;
     tw = t(step_window) - t_step;
-    xcw = xc(step_window) - xc_ref(step_window);
 
-    % Rise time (10%-90% of step magnitude, referenced to pre-step x_c)
+    % Cart displacement (from zero, since regulator drives to zero)
     xc_pre = mean(xc(pre_mask));
-    [~, i10] = min(abs(xc(step_window) - xc_pre - 0.10*step_amp));
-    [~, i90] = min(abs(xc(step_window) - xc_pre - 0.90*step_amp));
-    t_rise = tw(i90) - tw(i10);
+    xc_deviation = max(abs(xc(step_window) - xc_pre));
 
-    % Peak overshoot (cart)
-    xc_post_mean = mean(xc(post_mask));
-    xc_err = xc - xc_ref;
-    xc_overshoot = (max(xc(post_mask)) - xc_ref(post_mask(end))) / step_amp * 100;
+    % Peak angle excursion during transient
+    alpha_peak_transient = max(abs(alpha(step_window)));
+    alpha_peak_transient_deg = rad2deg(alpha_peak_transient);
+
+    % Voltage effort after step (how hard the controller fights back)
+    vm_rms_pre  = rms(vm(pre_mask));
+    vm_rms_post = rms(vm(post_mask));
+    vm_peak_transient = max(abs(vm(step_window)));
 
     % Post-step cart bound
     xc_p95_post = prctile(abs(xc(post_mask) - mean(xc(post_mask))), 95);
 
-    % Peak angle excursion during transient
-    alpha_peak_transient = max(abs(alpha(step_window))) * 180/pi;
+    fprintf('\n  --- Disturbance Rejection Metrics ---\n');
+    fprintf('    Disturbance step:     %+.3f V\n', d_amp);
+    fprintf('    Cart deviation:       %.2f cm\n', xc_deviation*100);
+    fprintf('    Peak |alpha| during:  %.2f deg\n', alpha_peak_transient_deg);
+    fprintf('    V_m RMS: pre=%.2f V → post=%.2f V\n', vm_rms_pre, vm_rms_post);
+    fprintf('    Post-step x_c bound:  ±%.2f cm\n', xc_p95_post*100);
 
-    fprintf('\n  --- Step Response Metrics ---\n');
-    fprintf('    Rise time (10-90%%):  %.3f s\n', t_rise);
-    fprintf('    Overshoot (cart):    %.1f%%%%\n', xc_overshoot);
-    fprintf('    Peak |alpha| during: %.2f deg\n', alpha_peak_transient);
-    fprintf('    Post-step x_c bound: ±%.2f cm\n', xc_p95_post*100);
-
-    %% B4. Figures — Step Response
-    figure('Name', 'Verification: Step Response', ...
+    %% B4. Figures — Disturbance Rejection Step
+    figure('Name', 'Verification: Disturbance Rejection Step', ...
         'Position', [50 50 1100 750]);
 
     subplot(4,1,1);
     yyaxis left;
     plot(t, xc*100, 'b-', 'LineWidth', 1.2); hold on;
-    plot(t, xc_ref*100, 'k--', 'LineWidth', 1.5);
     ylabel('x_c [cm]');
     yyaxis right;
-    plot(t, (xc - xc_ref)*100, 'r-', 'LineWidth', 0.8);
-    ylabel('Error [cm]');
+    plot(t, d_inj, 'Color', [0.5 0 0.5], 'LineWidth', 1.2);
+    ylabel('d [V]');
     xline(t_step, 'g--', 'Step');
-    grid on; title(sprintf('Step Response: %.0f cm step', step_amp*100));
-    legend('x_c', 'x_c^{ref}', 'Error', 'Location', 'best');
+    grid on;
+    title(sprintf('Disturbance Rejection: d = %+.2f V step', d_amp));
+    legend('x_c', 'd (perturbation)', 'Location', 'best');
 
     subplot(4,1,2);
     plot(t, rad2deg(alpha), 'r-', 'LineWidth', 1.2); grid on; hold on;
@@ -440,7 +444,8 @@ else
     yline(-V_sat, 'r--');
     xline(t_step, 'g--');
     ylabel('V_m [V]');
-    title(sprintf('Control Voltage (peak = %.2f V)', max(abs(vm))));
+    title(sprintf('Control Voltage (RMS pre=%.2f V, post=%.2f V)', ...
+        vm_rms_pre, vm_rms_post));
 
     subplot(4,1,4);
     h_pre = histogram(rad2deg(alpha(pre_mask)), 'BinWidth', 0.25, ...
@@ -451,30 +456,29 @@ else
     grid on;
     xlabel('\alpha [deg]'); ylabel('PDF');
     legend('Pre-step', 'Post-step');
-    title('Angle Distribution: Before vs After Step');
+    title('Angle Distribution: Before vs After Disturbance');
 
-    sgtitle('Hardware Verification — Step Response', 'FontWeight', 'bold');
+    sgtitle('Hardware Verification — Disturbance Rejection', 'FontWeight', 'bold');
     saveas(gcf, fullfile(figdir, 'Verification-StepResponse.png'));
     fprintf('  Saved: docs/figures/Verification-StepResponse.png\n');
 
-    %% B5. Zoomed step window
-    figure('Name', 'Verification: Step Zoom', ...
+    %% B5. Zoomed disturbance window
+    figure('Name', 'Verification: Disturbance Zoom', ...
         'Position', [100 100 1000 500]);
     subplot(2,1,1);
     plot(tw, xc(step_window)*100, 'b-', 'LineWidth', 1.5); hold on;
-    plot(tw, xc_ref(step_window)*100, 'k--', 'LineWidth', 1.5);
+    plot(tw, d_inj(step_window)*100, '-', 'Color', [0.5 0 0.5], 'LineWidth', 1.5);
     grid on; xlim([-0.2 2.0]);
-    ylabel('x_c [cm]');
-    title(sprintf('Cart Step Zoom (t_{rise} = %.3f s, overshoot = %.1f%%)', ...
-        t_rise, xc_overshoot));
-    legend('x_c', 'x_c^{ref}');
+    ylabel('x_c [cm] / d [V]');
+    title(sprintf('Cart Response to %.2f V Disturbance Step', d_amp));
+    legend('x_c [cm]', 'd [V]');
 
     subplot(2,1,2);
     plot(tw, rad2deg(alpha(step_window)), 'r-', 'LineWidth', 1.2); hold on;
     grid on; xlim([-0.2 2.0]);
     yline(0, 'k-');
-    ylabel('\alpha [deg]'); xlabel('Time from step [s]');
-    title(sprintf('Angle Transient (peak = %.2f deg)', alpha_peak_transient));
+    ylabel('\alpha [deg]'); xlabel('Time from disturbance [s]');
+    title(sprintf('Angle Transient (peak = %.2f deg)', alpha_peak_transient_deg));
 
     saveas(gcf, fullfile(figdir, 'Verification-StepZoom.png'));
     fprintf('  Saved: docs/figures/Verification-StepZoom.png\n');
@@ -482,46 +486,41 @@ end
 
 
 %% =====================================================================
-%  SECTION C — FREQUENCY-DOMAIN: CLOSED-LOOP BODE FROM CHIRP
+%  SECTION C — FREQUENCY-DOMAIN: DISTURBANCE-TO-OUTPUT BODE FROM CHIRP
 %  =====================================================================
-%  While the controller is running, a small-amplitude linear chirp is
-%  added to x_c_ref.  From the logged data we estimate the closed-loop
-%  transfer functions:
+%  A small-amplitude chirp disturbance is injected into the control
+%  signal:  u = sat(-K*x + d),  d = chirp (0.1–10 Hz, 0.5–1.0 V pk).
+%  From logged data we estimate disturbance-to-output transfer functions:
 %
-%    T(s)  = X_c(s) / X_c_ref(s)    (complementary sensitivity)
-%    G_vm(s) = V_m(s) / X_c_ref(s)  (control sensitivity — maps reference to effort)
-%    G_alpha(s) = α(s) / X_c_ref(s) (reference-to-angle coupling)
+%    G_xc(s)    = X_c(s) / d(s)      (cart sensitivity)
+%    G_vm(s)    = V_m(s) / d(s)      (control response)
+%    G_alpha(s) = α(s) / d(s)        (angle sensitivity)
 %
-%  These reveal bandwidth, peaking, and disturbance rejection.
-%
-%  H1 estimator (Welch's method) via tfestimate is used for robust
-%  cross-spectral estimation in the presence of the unmeasured rocking
-%  disturbance (which acts as uncorrelated output noise).
+%  These reveal the closed-loop disturbance rejection bandwidth and
+%  resonance.  The H1 estimator (Welch's method via tfestimate) is used
+%  for robust cross-spectral estimation.
 %  =====================================================================
 
 if ~has_chirp
     fprintf('\n*** SECTION C SKIPPED — hw_chirp_response.mat not found ***\n');
 else
     fprintf('\n========================================\n');
-    fprintf(' SECTION C: Closed-Loop Frequency Response\n');
+    fprintf(' SECTION C: Disturbance-to-Output Frequency Response\n');
     fprintf('========================================\n');
 
     d = load(fullfile(root, 'data', 'hw_chirp_response.mat'));
 
-    t       = d.hw_t(:);
-    xc_ref  = d.hw_r(:);
-    xc      = d.hw_xc(:);
-    alpha   = d.hw_alpha(:);
-    vm      = d.hw_vm(:);
+    t      = d.hw_t(:);
+    d_inj  = d.hw_d(:);
+    xc     = d.hw_xc(:);
+    alpha  = d.hw_alpha(:);
+    vm     = d.hw_vm(:);
 
     dt = mean(diff(t));
     Fs = 1/dt;
     fprintf('  Duration: %.1f s  |  Fs: %.0f Hz  |  N: %d\n', t(end), Fs, length(t));
 
-    %% C1. Estimate closed-loop transfer functions via Welch's method
-    % Window segment: target ~8-16 segments across duration.
-    % 4096 samples/segment at 500 Hz = ~8 s/segment → ~7 segments for 60 s
-    % Good balance of frequency resolution and variance reduction.
+    %% C1. Estimate disturbance-to-output transfer functions (Welch)
     n_seg = min(4096, 2^nextpow2(length(t)/10));
     n_seg = max(n_seg, 512);
     n_overlap = n_seg / 2;
@@ -529,26 +528,21 @@ else
     fprintf('\n  Welch parameters: n_seg=%d, overlap=%d, segments≈%d\n', ...
         n_seg, n_overlap, floor(length(t)/(n_seg - n_overlap)));
 
-    % H1 estimator: T_xy = P_xy / P_xx
-    % Best when input (x_c_ref) is noise-free and noise is on output
-    [H_xc, f_tfe] = tfestimate(xc_ref, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [H_alpha, ~]  = tfestimate(xc_ref, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
-    [H_vm, ~]     = tfestimate(xc_ref, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
+    % H1 estimator from disturbance d to each output
+    [H_xc, f_tfe]    = tfestimate(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
+    [H_alpha, ~]     = tfestimate(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
+    [H_vm, ~]        = tfestimate(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
 
-    % Coherence — how much of the output variance is explained by the input
-    [C_xc, ~]    = mscohere(xc_ref, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [C_alpha, ~] = mscohere(xc_ref, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
+    [C_xc, ~]    = mscohere(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
+    [C_alpha, ~] = mscohere(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
 
-    % Constrain to chirp frequency range
     f_lo = 0.1; f_hi = 10.0;
     f_mask = f_tfe >= f_lo & f_tfe <= f_hi;
     f_use = f_tfe(f_mask);
 
-    %% C2. Closed-loop bandwidth (cart)
-    % Bandwidth = frequency where |T(s)| first crosses -3 dB from DC
+    %% C2. Cart disturbance sensitivity bandwidth
     mag_xc_db = 20*log10(abs(H_xc(f_mask)));
     dc_gain_db = mag_xc_db(find(f_use >= f_lo, 1, 'first'));
-    % Find first crossing below -3 dB from DC
     idx_bw = find(mag_xc_db < dc_gain_db - 3, 1, 'first');
     if isempty(idx_bw)
         bw_hz = f_use(end);
@@ -558,27 +552,18 @@ else
         bw_warning = '';
     end
 
-    % Peak magnitude (resonance) and peaking frequency
     [mag_peak_db, idx_peak] = max(mag_xc_db);
     f_peak = f_use(idx_peak);
 
-    % Phase margin from complementary sensitivity
-    % Approximate: phase margin ≈ phase(T) at crossover where |T|=1 (0 dB)
-    phase_xc_deg = unwrap(angle(H_xc(f_mask))) * 180/pi;
-    idx_cross = find(mag_xc_db >= 0, 1, 'last');
-    if ~isempty(idx_cross) && idx_cross < length(f_use)
-        pm_from_t = 180 + phase_xc_deg(idx_cross);
-    else
-        pm_from_t = NaN;
-    end
+    % Mean sensitivity magnitude (lower = better rejection)
+    mag_xc_mean = mean(abs(H_xc(f_mask)));
 
-    fprintf('\n  --- Closed-Loop Frequency Metrics ---\n');
-    fprintf('    Bandwidth (-3 dB):  %.2f Hz%s\n', bw_hz, bw_warning);
-    fprintf('    Peak |T(s)|:        %.1f dB  at %.2f Hz\n', mag_peak_db, f_peak);
-    fprintf('    DC gain (cart):     %.1f dB\n', dc_gain_db);
-    if ~isnan(pm_from_t)
-        fprintf('    Phase at 0 dB:      %.1f deg  (~phase margin from T)\n', pm_from_t);
-    end
+    fprintf('\n  --- Disturbance-to-Output Frequency Metrics ---\n');
+    fprintf('    Sensitivity BW (-3 dB):  %.2f Hz%s\n', bw_hz, bw_warning);
+    fprintf('    Peak |G_xc(s)|:          %.1f dB (%.1e m/V) at %.2f Hz\n', ...
+        mag_peak_db, 10^(mag_peak_db/20), f_peak);
+    fprintf('    Mean |G_xc|:             %.1e m/V  (lower = better rejection)\n', ...
+        mag_xc_mean);
 
     % Coherence quality
     coh_xc_avg = mean(C_xc(f_mask));
@@ -587,52 +572,50 @@ else
     fprintf('    Mean coh (x_c):     %.2f  (>0.7 = good FRF)\n', coh_xc_avg);
     fprintf('    Mean coh (alpha):   %.2f  (lower = rocking dominates)\n', coh_alpha_avg);
     if coh_alpha_avg < 0.5
-        fprintf('    Note: alpha coherence is low because the unmeasured\n');
-        fprintf('          rocking disturbance is uncorrelated with x_c_ref.\n');
-        fprintf('          This is expected — the chirp is NOT driving the oscillation.\n');
+        fprintf('    Note: alpha coherence may be low because the unmeasured\n');
+        fprintf('          rocking disturbance is uncorrelated with injected d(t).\n');
+        fprintf('          This is expected.\n');
     end
 
-    %% C3. Figures — Closed-Loop Bode
-    figure('Name', 'Verification: Closed-Loop Bode', ...
+    %% C3. Figures — Disturbance-to-Output Bode
+    figure('Name', 'Verification: Disturbance-to-Output Bode', ...
         'Position', [50 50 1100 800]);
 
-    % --- Tile 1: Complementary sensitivity T(s) = x_c / x_c_ref ---
     subplot(3,2,1);
     semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); grid on; hold on;
     yline(dc_gain_db - 3, 'r--', sprintf('-3 dB → %.1f Hz', bw_hz));
     xlim([f_lo f_hi]);
-    ylabel('Magnitude [dB]');
-    title(sprintf('T(s) = X_c / X_c^{ref}  (BW = %.2f Hz)', bw_hz));
+    ylabel('Magnitude [dB m/V]');
+    title(sprintf('G_{xc}(s) = X_c / d  (BW = %.2f Hz)', bw_hz));
 
     subplot(3,2,2);
-    semilogx(f_use, phase_xc_deg(f_mask), 'b-', 'LineWidth', 1.5); grid on;
+    phase_xc_deg = unwrap(angle(H_xc(f_mask))) * 180/pi;
+    semilogx(f_use, phase_xc_deg, 'b-', 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
     ylabel('Phase [deg]');
-    title('Phase T(s)');
+    title('Phase G_{xc}(s)');
 
-    % --- Tile 2: Control sensitivity V_m / x_c_ref ---
     subplot(3,2,3);
     mag_vm_db = 20*log10(abs(H_vm(f_mask)));
     semilogx(f_use, mag_vm_db, 'Color', [0 0.6 0], 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
-    ylabel('Magnitude [dB V/m]');
-    title('Control Effort: V_m / X_c^{ref}');
+    ylabel('Magnitude [dB V/V]');
+    title('Control Response: V_m / d');
 
     subplot(3,2,4);
     phase_vm_deg = unwrap(angle(H_vm(f_mask))) * 180/pi;
     semilogx(f_use, phase_vm_deg, 'Color', [0 0.6 0], 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
     ylabel('Phase [deg]');
-    title('Phase V_m / X_c^{ref}');
+    title('Phase V_m / d');
 
-    % --- Tile 3: Reference-to-angle coupling (disturbance cross-talk) ---
     subplot(3,2,5);
     mag_alpha_db = 20*log10(abs(H_alpha(f_mask)));
     semilogx(f_use, mag_alpha_db, 'r-', 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
-    ylabel('Magnitude [dB rad/m]');
+    ylabel('Magnitude [dB rad/V]');
     xlabel('Frequency [Hz]');
-    title('Coupling: \alpha / X_c^{ref}');
+    title('Angle Sensitivity: α / d');
 
     subplot(3,2,6);
     semilogx(f_use, C_xc(f_mask), 'b-', 'LineWidth', 1.2); hold on;
@@ -644,14 +627,12 @@ else
     legend('x_c', '\alpha', 'Location', 'best');
     title('Coherence (H1 estimator quality)');
 
-    sgtitle('Hardware Verification — Closed-Loop Frequency Response', ...
+    sgtitle('Hardware Verification — Disturbance-to-Output Frequency Response', ...
         'FontWeight', 'bold');
     saveas(gcf, fullfile(figdir, 'Verification-CLBode.png'));
     fprintf('  Saved: docs/figures/Verification-CLBode.png\n');
 
     %% C4. Overlay with analytical prediction
-    % Rebuild the closed-loop transfer function from the controller
-    % and plant, for comparison with hardware.
     M_c_added = ctrl.M_c_added;
     if ~exist('M_c_added', 'var'), M_c_added = 0; end
     M_c_use = M_c + M_c_added;
@@ -662,37 +643,32 @@ else
     A_sw = [0 1 0 0; M_inv(1,:)*G_rhs; 0 0 0 1; M_inv(2,:)*G_rhs];
     B_sw = [0; M_inv(1,:)*[alpha_f*eta_m; 0]; 0; M_inv(2,:)*[alpha_f*eta_m; 0]];
 
-    % Closed-loop A, B, C for reference tracking
+    % Closed-loop with disturbance input: x_dot = (A - B*K)*x + B*d
     A_cl = A_sw - B_sw * K_fb;
-    % x_c output = C_xc * x = [1 0 0 0] * x
-    C_xc = [1 0 0 0];
-    % Reference enters as a feedforward: x_dot = A_cl*x + B_sw*K_fb(1)*r
-    B_ref = B_sw * K_fb(1);
+    C_xc_out = [1 0 0 0];
 
-    T_model = tf(ss(A_cl, B_ref, C_xc, 0));
+    G_xc_model = tf(ss(A_cl, B_sw, C_xc_out, 0));
 
-    % Compare model vs hardware magnitude
-    [mag_model, phase_model] = bode(T_model, 2*pi*f_use);
+    [mag_model, phase_model] = bode(G_xc_model, 2*pi*f_use);
     mag_model_db = 20*log10(squeeze(mag_model));
     phase_model_deg = squeeze(phase_model);
 
-    figure('Name', 'Verification: CL Bode Model vs Hardware', ...
+    figure('Name', 'Verification: Dist. Bode Model vs Hardware', ...
         'Position', [100 100 1000 600]);
     subplot(2,1,1);
     semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); hold on;
     semilogx(f_use, mag_model_db, 'k--', 'LineWidth', 2);
     grid on; xlim([f_lo f_hi]);
-    ylabel('Magnitude [dB]');
-    title('T(s) = X_c / X_c^{ref}:  Model vs Hardware');
+    ylabel('Magnitude [dB m/V]');
+    title('G_{xc}(s) = X_c / d:  Model vs Hardware');
     legend('Hardware (H1)', 'Model (linear)', 'Location', 'best');
 
     subplot(2,1,2);
-    semilogx(f_use, phase_xc_deg(f_mask), 'b-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, phase_xc_deg, 'b-', 'LineWidth', 1.5); hold on;
     semilogx(f_use, phase_model_deg, 'k--', 'LineWidth', 2);
     grid on; xlim([f_lo f_hi]);
     ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
 
-    % Compute RMS magnitude error in band
     mag_err_rms = rms(mag_xc_db(f_mask) - mag_model_db(:));
     fprintf('\n  --- Model-Hardware Agreement ---\n');
     fprintf('    RMS magnitude error:  %.2f dB  (in chirp band)\n', mag_err_rms);
@@ -750,19 +726,23 @@ if has_free_run
             'HorizontalAlignment', 'center'); end
 end
 
-% --- Tile 4: Step response ---
+% --- Tile 4: Disturbance rejection step ---
 if has_step
     subplot(3,3,4);
     d = load(fullfile(root, 'data', 'hw_step_response.mat'));
-    t_s = d.hw_t(:); xc_s = d.hw_xc(:)*100; ref_s = d.hw_r(:)*100;
-    [~, si] = max(abs(diff(ref_s)));
+    t_s = d.hw_t(:); xc_s = d.hw_xc(:)*100; d_s = d.hw_d(:);
+    [~, si] = max(abs(diff(d_s)));
     t_s = t_s - d.hw_t(si);
     mask = t_s >= -1 & t_s <= 4;
+    yyaxis left;
     plot(t_s(mask), xc_s(mask), 'b-', 'LineWidth', 1.2); hold on;
-    plot(t_s(mask), ref_s(mask), 'k--', 'LineWidth', 1.2);
-    grid on; ylabel('x_c [cm]');
-    title('Cart Step Response');
-    legend('x_c', 'ref', 'Location', 'best');
+    ylabel('x_c [cm]');
+    yyaxis right;
+    plot(t_s(mask), d_s(mask), '-', 'Color', [0.5 0 0.5], 'LineWidth', 1.2);
+    ylabel('d [V]');
+    grid on;
+    title('Disturbance Rejection');
+    legend('x_c [cm]', 'd [V]', 'Location', 'best');
 end
 
 % --- Tile 5: Voltage histogram ---
@@ -786,15 +766,15 @@ if has_free_run
     title(sprintf('Angle PSD (peak at %.2f Hz)', f_dom_psd));
 end
 
-% --- Tile 7: CL Bode Magnitude ---
+% --- Tile 7: Disturbance-to-output Bode magnitude ---
 if has_chirp
     subplot(3,3,7);
     semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); grid on; hold on;
     yline(dc_gain_db - 3, 'r--');
     xlim([f_lo f_hi]);
-    ylabel('|T(s)| [dB]');
+    ylabel('|G_{xc}| [dB m/V]');
     xlabel('Freq [Hz]');
-    title(sprintf('CL BW = %.2f Hz, peak = %.1f dB', bw_hz, mag_peak_db));
+    title(sprintf('Sensitivity BW = %.2f Hz, peak = %.1f dB', bw_hz, mag_peak_db));
 end
 
 % --- Tile 8: Coherence ---
@@ -828,10 +808,10 @@ else
 end
 
 li = li + 1; summary_lines{li} = '';
-li = li + 1; summary_lines{li} = 'STEP RESPONSE:';
+li = li + 1; summary_lines{li} = 'DISTURBANCE STEP:';
 if has_step
-    li = li + 1; summary_lines{li} = sprintf('  Rise time:     %.3f s', t_rise);
-    li = li + 1; summary_lines{li} = sprintf('  Overshoot:     %.1f%%%%', xc_overshoot);
+    li = li + 1; summary_lines{li} = sprintf('  Cart deviation: %.2f cm', xc_deviation*100);
+    li = li + 1; summary_lines{li} = sprintf('  Peak |alpha|:   %.2f deg', alpha_peak_transient_deg);
 else
     li = li + 1; summary_lines{li} = '  (no data)';
 end
@@ -845,10 +825,10 @@ if has_obs
 end
 
 li = li + 1; summary_lines{li} = '';
-li = li + 1; summary_lines{li} = 'FREQUENCY:';
+li = li + 1; summary_lines{li} = 'FREQUENCY (dist-to-output):';
 if has_chirp
-    li = li + 1; summary_lines{li} = sprintf('  CL bandwidth:  %.2f Hz', bw_hz);
-    li = li + 1; summary_lines{li} = sprintf('  Model-HW err:  %.2f dB', mag_err_rms);
+    li = li + 1; summary_lines{li} = sprintf('  Sensitivity BW: %.2f Hz', bw_hz);
+    li = li + 1; summary_lines{li} = sprintf('  Model-HW err:   %.2f dB', mag_err_rms);
 else
     li = li + 1; summary_lines{li} = '  (no data)';
 end
@@ -1156,18 +1136,20 @@ if has_free_run
     end
 end
 
-% Step response metrics
+% Disturbance step metrics
 if has_step
     results.step = struct(...
-        'step_time_s',      t_step, ...
-        'step_amp_cm',      step_amp*100, ...
-        'rise_time_s',      t_rise, ...
-        'overshoot_pct',    xc_overshoot, ...
-        'alpha_peak_deg',   alpha_peak_transient, ...
-        'alpha_pre_pp_deg', rad2deg(alpha_pre_pp), ...
-        'alpha_post_pp_deg', rad2deg(alpha_post_pp), ...
-        'alpha_pre_rms_deg', rad2deg(alpha_pre_rms), ...
-        'alpha_post_rms_deg', rad2deg(alpha_post_rms));
+        'd_amp_V',              d_amp, ...
+        'step_time_s',          t_step, ...
+        'xc_deviation_cm',      xc_deviation*100, ...
+        'alpha_peak_deg',       alpha_peak_transient_deg, ...
+        'vm_rms_pre',           vm_rms_pre, ...
+        'vm_rms_post',          vm_rms_post, ...
+        'vm_peak_transient',    vm_peak_transient, ...
+        'alpha_pre_pp_deg',     rad2deg(alpha_pre_pp), ...
+        'alpha_post_pp_deg',    rad2deg(alpha_post_pp), ...
+        'alpha_pre_rms_deg',    rad2deg(alpha_pre_rms), ...
+        'alpha_post_rms_deg',   rad2deg(alpha_post_rms));
 end
 
 % Frequency response metrics
@@ -1180,29 +1162,6 @@ if has_chirp
         'coh_xc_mean',      coh_xc_avg, ...
         'coh_alpha_mean',   coh_alpha_avg, ...
         'model_hw_rms_db',  mag_err_rms);
-    if ~isnan(pm_from_t)
-        results.freq.phase_margin_deg = pm_from_t;
-    end
-end
-
-% Observer metrics
-if has_obs
-    results.observer = struct(...
-        'e_xc_rms_cm',        e_xc_rms*100, ...
-        'e_alpha_rms_deg',    rad2deg(e_alpha_rms), ...
-        'e_xc_max_cm',        e_xc_max*100, ...
-        'e_alpha_max_deg',    rad2deg(e_alpha_max), ...
-        't_conv_s',           t_conv, ...
-        'innov_xc_rms_cm',    innov_xc_rms*100, ...
-        'innov_alpha_rms_deg', rad2deg(innov_alpha_rms), ...
-        'innov_xc_bias_cm',   innov_xc_bias*100, ...
-        'innov_alpha_bias_deg', rad2deg(innov_alpha_bias), ...
-        'rho_xc_lag1',        rho_xc_lag1, ...
-        'rho_alpha_lag1',     rho_alpha_lag1, ...
-        'v_xc_obs_rms',       v_xc_obs_rms, ...
-        'v_xc_num_rms',       v_xc_num_rms, ...
-        'v_al_obs_rms',       v_al_obs_rms, ...
-        'v_al_num_rms',       v_al_num_rms);
 end
 
 % Observer metrics
