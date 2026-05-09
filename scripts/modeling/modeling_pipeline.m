@@ -28,7 +28,7 @@ s_tf = tf('s');
 G_xc    = K_a * alpha_f * eta_m / (M_c * s_tf^2 + B_total * s_tf);
 G_xcdot = K_a * alpha_f * eta_m / (M_c * s_tf + B_total);
 
-freq_range = logspace(log10(f_chirp_start), log10(f_chirp_end), 200);
+freq_range = logspace(log10(f_step_start), log10(f_step_end), 200);
 [mag_an, phase_an] = bode(G_xc, 2*pi*freq_range);
 mag_an_dB   = 20*log10(squeeze(mag_an) * 100);  % convert m/V to cm/V
 phase_an_deg = squeeze(phase_an);
@@ -46,20 +46,39 @@ sgtitle(sprintf('Nominal Model (B_{eq} = %.1f N{\\cdot}s/m)', B_eq));
 fprintf('\nDC gain (velocity): %.4f (cm/s)/V\n', dcgain(G_xcdot)*100);
 fprintf('Velocity pole: %.2f Hz\n', B_total/M_c / (2*pi));
 
-%% 3. BUILD QUARC FREQUENCY TEST MODEL
-%  Programmatically build IP02_FreqTest.slx with chirp input.
-%  This model runs on hardware via QUARC External Mode.
+%% 3. GENERATE STEPPED-SINE EXCITATION SIGNAL
+%  Create a stepped-sine excitation for the QUARC model.
+%  Stepped-sine holds each frequency constant for a block of time,
+%  which the VoltPAQ-X1/Faulhaber motor track far more smoothly
+%  than a continuously-sweeping chirp.  The signal concentrates all
+%  power into one DFT bin per block, yielding higher coherence.
+%
+%  The signal is saved as data/step_signal.mat for the Simulink model
+%  to load via a "From File" or "From Workspace" block.
 
-frequency_setup;  % builds models/IP02_FreqTest.slx
+[t_step, d_step, f_step_vec, step_info] = stepped_sine(...
+    f_step_start, f_step_end, n_step_freqs, ...
+    A_step, 0.002, t_step_block, step_settle_frac);
+
+% Save for Simulink
+step_signal = [t_step, d_step];
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
+save(fullfile(SEESAW_ROOT, 'data', 'step_signal.mat'), 'step_signal', 't_step', 'd_step', 'f_step_vec', 'step_info');
 
 fprintf('\n========================================\n');
 fprintf(' NEXT STEP: Go to hardware!\n');
 fprintf('========================================\n');
-fprintf(' 1. Open models/IP02_FreqTest.slx\n');
-fprintf(' 2. Connect to QUARC (External Mode)\n');
-fprintf(' 3. Run the model — wait %d seconds\n', chirp_duration);
-fprintf(' 4. Data saves automatically to data/data.mat\n');
-fprintf(' 5. Come back here and run Section 4\n');
+fprintf(' 1. Open your QUARC model (e.g. IP02_FreqTest.slx)\n');
+fprintf(' 2. Add a "From Workspace" block reading step_signal\n');
+fprintf('    (sample time = 0.002, form = array)\n');
+fprintf(' 3. Connect to QUARC (External Mode)\n');
+fprintf(' 4. Run the model — wait %.0f seconds\n', t_step(end));
+fprintf(' 5. Data saves automatically to data/data.mat\n');
+fprintf(' 6. Come back here and run Section 4\n');
+fprintf('========================================\n');
+fprintf('  Freq range:  %.2f–%.2f Hz\n', f_step_vec(1), f_step_vec(end));
+fprintf('  %d frequencies, %.1f s each (%.1f s settle)\n', ...
+    n_step_freqs, t_step_block, step_settle_frac * t_step_block);
 fprintf('========================================\n');
 
 %% 4. LOAD & INSPECT HARDWARE DATA
@@ -107,7 +126,7 @@ end
 
 figure('Name', 'Raw Hardware Data', 'Position', [100 100 1000 700]);
 subplot(3,1,1);
-plot(t_hw, V_cmd_hw, 'k-'); ylabel('V_{cmd} [V]'); title('Chirp Input');
+plot(t_hw, V_cmd_hw, 'k-'); ylabel('V_{cmd} [V]'); title('Excitation Input');
 grid on;
 subplot(3,1,2);
 plot(t_hw, xc_hw*100, 'r-'); ylabel('x_c [cm]'); title('Cart Position (Hardware)');
@@ -118,22 +137,35 @@ xlabel('Time [s]'); grid on;
 sgtitle('Raw Hardware Frequency Sweep Data');
 
 %% 5. FREQUENCY RESPONSE COMPARISON (UNTUNED)
-%  Compute the empirical FRF from hardware data using Welch's method,
-%  then overlay against the analytical model.
+%  Compute the empirical FRF from hardware data.
+%  If stepped-sine excitation was used, a per-frequency DFT gives
+%  cleaner estimates than Welch's method on chirp data.
+%
+%  The stepped-sine parameters (t_step_block, step_settle_frac, etc.)
+%  were saved inside step_info in the data file (or use defaults).
 
-[hw_freq, hw_H_xc, ~] = compute_frf(t_hw, V_cmd_hw, xc_hw, xcdot_hw, dt_hw);
+if exist('f_step_vec', 'var') && exist('t_step_block', 'var') && exist('step_settle_frac', 'var')
+    [H_emp, ~, f_emp] = stepped_sine_frf(t_hw, V_cmd_hw, xc_hw, ...
+        f_step_vec, t_step_block, step_settle_frac);
+    hw_freq = f_emp;
+    hw_H_xc = H_emp;
+    fprintf('  Using stepped-sine per-frequency DFT (H1 at each tone).\n');
+else
+    [hw_freq, hw_H_xc, ~] = compute_frf(t_hw, V_cmd_hw, xc_hw, xcdot_hw, dt_hw);
+    fprintf('  Fallback: Welch tfestimate (chirp or unknown excitation).\n');
+end
 
 figure('Name', 'FRF: Model vs Hardware (Untuned)', 'Position', [100 100 1000 600]);
 subplot(2,1,1);
 semilogx(freq_range, mag_an_dB, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(hw_freq, 20*log10(abs(hw_H_xc)*100), 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Magnitude [dB cm/V]'); xlim([f_chirp_start f_chirp_end]);
+grid on; ylabel('Magnitude [dB cm/V]'); xlim([f_step_start f_step_end]);
 title('V_{cmd} \rightarrow x_c');
 legend('Analytical (nominal)', 'Hardware', 'Location', 'best');
 subplot(2,1,2);
 semilogx(freq_range, phase_an_deg, 'b-', 'LineWidth', 1.5); hold on;
 semilogx(hw_freq, unwrap(angle(hw_H_xc))*180/pi, 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]'); xlim([f_chirp_start f_chirp_end]);
+grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]'); xlim([f_step_start f_step_end]);
 sgtitle(sprintf('Frequency Response — BEFORE Tuning (B_{eq} = %.1f)', B_eq));
 
 %% 6. AUTO-TUNE B_eq
@@ -232,17 +264,17 @@ subplot(2,1,1);
 semilogx(freq_range, mag_an_dB, 'b--', 'LineWidth', 1); hold on;
 semilogx(freq_range, mag_t_dB, 'g-', 'LineWidth', 2);
 semilogx(hw_freq, 20*log10(abs(hw_H_xc)*100), 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Magnitude [dB cm/V]'); xlim([f_chirp_start f_chirp_end]);
+grid on; ylabel('Magnitude [dB cm/V]'); xlim([f_step_start f_step_end]);
 legend('Nominal', 'TUNED', 'Hardware', 'Location', 'best');
 subplot(2,1,2);
 semilogx(freq_range, phase_an_deg, 'b--', 'LineWidth', 1); hold on;
 semilogx(freq_range, phase_t_deg, 'g-', 'LineWidth', 2);
 semilogx(hw_freq, unwrap(angle(hw_H_xc))*180/pi, 'r-', 'LineWidth', 1.5);
-grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]'); xlim([f_chirp_start f_chirp_end]);
+grid on; ylabel('Phase [deg]'); xlabel('Frequency [Hz]'); xlim([f_step_start f_step_end]);
 sgtitle(sprintf('Frequency Response — AFTER Tuning (B_{eq} = %.2f \\rightarrow %.2f)', B_eq_nominal, B_eq));
 
 %% 9. TIME-DOMAIN VALIDATION
-%  Simulate the tuned model with the same chirp input that was fed to the
+%  Simulate the tuned model with the same excitation that was fed to the
 %  hardware, then overlay the two position traces and compute RMS error.
 
 sys_tuned = ss(A_cart, B_cart, C_cart, D_cart);
@@ -298,7 +330,7 @@ if rms_err < 1.0
     fprintf('    Ready for LQR controller design.\n');
 else
     fprintf('\n  WARNING: RMS error > 1 cm -- consider:\n');
-    fprintf('    - Reducing chirp amplitude (currently %.1f V)\n', A_chirp);
+    fprintf('    - Reducing excitation amplitude (currently %.1f V)\n', A_step);
     fprintf('    - Checking for end-stop clipping\n');
     fprintf('    - Manual B_eq adjustment\n');
 end
@@ -329,9 +361,9 @@ function [freq_out, H_xc, H_xcdot] = compute_frf(t, u, xc, xcdot, dt)
     [H_xc_raw,    freq_fft] = tfestimate(u, xc,    hanning(n_seg), n_seg/2, n_seg, Fs);
     [H_xcdot_raw, ~       ] = tfestimate(u, xcdot, hanning(n_seg), n_seg/2, n_seg, Fs);
 
-    % Use chirp range from workspace; fall back to defaults if absent
-    try f_lo = evalin('base','f_chirp_start'); catch, f_lo = 0.1;  end
-    try f_hi = evalin('base','f_chirp_end');   catch, f_hi = 12.0; end
+    % Use stepped-sine range from workspace; fall back to defaults if absent
+    try f_lo = evalin('base','f_step_start'); catch, f_lo = 0.1;  end
+    try f_hi = evalin('base','f_step_end');   catch, f_hi = 12.0; end
     valid = freq_fft >= f_lo & freq_fft <= f_hi;
     freq_out = freq_fft(valid);
     H_xc     = H_xc_raw(valid);

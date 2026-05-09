@@ -210,6 +210,23 @@ end
 %   alpha [rad] = (encoder_counts * K_E_SW) / K_gs
 %   (The gear ratio K_gs is between pivot and encoder shaft)
 
+%% ===== System Identification Excitation Parameters =====
+% Chirp (continuous sweep) — legacy, kept for backward compatibility.
+% Prefer stepped-sine for closed-loop hardware where the amplifier/motor
+% track constant-frequency blocks more smoothly than continuous sweeps.
+f_chirp_start   = 0.1;      % Chirp start frequency [Hz]
+f_chirp_end     = 12.0;     % Chirp end frequency [Hz]
+A_chirp         = 1.0;      % Chirp amplitude [V]
+chirp_duration  = 60;       % Chirp duration [s]
+
+% Stepped-sine (discrete frequency blocks) — recommended for hardware.
+f_step_start    = 0.1;      % Start frequency [Hz]
+f_step_end      = 10.0;     % End frequency [Hz]
+n_step_freqs    = 18;       % Number of discrete frequencies
+A_step          = 0.5;      % Disturbance amplitude [V]
+t_step_block    = 5;        % Duration per frequency [s]
+step_settle_frac = 0.2;     % Fraction of each block skipped (settling)
+
 fprintf('\nAll parameters loaded successfully.\n');
 fprintf('Amplifier gain K_a = %d (VERIFY switch on VoltPAQ!)\n', K_a);
 fprintf('Voltage saturation = +/- %.1f V\n', V_sat);
@@ -217,3 +234,5 @@ fprintf('Max angle = +/- %.1f deg (= physical stops)\n', alpha_max * 180/pi);
 fprintf('Motor model: L_m = 0 (reduced, matches Good ref Eq. 2.3)\n');
 fprintf('  Cart mass m_c = %.3f kg (no reflected rotor inertia -- matches Good ref)\n', M_c);
 fprintf('SS matrices ready: A_cart/B_cart/C_cart/D_cart (Phase 1), A_sw/B_sw/C_sw/D_sw (Phase 2)\n');
+fprintf('Excitation: chirp [%.1f–%.1f Hz]  |  stepped-sine [%.1f–%.1f Hz, %d freqs]\n', ...
+    f_chirp_start, f_chirp_end, f_step_start, f_step_end, n_step_freqs);

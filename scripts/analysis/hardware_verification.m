@@ -3,7 +3,7 @@
 %  Master script for verifying the closed-loop seesaw controller against
 %  hardware data.  Covers both time-domain (step response, bounded
 %  oscillation analysis) and frequency-domain (closed-loop Bode from
-%  chirp perturbation) verification.
+%  stepped-sine perturbation) verification.
 %
 %  KEY INSIGHT:  The seesaw does NOT achieve asymptotic stability at
 %  theta = 0.  Nonlinearities (Coulomb friction, encoder quantization,
@@ -23,7 +23,7 @@
 %    Inject a disturbance signal d(t) into the control voltage, after
 %    the feedback gain and before saturation: u_sat = sat(-K*x + d).
 %    Add a "From Workspace" block for d and a manual switch to toggle
-%    between d=0 (normal) and an injected signal (step or chirp).
+%    between d=0 (normal) and an injected signal (step or stepped-sine).
 %    Log d alongside everything else.
 %    (Do NOT inject as cart/angle reference — commanding arbitrary
 %     positions on an unstable seesaw is nonsense. Disturbance injection
@@ -45,14 +45,37 @@
 %    5. Save as: data/hw_step_response.mat
 %       Variables: hw_t, hw_d, hw_xc, hw_alpha, hw_vm
 %
-%  Experiment C — Chirp Perturbation (frequency response):
-%    1. Same model as B. Replace step with chirp:
-%       - Amplitude: 0.5-1.0 V (too large may destabilize)
-%       - Frequency: 0.1 to 10 Hz (linear chirp)
-%       - Duration: 60 s
-%    2. Log: t, d, x_c, alpha, V_m
-%    3. Save as: data/hw_chirp_response.mat
+%  Experiment C — Stepped-Sine Perturbation (frequency response):
+%    WHY STEPPED-SINE INSTEAD OF CHIRP:  A chirp continuously changes
+%    frequency, which the VoltPAQ-X1 amp & Faulhaber motor struggle to
+%    track smoothly.  Stepped-sine holds each frequency constant for a
+%    block of time, giving the hardware clean steady-state blocks and
+%    concentrating all disturbance power into one DFT bin per block.
+%    This yields much higher coherence at each excitation frequency.
+%
+%    IMPORTANT:  The seesaw is always rocking (limit cycle).  The
+%    stepped-sine d(t) and the rocking are at different frequencies,
+%    so the per-frequency H1 estimator averages the uncorrelated rocking
+%    noise to zero.
+%
+%    1. Run this MATLAB script through Section 0 first to populate
+%       f_step_start, f_step_end, n_step_freqs, A_step, t_step_block,
+%       and step_settle_frac in the workspace.
+%    2. Generate the signal in MATLAB:
+%         [t_step, d_step, f_step_vec] = stepped_sine(...
+%             f_step_start, f_step_end, n_step_freqs, ...
+%             A_step, 0.002, t_step_block, step_settle_frac);
+%         step_signal = [t_step, d_step];   % for "From Workspace" block
+%    3. Open models/PolePlacementObserver2024.slx (QUARC External)
+%    4. Add a "From Workspace" block reading step_signal (sample time 0.002)
+%       and a manual switch to toggle d=0 ↔ d=step_signal, injected
+%       after the feedback gain: u_sat = sat(-K*x + d).
+%    5. Hold seesaw level, Start controller, release gently, then toggle
+%       d to the stepped-sine signal.
+%    6. Log: t, d, x_c, alpha, V_m (same signals as chirp experiment).
+%    7. Save as: data/hw_stepped_sine_response.mat
 %       Variables: hw_t, hw_d, hw_xc, hw_alpha, hw_vm
+%       (Legacy filename data/hw_chirp_response.mat is also accepted.)
 %
 %  Experiment D — Observer free-run (observer-in-loop, for Section F):
 %    1. Observer-in-loop variant, d=0
@@ -111,7 +134,8 @@ fprintf('\n');
 % ---- Scanners for what data files exist ----
 has_free_run  = exist(fullfile(root, 'data', 'hw_free_run.mat'), 'file') == 2;
 has_step      = exist(fullfile(root, 'data', 'hw_step_response.mat'), 'file') == 2;
-has_chirp     = exist(fullfile(root, 'data', 'hw_chirp_response.mat'), 'file') == 2;
+has_chirp     = exist(fullfile(root, 'data', 'hw_stepped_sine_response.mat'), 'file') == 2 ...
+                 || exist(fullfile(root, 'data', 'hw_chirp_response.mat'), 'file') == 2;
 has_obs       = exist(fullfile(root, 'data', 'hw_obs_free.mat'), 'file') == 2;
 
 if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
@@ -486,29 +510,44 @@ end
 
 
 %% =====================================================================
-%  SECTION C — FREQUENCY-DOMAIN: DISTURBANCE-TO-OUTPUT BODE FROM CHIRP
+%  SECTION C — FREQUENCY-DOMAIN: DISTURBANCE-TO-OUTPUT BODE
 %  =====================================================================
-%  A small-amplitude chirp disturbance is injected into the control
-%  signal:  u = sat(-K*x + d),  d = chirp (0.1–10 Hz, 0.5–1.0 V pk).
-%  From logged data we estimate disturbance-to-output transfer functions:
+%  A stepped-sine disturbance is injected into the control signal:
+%    u = sat(-K*x + d),   d = stepped-sine (0.1–10 Hz, 0.5 V pk).
+%
+%  Each frequency is held constant for t_step_block seconds; the
+%  amplifier and motor see clean, stationary sine blocks instead of a
+%  continuously-sweeping chirp.  The first step_settle_frac of each block
+%  is skipped to let transients decay after frequency switches.
+%
+%  From logged data we estimate disturbance-to-output transfer functions
+%  using a per-frequency single-bin DFT (H1 estimator):
 %
 %    G_xc(s)    = X_c(s) / d(s)      (cart sensitivity)
 %    G_vm(s)    = V_m(s) / d(s)      (control response)
 %    G_alpha(s) = α(s) / d(s)        (angle sensitivity)
 %
-%  These reveal the closed-loop disturbance rejection bandwidth and
-%  resonance.  The H1 estimator (Welch's method via tfestimate) is used
-%  for robust cross-spectral estimation.
+%  Coherence is estimated by splitting each block's analysis window
+%  into sub-segments.  Legacy chirp data is also supported via Welch's
+%  tfestimate fallback.
 %  =====================================================================
 
 if ~has_chirp
-    fprintf('\n*** SECTION C SKIPPED — hw_chirp_response.mat not found ***\n');
+    fprintf('\n*** SECTION C SKIPPED — no stepped-sine or chirp response data found ***\n');
 else
     fprintf('\n========================================\n');
     fprintf(' SECTION C: Disturbance-to-Output Frequency Response\n');
     fprintf('========================================\n');
 
-    d = load(fullfile(root, 'data', 'hw_chirp_response.mat'));
+    step_file = fullfile(root, 'data', 'hw_stepped_sine_response.mat');
+    chirp_file = fullfile(root, 'data', 'hw_chirp_response.mat');
+    if exist(step_file, 'file') == 2
+        d = load(step_file);
+        fprintf('  Loaded: hw_stepped_sine_response.mat\n');
+    else
+        d = load(chirp_file);
+        fprintf('  Loaded: hw_chirp_response.mat (legacy)\n');
+    end
 
     t      = d.hw_t(:);
     d_inj  = d.hw_d(:);
@@ -520,54 +559,94 @@ else
     Fs = 1/dt;
     fprintf('  Duration: %.1f s  |  Fs: %.0f Hz  |  N: %d\n', t(end), Fs, length(t));
 
-    %% C1. Estimate disturbance-to-output transfer functions (Welch)
-    n_seg = min(4096, 2^nextpow2(length(t)/10));
-    n_seg = max(n_seg, 512);
-    n_overlap = n_seg / 2;
+    %% C1. Detect excitation type & extract stepped-sine parameters
+    is_stepped = exist(step_file, 'file') == 2;
 
-    fprintf('\n  Welch parameters: n_seg=%d, overlap=%d, segments≈%d\n', ...
-        n_seg, n_overlap, floor(length(t)/(n_seg - n_overlap)));
+    if is_stepped
+        [t_step, d_ref, f_step_vec, step_info] = stepped_sine(...
+            f_step_start, f_step_end, n_step_freqs, A_step, dt, ...
+            t_step_block, step_settle_frac);
+        n_freqs = length(f_step_vec);
+        fprintf('\n  Stepped-sine: %d frequencies, %.2f–%.2f Hz, %.1f s/block (%.1f s settle)\n', ...
+            n_freqs, f_step_vec(1), f_step_vec(end), t_step_block, step_settle_frac * t_step_block);
+        fprintf('  Total excitation duration: %.0f s\n', t_step(end));
 
-    % H1 estimator from disturbance d to each output
-    [H_xc, f_tfe]    = tfestimate(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [H_alpha, ~]     = tfestimate(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
-    [H_vm, ~]        = tfestimate(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
+        f_use = f_step_vec;
+        f_lo = f_step_start;
+        f_hi = f_step_end;
 
-    [C_xc, ~]    = mscohere(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [C_alpha, ~] = mscohere(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
+        [H_xc,    coh_xc]    = stepped_sine_frf(t, d_inj, xc,    f_step_vec, t_step_block, step_settle_frac);
+        [H_alpha, coh_alpha] = stepped_sine_frf(t, d_inj, alpha, f_step_vec, t_step_block, step_settle_frac);
+        [H_vm,    ~]         = stepped_sine_frf(t, d_inj, vm,    f_step_vec, t_step_block, step_settle_frac);
 
-    f_lo = 0.1; f_hi = 10.0;
-    f_mask = f_tfe >= f_lo & f_tfe <= f_hi;
-    f_use = f_tfe(f_mask);
+        H_xc_db    = 20*log10(abs(H_xc));
+        H_alpha_db = 20*log10(abs(H_alpha));
+        H_vm_db    = 20*log10(abs(H_vm));
+        phase_xc_deg   = unwrap(angle(H_xc)) * 180/pi;
+        phase_alpha_deg = unwrap(angle(H_alpha)) * 180/pi;
+        phase_vm_deg    = unwrap(angle(H_vm)) * 180/pi;
+        coh_xc_vals = coh_xc;
+        coh_alpha_vals = coh_alpha;
+    else
+        fprintf('\n  Legacy chirp detected — using Welch tfestimate (H1).\n');
+        n_seg = min(4096, 2^nextpow2(length(t)/10));
+        n_seg = max(n_seg, 512);
+        n_overlap = n_seg / 2;
+
+        [H_xc_tfe, f_tfe] = tfestimate(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
+        [H_alpha_tfe, ~]  = tfestimate(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
+        [H_vm_tfe, ~]     = tfestimate(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
+        [C_xc_tfe, ~]     = mscohere(d_inj, xc,      hanning(n_seg), n_overlap, n_seg, Fs);
+        [C_alpha_tfe, ~]  = mscohere(d_inj, alpha,   hanning(n_seg), n_overlap, n_seg, Fs);
+
+        f_lo = 0.1; f_hi = 10.0;
+        f_mask = f_tfe >= f_lo & f_tfe <= f_hi;
+        f_use = f_tfe(f_mask);
+
+        H_xc    = H_xc_tfe(f_mask);
+        H_alpha = H_alpha_tfe(f_mask);
+        H_vm    = H_vm_tfe(f_mask);
+        coh_xc_vals  = C_xc_tfe(f_mask);
+        coh_alpha_vals = C_alpha_tfe(f_mask);
+        H_xc_db    = 20*log10(abs(H_xc));
+        H_alpha_db = 20*log10(abs(H_alpha));
+        H_vm_db    = 20*log10(abs(H_vm));
+        phase_xc_deg    = unwrap(angle(H_xc)) * 180/pi;
+        phase_vm_deg    = unwrap(angle(H_vm)) * 180/pi;
+        phase_alpha_deg  = unwrap(angle(H_alpha)) * 180/pi;
+    end
 
     %% C2. Cart disturbance sensitivity bandwidth
-    mag_xc_db = 20*log10(abs(H_xc(f_mask)));
-    dc_gain_db = mag_xc_db(find(f_use >= f_lo, 1, 'first'));
-    idx_bw = find(mag_xc_db < dc_gain_db - 3, 1, 'first');
+    valid_mask = ~isnan(H_xc_db);
+    if ~any(valid_mask)
+        warning('All FRF estimates are NaN — check data quality.');
+    end
+
+    idx_first_valid = find(valid_mask, 1, 'first');
+    dc_gain_db = H_xc_db(idx_first_valid);
+    idx_bw = find(H_xc_db(valid_mask) < dc_gain_db - 3, 1, 'first');
     if isempty(idx_bw)
-        bw_hz = f_use(end);
-        bw_warning = ' (not found — beyond chirp range)';
+        bw_hz = f_use(find(valid_mask, 1, 'last'));
+        bw_warning = ' (not found — beyond range)';
     else
-        bw_hz = f_use(idx_bw);
+        bw_hz = f_use(find(valid_mask, 1, 'first') + idx_bw - 1);
         bw_warning = '';
     end
 
-    [mag_peak_db, idx_peak] = max(mag_xc_db);
+    [mag_peak_db, idx_peak] = max(H_xc_db);
     f_peak = f_use(idx_peak);
 
-    % Mean sensitivity magnitude (lower = better rejection)
-    mag_xc_mean = mean(abs(H_xc(f_mask)));
+    mag_xc_mean = mean(abs(H_xc));
 
     fprintf('\n  --- Disturbance-to-Output Frequency Metrics ---\n');
     fprintf('    Sensitivity BW (-3 dB):  %.2f Hz%s\n', bw_hz, bw_warning);
-    fprintf('    Peak |G_xc(s)|:          %.1f dB (%.1e m/V) at %.2f Hz\n', ...
+    fprintf('    Peak |G_xc|:             %.1f dB (%.1e m/V) at %.2f Hz\n', ...
         mag_peak_db, 10^(mag_peak_db/20), f_peak);
     fprintf('    Mean |G_xc|:             %.1e m/V  (lower = better rejection)\n', ...
         mag_xc_mean);
 
-    % Coherence quality
-    coh_xc_avg = mean(C_xc(f_mask));
-    coh_alpha_avg = mean(C_alpha(f_mask));
+    coh_xc_avg    = mean(coh_xc_vals(~isnan(coh_xc_vals)));
+    coh_alpha_avg = mean(coh_alpha_vals(~isnan(coh_alpha_vals)));
     fprintf('\n  --- Coherence ---\n');
     fprintf('    Mean coh (x_c):     %.2f  (>0.7 = good FRF)\n', coh_xc_avg);
     fprintf('    Mean coh (alpha):   %.2f  (lower = rocking dominates)\n', coh_alpha_avg);
@@ -578,54 +657,61 @@ else
     end
 
     %% C3. Figures — Disturbance-to-Output Bode
+    ep_str = 'stepped-sine';
+    if ~is_stepped, ep_str = 'chirp'; end
+
     figure('Name', 'Verification: Disturbance-to-Output Bode', ...
         'Position', [50 50 1100 800]);
 
     subplot(3,2,1);
-    semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); grid on; hold on;
+    semilogx(f_use, H_xc_db, 'b.-', 'LineWidth', 1.5, 'MarkerSize', 8); grid on; hold on;
     yline(dc_gain_db - 3, 'r--', sprintf('-3 dB → %.1f Hz', bw_hz));
     xlim([f_lo f_hi]);
     ylabel('Magnitude [dB m/V]');
-    title(sprintf('G_{xc}(s) = X_c / d  (BW = %.2f Hz)', bw_hz));
+    title(sprintf('G_{xc}(s) = X_c / d  (BW = %.2f Hz) [%s]', bw_hz, ep_str));
 
     subplot(3,2,2);
-    phase_xc_deg = unwrap(angle(H_xc(f_mask))) * 180/pi;
-    semilogx(f_use, phase_xc_deg, 'b-', 'LineWidth', 1.5); grid on;
+    semilogx(f_use, phase_xc_deg, 'b.-', 'LineWidth', 1.5, 'MarkerSize', 8); grid on;
     xlim([f_lo f_hi]);
     ylabel('Phase [deg]');
     title('Phase G_{xc}(s)');
 
     subplot(3,2,3);
-    mag_vm_db = 20*log10(abs(H_vm(f_mask)));
-    semilogx(f_use, mag_vm_db, 'Color', [0 0.6 0], 'LineWidth', 1.5); grid on;
+    semilogx(f_use, H_vm_db, 'Color', [0 0.6 0], 'LineWidth', 1.5); hold on;
+    if is_stepped
+        semilogx(f_use, H_vm_db, 'g.', 'MarkerSize', 8);
+    end
+    grid on;
     xlim([f_lo f_hi]);
     ylabel('Magnitude [dB V/V]');
     title('Control Response: V_m / d');
 
     subplot(3,2,4);
-    phase_vm_deg = unwrap(angle(H_vm(f_mask))) * 180/pi;
-    semilogx(f_use, phase_vm_deg, 'Color', [0 0.6 0], 'LineWidth', 1.5); grid on;
+    semilogx(f_use, phase_vm_deg, 'Color', [0 0.6 0], 'LineWidth', 1.5); hold on;
+    if is_stepped
+        semilogx(f_use, phase_vm_deg, 'g.', 'MarkerSize', 8);
+    end
+    grid on;
     xlim([f_lo f_hi]);
     ylabel('Phase [deg]');
     title('Phase V_m / d');
 
     subplot(3,2,5);
-    mag_alpha_db = 20*log10(abs(H_alpha(f_mask)));
-    semilogx(f_use, mag_alpha_db, 'r-', 'LineWidth', 1.5); grid on;
+    semilogx(f_use, H_alpha_db, 'r.-', 'LineWidth', 1.5, 'MarkerSize', 8); grid on;
     xlim([f_lo f_hi]);
     ylabel('Magnitude [dB rad/V]');
     xlabel('Frequency [Hz]');
     title('Angle Sensitivity: α / d');
 
     subplot(3,2,6);
-    semilogx(f_use, C_xc(f_mask), 'b-', 'LineWidth', 1.2); hold on;
-    semilogx(f_use, C_alpha(f_mask), 'r-', 'LineWidth', 1.2); grid on;
+    semilogx(f_use, coh_xc_vals, 'b.-', 'LineWidth', 1.2, 'MarkerSize', 6); hold on;
+    semilogx(f_use, coh_alpha_vals, 'r.-', 'LineWidth', 1.2, 'MarkerSize', 6); grid on;
     yline(0.7, 'k--');
     xlim([f_lo f_hi]); ylim([0 1]);
     ylabel('Coherence');
     xlabel('Frequency [Hz]');
     legend('x_c', '\alpha', 'Location', 'best');
-    title('Coherence (H1 estimator quality)');
+    title(sprintf('Coherence [%s]', ep_str));
 
     sgtitle('Hardware Verification — Disturbance-to-Output Frequency Response', ...
         'FontWeight', 'bold');
@@ -643,7 +729,6 @@ else
     A_sw = [0 1 0 0; M_inv(1,:)*G_rhs; 0 0 0 1; M_inv(2,:)*G_rhs];
     B_sw = [0; M_inv(1,:)*[alpha_f*eta_m; 0]; 0; M_inv(2,:)*[alpha_f*eta_m; 0]];
 
-    % Closed-loop with disturbance input: x_dot = (A - B*K)*x + B*d
     A_cl = A_sw - B_sw * K_fb;
     C_xc_out = [1 0 0 0];
 
@@ -656,7 +741,11 @@ else
     figure('Name', 'Verification: Dist. Bode Model vs Hardware', ...
         'Position', [100 100 1000 600]);
     subplot(2,1,1);
-    semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); hold on;
+    if is_stepped
+        semilogx(f_use, H_xc_db, 'b.-', 'LineWidth', 1.5, 'MarkerSize', 8); hold on;
+    else
+        semilogx(f_use, H_xc_db, 'b-', 'LineWidth', 1.5); hold on;
+    end
     semilogx(f_use, mag_model_db, 'k--', 'LineWidth', 2);
     grid on; xlim([f_lo f_hi]);
     ylabel('Magnitude [dB m/V]');
@@ -664,14 +753,18 @@ else
     legend('Hardware (H1)', 'Model (linear)', 'Location', 'best');
 
     subplot(2,1,2);
-    semilogx(f_use, phase_xc_deg, 'b-', 'LineWidth', 1.5); hold on;
+    if is_stepped
+        semilogx(f_use, phase_xc_deg, 'b.-', 'LineWidth', 1.5, 'MarkerSize', 8); hold on;
+    else
+        semilogx(f_use, phase_xc_deg, 'b-', 'LineWidth', 1.5); hold on;
+    end
     semilogx(f_use, phase_model_deg, 'k--', 'LineWidth', 2);
     grid on; xlim([f_lo f_hi]);
     ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
 
-    mag_err_rms = rms(mag_xc_db(f_mask) - mag_model_db(:));
+    mag_err_rms = rms(H_xc_db - mag_model_db(:));
     fprintf('\n  --- Model-Hardware Agreement ---\n');
-    fprintf('    RMS magnitude error:  %.2f dB  (in chirp band)\n', mag_err_rms);
+    fprintf('    RMS magnitude error:  %.2f dB  (in band [%.1f–%.1f Hz])\n', mag_err_rms, f_lo, f_hi);
 
     saveas(gcf, fullfile(figdir, 'Verification-CLBode-ModelVsHW.png'));
     fprintf('  Saved: docs/figures/Verification-CLBode-ModelVsHW.png\n');
@@ -769,7 +862,7 @@ end
 % --- Tile 7: Disturbance-to-output Bode magnitude ---
 if has_chirp
     subplot(3,3,7);
-    semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); grid on; hold on;
+    semilogx(f_use, H_xc_db, 'b.-', 'LineWidth', 1.5, 'MarkerSize', 6); grid on; hold on;
     yline(dc_gain_db - 3, 'r--');
     xlim([f_lo f_hi]);
     ylabel('|G_{xc}| [dB m/V]');
@@ -780,8 +873,8 @@ end
 % --- Tile 8: Coherence ---
 if has_chirp
     subplot(3,3,8);
-    semilogx(f_use, C_xc(f_mask), 'b-', 'LineWidth', 1.2); hold on;
-    semilogx(f_use, C_alpha(f_mask), 'r-', 'LineWidth', 1.2); grid on;
+    semilogx(f_use, coh_xc_vals, 'b.-', 'LineWidth', 1.2, 'MarkerSize', 5); hold on;
+    semilogx(f_use, coh_alpha_vals, 'r.-', 'LineWidth', 1.2, 'MarkerSize', 5); grid on;
     xlim([f_lo f_hi]); ylim([0 1]);
     ylabel('Coherence'); xlabel('Freq [Hz]');
     legend('x_c', '\alpha', 'Location', 'best');
@@ -827,6 +920,15 @@ end
 li = li + 1; summary_lines{li} = '';
 li = li + 1; summary_lines{li} = 'FREQUENCY (dist-to-output):';
 if has_chirp
+    if ~exist('ep_str', 'var')
+        if exist(fullfile(root, 'data', 'hw_stepped_sine_response.mat'), 'file') == 2
+            ep_str = 'stepped-sine';
+        else
+            ep_str = 'chirp';
+        end
+    end
+    li = li + 1; summary_lines{li} = sprintf('  Method:         %s', upper(ep_str));
+    li = li + 1; summary_lines{li} = sprintf('  Freq points:    %d (%.1f–%.1f Hz)', length(f_use), f_lo, f_hi);
     li = li + 1; summary_lines{li} = sprintf('  Sensitivity BW: %.2f Hz', bw_hz);
     li = li + 1; summary_lines{li} = sprintf('  Model-HW err:   %.2f dB', mag_err_rms);
 else
