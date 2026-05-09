@@ -19,6 +19,13 @@ if ~exist(data_file, 'file')
     error('tuned cart data not found.');
 end
 
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
+data_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
+
+if ~exist(data_file, 'file')
+    error('non-linear data not found.');
+end
+
 D_C_nominal = D_C;  % save for comparison later
 fprintf('\n----- Nominal Model -----\n');
 fprintf('  D_C     = %.2f N*s/m (will be tuned)\n', D_C_nominal);

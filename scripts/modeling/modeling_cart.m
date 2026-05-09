@@ -15,6 +15,12 @@ set(groot, 'defaultTextInterpreter', 'latex');
 %  This populates ~30 variables including B_eq (tuning target).
 
 seesaw_params;
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
+data_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
+
+if ~exist(data_file, 'file')
+    error('non-linear data not found.');
+end
 
 B_eq_nominal = B_eq;  % save for comparison later
 eta_g_nominal = eta_g;
@@ -125,11 +131,11 @@ calc_alpha = @(p) (k_t * K_g * p(1) * eta_m) / (r_mp * R_m);
 calc_Btot  = @(p) ((k_t * k_m * K_g^2 * p(1)) / (r_mp^2 * R_m)) + p(2);
 
 % Helper functions for Gain and Time Constant to keep equations clean
-calc_K   = @(p) calc_alpha(p) / calc_Btot(p);
+calc_K   = @(p) calc_alpha(p) * eta_m / calc_Btot(p);
 calc_tau = @(p) M_e / calc_Btot(p);
 
 % Step Responses Calculation
-v_sim = @(p) V_step * (calc_alpha(p) / calc_Btot(p)) * (1 - exp(-(calc_Btot(p) / M_e) * tdot_hw));
+v_sim = @(p) V_step * (calc_alpha(p) * eta_m / calc_Btot(p)) * (1 - exp(-(calc_Btot(p) / M_e) * tdot_hw));
 x_sim = @(p) V_step * calc_K(p) * (t_hw - calc_tau(p) * (1 - exp(-t_hw / calc_tau(p))));
 
 % 4. Define the Cost Function (Mean Squared Error)
@@ -140,8 +146,7 @@ costFunction = @(p) mean((xcdot_hw - v_sim(p)).^2) + ...
 
 % 5. Initial Guesses for the 2 Unknowns
 % Provide realistic starting points.
-initial_params = [eta_g_nominal, 6.7217];
-model_params = [eta_g_nominal, B_eq_nominal];
+initial_params = [eta_g_nominal, B_eq_nominal];
 
 % 6. Run Optimization (Nelder-Mead)
 options = optimset('Display', 'iter', 'TolFun', 1e-6, 'TolX', 1e-6);
@@ -155,10 +160,10 @@ B_eq   = best_params(2);
 % Calculate the final transfer function metrics using the locked eta_m
 alpha_f = calc_alpha(best_params);
 B_total  = calc_Btot(best_params);
-Kdc_opt   = alpha_f / B_total;
+Kdc_opt   = alpha_f * eta_m / B_total;
 tau_opt   = M_e / B_total;
 
-rmse_init = sqrt(mean((xc_hw - x_sim(model_params)).^2));
+rmse_init = sqrt(mean((xc_hw - x_sim(initial_params)).^2));
 rmse_tuned     = sqrt(mean((xc_hw - x_sim(best_params)).^2));
 
 fprintf('\n--- Optimized Physical Parameters ---\n');
@@ -192,7 +197,7 @@ plot(t_hw, xc_hw*100, 'k-', 'LineWidth', 2, 'DisplayName', 'Hardware');
 title('Cart Position'); 
 hold on;
 plot(t_hw, x_sim(best_params)*100, 'r-', 'LineWidth', 1.5, 'DisplayName', 'Optimized Model');
-plot(t_hw, x_sim(model_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
+plot(t_hw, x_sim(initial_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
 grid on;
 
 % --- Subplot 3: Velocity ---
@@ -202,7 +207,7 @@ ylabel('$\dot{x}_c$ [cm/s]');
 title('Cart Velocity'); 
 hold on;
 plot(tdot_hw, v_sim(best_params)*100, 'r-', 'LineWidth', 1.5, 'DisplayName', 'Optimized Model');
-plot(tdot_hw, v_sim(model_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
+plot(tdot_hw, v_sim(initial_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
 xlabel('Time [s]'); 
 grid on; 
 legend('Location', 'southeast');
@@ -368,3 +373,188 @@ disp('------------------------------------------------');
 for i = 1:length(w_out)
     fprintf('%17.1f | %13d | %12.2f\n', w_out(i), v_safe(i), v_total_peak(i));
 end
+
+
+%%
+%% Schroeder-Phased Multi-Sine Generator
+
+% --- 1. User Parameters ---
+w_min = 0.2;        % Minimum frequency (rad/s)
+w_max = 20.0;       % Maximum frequency (rad/s)
+N = 10;             % Number of frequencies
+V_max_budget = 3.0; % Max allowed peak voltage (after subtracting V_comp)
+T_test = 20;        % Duration of the experiment in seconds
+Fs = 1000;          % Controller sampling frequency in Hz (e.g., QUARC at 1ms)
+
+% --- 2. Generate Logarithmic Frequencies ---
+% logspace works in powers of 10, so we pass the log10 of our limits
+w_vals = logspace(log10(w_min), log10(w_max), N);
+
+% --- 3. Define Amplitudes and Phases ---
+% We start with a uniform amplitude weighting of 1 for all frequencies.
+% (You can alter this array later if you want to push more power to high freqs)
+A = ones(1, N); 
+
+% Calculate the Schroeder phase shift for each frequency
+k = 1:N;
+phi = -pi * k .* (k - 1) / N;
+
+% --- 4. Build the Time Vector and Signal ---
+t = 0:(1/Fs):T_test;
+u_raw = zeros(size(t));
+
+% Superimpose all the sine waves
+for i = 1:N
+    u_raw = u_raw + A(i) * sin(w_vals(i) * t + phi(i));
+end
+
+% --- 5. Safety Scaling ---
+% Find the absolute peak of the raw signal
+peak_raw = max(abs(u_raw));
+
+% Scale the entire array so the highest peak perfectly touches your voltage budget
+u_safe = (V_max_budget / peak_raw) * u_raw;
+
+% --- 6. Plot the Result ---
+% --- Apply the Friction Compensator Logic ---
+epsilon = 0.05; % Noise deadband threshold
+u_real = zeros(size(u_safe));
+
+% Vectorized inverse deadzone
+u_real(u_safe > epsilon)  = u_safe(u_safe > epsilon) + ud_pos;
+u_real(u_safe < -epsilon) = u_safe(u_safe < -epsilon) - ud_neg;
+
+% --- Updated Plotting Section ---
+figure('Name', 'Schroeder Multi-Sine Validation', 'Position', [200 200 800 400]);
+
+% Plot the compensated "real" hardware command (in red)
+plot(t, u_real, 'r--', 'LineWidth', 1, 'DisplayName', 'Hardware Command ($u_{real}$)');
+hold on;
+
+% Plot the ideal linear command (in blue)
+plot(t, u_safe, 'b-', 'LineWidth', 1.2, 'DisplayName', 'Linear Command ($u_{safe}$)');
+
+% The actual peak voltage hitting the hardware is V_max_budget + friction
+V_total_peak = V_max_budget + max(ud_pos, ud_neg);
+
+% Add threshold lines
+yline(V_total_peak, 'k-.', 'Hardware Peak Limit', 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
+yline(-V_total_peak, 'k-.', 'HandleVisibility', 'off');
+yline(V_max_budget, 'k--', 'Max Safe Limit', 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
+yline(-V_max_budget, 'k--', 'HandleVisibility', 'off');
+% Formatting (assuming your global LaTeX interpreters are still active)
+xlabel('Time [s]');
+ylabel('Voltage [V]');
+title('Schroeder-Phased Multi-Sine Input Vector');
+grid on;
+legend('Location', 'northeast', 'Interpreter', 'latex');
+ylim([-V_total_peak*1.2, V_total_peak*1.2]);
+
+% Display statistics in the command window
+disp('--- Multi-Sine Profile Generated ---');
+fprintf('Frequencies:      %d (from %.2f to %.2f rad/s)\n', N, w_min, w_max);
+fprintf('Raw Peak:         %.2f V (Without scaling)\n', peak_raw);
+fprintf('Linear Peak:      %.2f V (u_safe)\n', max(abs(u_safe)));
+fprintf('Hardware Peak:    %.2f V (u_real)\n', max(abs(u_real)));
+
+%
+% Pre-Flight Hardware Safety Verification
+disp(' ');
+disp('==================================================');
+disp('      PRE-FLIGHT HARDWARE SAFETY CHECKLIST        ');
+disp('==================================================');
+
+% --- 1. Define Hardware Absolute Limits ---
+% From IP02 Datasheet and prior analysis
+LIMIT_V_PEAK    = 6.0;          % [V] Nominal maximum motor voltage
+LIMIT_I_PEAK    = 3.0;          % [A] Absolute peak current before coil damage
+LIMIT_I_RMS     = 1.0;          % [A] Continuous RMS current limit (thermal)
+LIMIT_X_MAX     = Tc/2 * 0.75;  % [m] Safe track boundary (Total travel is 0.814m, center +/- 0.4)
+
+% Mechanical Force Limit (Recalculated from previous script)
+LIMIT_F_PEAK    = F_limit;      % [N] The 85% clicking limit we defined earlier
+
+% --- 2. Simulate the Physical Dynamics ---
+% Create the velocity transfer function G_v(s) = s * G_x(s)
+
+% Ensure inputs to lsim are column vectors
+u_sim = u_safe(:);
+t_sim = t(:);
+
+% Simulate Position, Velocity, and Rack Force
+[x_sim_resp, ~, ~] = lsim(Gx, u_sim, t_sim);
+[v_sim_resp, ~, ~] = lsim(Gv, u_sim, t_sim);
+[F_sim_resp, ~, ~] = lsim(G_force, u_sim, t_sim);
+
+% --- 3. Calculate Electrical Current ---
+% I = (V - V_emf) / Rm
+% V_emf = km * motor_speed = km * (v_cart * Kg / rmp)
+v_emf_sim = k_m * (v_sim_resp * K_g / r_mp);
+i_sim_resp = (u_sim - v_emf_sim) / R_m;
+
+% --- 4. Extract Peak and RMS Values ---
+peak_V = max(abs(u_sim)) + v_friction_max; % Total voltage hitting amplifier
+peak_I = max(abs(i_sim_resp));
+rms_I  = sqrt(mean(i_sim_resp.^2));
+
+% Calculate the maximum dynamic force, PLUS the friction compensator's physical force
+peak_F_dynamic = max(abs(F_sim_resp));
+peak_F_total = peak_F_dynamic + (alpha_f * eta_m * v_friction_max); 
+
+peak_X = max(abs(x_sim_resp));
+
+% --- 5. Evaluate and Report ---
+checks_passed = true;
+
+fprintf('%-20s | %-12s | %-12s | %-10s\n', 'PARAMETER', 'SIMULATED', 'LIMIT', 'STATUS');
+disp('------------------------------------------------------------------');
+
+% Voltage Check
+if peak_V <= LIMIT_V_PEAK
+    fprintf('%-20s | %-10.2f V | %-10.2f V | [ PASS ]\n', 'Peak Voltage', peak_V, LIMIT_V_PEAK);
+else
+    fprintf('%-20s | %-10.2f V | %-10.2f V | [ FAIL ]\n', 'Peak Voltage', peak_V, LIMIT_V_PEAK);
+    checks_passed = false;
+end
+
+% Peak Current Check
+if peak_I <= LIMIT_I_PEAK
+    fprintf('%-20s | %-10.2f A | %-10.2f A | [ PASS ]\n', 'Peak Current', peak_I, LIMIT_I_PEAK);
+else
+    fprintf('%-20s | %-10.2f A | %-10.2f A | [ FAIL ]\n', 'Peak Current', peak_I, LIMIT_I_PEAK);
+    checks_passed = false;
+end
+
+% RMS Current Check (Thermal Limit)
+if rms_I <= LIMIT_I_RMS
+    fprintf('%-20s | %-10.2f A | %-10.2f A | [ PASS ]\n', 'RMS Current', rms_I, LIMIT_I_RMS);
+else
+    fprintf('%-20s | %-10.2f A | %-10.2f A | [ FAIL ]\n', 'RMS Current', rms_I, LIMIT_I_RMS);
+    checks_passed = false;
+end
+
+% Rack Force Check (Gear Clicking)
+if peak_F_total <= LIMIT_F_PEAK
+    fprintf('%-20s | %-10.2f N | %-10.2f N | [ PASS ]\n', 'Peak Force', peak_F, LIMIT_F_PEAK);
+else
+    fprintf('%-20s | %-10.2f N | %-10.2f N | [ FAIL ]\n', 'Peak Force', peak_F, LIMIT_F_PEAK);
+    checks_passed = false;
+end
+
+% Position Drift Check (End-Stops)
+if peak_X <= LIMIT_X_MAX
+    fprintf('%-20s | %-10.2f m | %-10.2f m | [ PASS ]\n', 'Max Displacement', peak_X, LIMIT_X_MAX);
+else
+    fprintf('%-20s | %-10.2f m | %-10.2f m | [ FAIL ]\n', 'Max Displacement', peak_X, LIMIT_X_MAX);
+    checks_passed = false;
+end
+
+disp('==================================================');
+if checks_passed
+    disp('>>> SUCCESS: Signal is SAFE to deploy on hardware. <<<');
+    disp('    (Ensure the cart is physically centered before starting!)');
+else
+    disp('>>> WARNING: DANGER LIMITS EXCEEDED! <<<');
+    disp('    Do not deploy. Reduce V_max_budget or increase lowest frequency.');
+end
+disp(' ');
