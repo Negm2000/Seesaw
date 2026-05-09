@@ -281,7 +281,7 @@ fprintf('============================================================\n');
 min_displacement = 0.01;                     % [m]
 max_dB = 20*log10(min_displacement/V_nom);   % [dB]
 
-max_displacement = Tc * 0.75;
+max_displacement = T_c * 0.75;
 V_min = 2;
 min_dB = 20*log10(max_displacement/V_min);
 
@@ -323,7 +323,7 @@ v_out = max(V_min, min(V_nom, round(v_raw)));
 % --- Mechanical Force / Torque Safety Limits ---
 
 % 1. Reconstruct the Force Transfer Function
-G_force = minreal(alpha * (Me * s + B_eq) / (Me * s + B_tot));
+G_force = minreal(alpha_f * (M_e * s + B_eq) / (M_e * s + B_total));
 
 % 2. Safety thresholds based on bench observations
 % 4V @ 18 rad/s triggered the click.

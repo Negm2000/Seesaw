@@ -81,8 +81,12 @@ J_pivot = J_SW_cg + M_SW * D_C^2;
 fprintf('  J_pivot = %.4f kg*m^2 (J_cg + M*Dc^2 = %.3f + %.4f)\n', ...
     J_pivot, J_SW_cg, M_SW * D_C^2);
 
+% Total physical mass of the cart
+M_total = M_c + M_w;
+
 % Equivalent mass seen by the motor
-M_e = M_c + M_w + J_rotor * K_g^2 / r_mp^2;
+M_e = M_total + J_rotor * K_g^2 / r_mp^2;
+
 
 % Cart force from motor voltage (Good ref Eq. 2.3, reduced model with L_m = 0):
 %   F_c = (eta_g * K_g * k_t) / (R_m * r_mp) * (-K_g * k_m * x_c_dot / r_mp + eta_m * V_m)
@@ -150,7 +154,7 @@ D_cart = zeros(2, 1);
 fprintf('  [Phase 1] A_cart, B_cart, C_cart, D_cart computed.\n');
 
 %% ===== Transfer Function Model 2: Cart on Seesaw (Coupled, Linearised) =====
-% Linearised around equilibrium: x_c=0, x_c_dot=0, alpha=0, alpha_dot=0
+% Linearised around equilibrium: x_c=0, x_c_dot=0, theta=0, theta_dot=0
 %
 % Input:  V_m (motor voltage, after amplifier + saturation)
 % Output: [x_c; theta]
@@ -163,12 +167,12 @@ fprintf('  [Phase 1] A_cart, B_cart, C_cart, D_cart computed.\n');
 %         + g*M_c*x_c - g*(M_c*D_T + M_SW*D_C)*theta
 %         = -B_SW*theta_dot
 
-P21 =  -M_e*D_T*s^2 + g*M_e;
-P22 = (J_pivot + M_e*D_T^2)*s^2 + B_SW*s - g*(M_e*D_T + M_SW*D_C);
+P21 =  -M_total*D_T*s^2 + g*M_total;
+P22 = (J_pivot + M_total*D_T^2)*s^2 + B_SW*s - g*(M_total*D_T + M_SW*D_C);
 
 Gt = minreal(-P21/P22);
-num_t = [M_e*D_T, 0, -g*M_e];
-den_t = [(J_pivot + M_e*D_T^2), B_SW, -g*(M_e*D_T + M_SW*D_C)]; 
+num_t = [M_total*D_T, 0, -g*M_total];
+den_t = [(J_pivot + M_total*D_T^2), B_SW, -g*(M_total*D_T + M_SW*D_C)]; 
 
 %% ===== Linear State-Space Model 2: Cart on Seesaw (Coupled, Linearised) =====
 % Linearised around equilibrium: x_c=0, x_c_dot=0, theta=0, theta_dot=0
@@ -201,8 +205,8 @@ den_t = [(J_pivot + M_e*D_T^2), B_SW, -g*(M_e*D_T + M_SW*D_C)];
 %
 %   [x_c_ddot; theta_ddot] = inv(M_eff) * G_rhs * z + inv(M_eff) * G_inp * V_m
 
-M_eff = [M_e,          -M_e*D_T;
-         -M_e*D_T,      J_pivot + M_e*D_T^2];
+M_eff = [M_e,          -M_total*D_T;
+         -M_total*D_T,      J_pivot + M_total*D_T^2];
 
 % Inverse of effective inertia matrix
 M_inv = inv(M_eff);
@@ -213,8 +217,8 @@ M_inv = inv(M_eff);
 %   seesaw row : gravity coupling -g*M_c in x_c column;
 %                restoring moment g*(M_c*D_T + M_SW*D_C) in alpha column
 
-G_rhs = [0, -B_total,  -g*M_e,                        0;   % cart EOM RHS
-         -g*M_e, 0,     g*(M_e*D_T + M_SW*D_C),  -B_SW];   % seesaw EOM RHS
+G_rhs = [0, -B_total,  -g*M_total,                        0;   % cart EOM RHS
+         -g*M_total, 0,     g*(M_total*D_T + M_SW*D_C),  -B_SW];   % seesaw EOM RHS
 
 % Full A_sw (4x4):  state derivative = M_inv * G_rhs * z
 %   rows 1,3 (positions) are just velocities; rows 2,4 are accelerations

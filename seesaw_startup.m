@@ -2,7 +2,7 @@
 % -------------------------------------------------------------------------
 % Seesaw Project Paths Initialization
 % -------------------------------------------------------------------------
-
+clear; close all; clc;
 fprintf('Initializing Seesaw Project...\n');
 
 % setting default parameter with LaTeX interpreter
