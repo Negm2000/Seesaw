@@ -20,6 +20,9 @@ data_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
 
 if ~exist(data_file, 'file')
     error('non-linear data not found.');
+else
+    fprintf('Loading %s ...\n', data_file);
+    load(data_file)
 end
 
 B_eq_nominal = B_eq;  % save for comparison later
@@ -102,10 +105,10 @@ sgtitle('Raw Hardware Step Response Data');
 % It means that we consider that the model behave as it would if the
 % hardware had these values.
 
-V_step = 3 - 2*0.6;              % The step input applied
+V_step = 3 - 2*ud_pos;              % The step input applied
 
 % keep datasheet limits
-etag_min = eta_g_nominal * 0.75; % -10%
+etag_min = eta_g_nominal * 0.5; % -10%
 etag_max = eta_g_nominal * 1.1; % +10%
 
 % Define the gain and time constant of hardware
@@ -146,12 +149,12 @@ costFunction = @(p) mean((xcdot_hw - v_sim(p)).^2) + ...
 
 % 5. Initial Guesses for the 2 Unknowns
 % Provide realistic starting points.
-initial_params = [eta_g_nominal, B_eq_nominal];
+init_params = [eta_g_nominal, B_eq_nominal];
 
 % 6. Run Optimization (Nelder-Mead)
 options = optimset('Display', 'iter', 'TolFun', 1e-6, 'TolX', 1e-6);
 disp('Hunting for optimal gearbox efficiency and friction...');
-best_params = fminsearch(costFunction, initial_params, options);
+best_params = fminsearch(costFunction, init_params, options);
 
 % 7. Extract and Display Results
 eta_g = best_params(1);
@@ -163,8 +166,8 @@ B_total  = calc_Btot(best_params);
 Kdc_opt   = alpha_f * eta_m / B_total;
 tau_opt   = M_e / B_total;
 
-rmse_init = sqrt(mean((xc_hw - x_sim(initial_params)).^2));
-rmse_tuned     = sqrt(mean((xc_hw - x_sim(best_params)).^2));
+rmse_init  = sqrt(mean((xc_hw - x_sim(init_params)).^2));
+rmse_tuned = sqrt(mean((xc_hw - x_sim(best_params)).^2));
 
 fprintf('\n--- Optimized Physical Parameters ---\n');
 fprintf('Gearbox Efficiency (eta_g):    %.2f %%\n', eta_g*100);
@@ -197,7 +200,7 @@ plot(t_hw, xc_hw*100, 'k-', 'LineWidth', 2, 'DisplayName', 'Hardware');
 title('Cart Position'); 
 hold on;
 plot(t_hw, x_sim(best_params)*100, 'r-', 'LineWidth', 1.5, 'DisplayName', 'Optimized Model');
-plot(t_hw, x_sim(initial_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
+plot(t_hw, x_sim(init_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
 grid on;
 
 % --- Subplot 3: Velocity ---
@@ -207,7 +210,7 @@ ylabel('$\dot{x}_c$ [cm/s]');
 title('Cart Velocity'); 
 hold on;
 plot(tdot_hw, v_sim(best_params)*100, 'r-', 'LineWidth', 1.5, 'DisplayName', 'Optimized Model');
-plot(tdot_hw, v_sim(initial_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
+plot(tdot_hw, v_sim(init_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
 xlabel('Time [s]'); 
 grid on; 
 legend('Location', 'southeast');
@@ -281,231 +284,163 @@ fprintf('\n  Tuned parameters saved to: data/tuned_cart.mat\n');
 fprintf('============================================================\n');
 
 %% DETERMINE TESTING FREQUENCIES
+%% 1. DETERMINE DYNAMIC PHYSICAL LIMITS
 
-% Define the target limits
-min_displacement = 0.01;                     % [m]
-max_dB = 20*log10(min_displacement/V_nom);   % [dB]
-
-max_displacement = T_c * 0.75;
-V_min = 2;
-min_dB = 20*log10(max_displacement/V_min);
-
-% Create anonymous functions for error calculation
-mag_error_max = @(w) 20*log10(squeeze(bode(Gx, w))) - max_dB;
-mag_error_min = @(w) 20*log10(squeeze(bode(Gx, w))) - min_dB;
-
-% Find crossover frequencies
-initial_guess_max = 30; % rad/s
-w_cross_max = fzero(mag_error_max, initial_guess_max);
-
-initial_guess_min = 0.1; % rad/s
-w_cross_min = abs(fzero(mag_error_min, initial_guess_min));
-
-disp('Numerical frequency range (rad/s):');
-fprintf('Min: %.2f, Max: %.2f\n', w_cross_min, w_cross_max);
-
-% Generating the testing frequencies
-suite = [0, 1, 2, 4, 8];
-w_vals = [];
-
-% Decimal scaling for values < 1
-w_vals = [w_vals, suite * 0.1];
-
-% Blocks of 10 for values >= 1
-max_tens = floor(w_cross_max / 10) * 10;
-for k = 0:10:max_tens
-    w_vals = [w_vals, k + suite];
-end
-
-% Clean up and filter by boundaries
-w_vals = unique(w_vals);
-w_out = w_vals(w_vals >= w_cross_min & w_vals <= w_cross_max);
-
-% Initial voltage scaling (will be clamped by safety rules below)
-v_raw = V_min + (w_out - w_cross_min) * (V_nom - V_min) / (w_cross_max - w_cross_min);
-v_out = max(V_min, min(V_nom, round(v_raw)));
-
-% --- Mechanical Force / Torque Safety Limits ---
-
-% 1. Reconstruct the Force Transfer Function
-G_force = minreal(alpha_f * (M_e * s + B_eq) / (M_e * s + B_total));
-
-% 2. Safety thresholds based on bench observations
-% 4V @ 18 rad/s triggered the click.
-click_force_mag = 4 * norm(evalfr(G_force, 18j));
-F_limit = click_force_mag * 0.85; % 15% safety margin
-
-% 3. Hardware Friction Compensation Values
-% IMPORTANT: Replace these with your actual measured bench values!
-ud_pos = 0.8; 
-ud_neg = 0.7;
+% Hardware Friction Compensation Values
 v_friction_max = max(ud_pos, ud_neg); 
+V_max_budget = 3.0 - v_friction_max; % Available budget for the linear sine wave
 
-% 4. Enforce limits
-v_safe = zeros(size(w_out));
-v_total_peak = zeros(size(w_out));
+% Reconstruct the Force Transfer Function
+G_force = minreal(alpha_f * eta_m * (M_e * s + B_eq) / (M_e * s + B_total));
 
-for i = 1:length(w_out)
-    w = w_out(i);
+% --- Calculate w_max (Control Target vs Torque Limit) ---
+% 1. Define closed-loop cascade targets
+w_bw_outer = 4.5;                 % [rad/s] NMP bounded target
+w_bw_inner_target = 4 * w_bw_outer; % [rad/s] Timescale separation
+w_validation_target = w_bw_inner_target * 1.5; % [rad/s] Add 1.5x buffer for phase margin
+
+% 2. Extract the physical torque limit
+F_limit = 4 * norm(evalfr(G_force, 14j)); % 4V @ 14 rad/s clicking limit
+max_theoretical_force = (alpha_f * eta_m) * V_max_budget;
+
+% 3. Determine the final sweep maximum
+if max_theoretical_force < F_limit
+    disp('>>> SAFETY BONUS: Torque asymptote is below the clicking limit!');
+    fprintf('    Capping sweep based on Cascade Target: %.2f rad/s\n', w_validation_target);
+    w_max = w_validation_target;
+else
+    % The force will eventually hit the limit. Find where it breaks.
+    force_error = @(w) (norm(evalfr(G_force, w*1j)) * V_max_budget) - F_limit;
+    w_break = fzero(force_error, 30); 
     
-    % Force generated per 1 Volt input at this frequency
-    force_per_volt = norm(evalfr(G_force, w*1j)); 
-    
-    % MAXIMUM TOTAL voltage the gears can safely handle
-    v_max_total = F_limit / force_per_volt;
-    
-    % Available voltage budget for the sine wave (subtract V_comp penalty)
-    v_max_sine = max(0, v_max_total - v_friction_max);
-    
-    % Clamp the originally planned voltage to the safety ceiling
-    v_safe(i) = min(v_out(i), floor(v_max_sine));
-    
-    % Record what the absolute peak voltage will be hitting the motor
-    v_total_peak(i) = v_safe(i) + v_friction_max;
+    if w_break < w_validation_target
+        disp('>>> WARNING: Hardware torque limit prevents reaching cascade target.');
+        fprintf('    Capping sweep at physical limit: %.2f rad/s\n', w_break);
+        w_max = w_break;
+    else
+        fprintf('    Hardware is safe past cascade target. Capping at: %.2f rad/s\n', w_validation_target);
+        w_max = w_validation_target;
+    end
 end
 
-% 5. Final Output Table
-disp('');
-disp('Suggested Frequency and Voltage Input for frequency validation');
-disp(' -----------------------------------------------');
-disp('Frequency (rad/s) | Safe Sine (V) | Max Peak (V)');
-disp('------------------------------------------------');
-for i = 1:length(w_out)
-    fprintf('%17.1f | %13d | %12.2f\n', w_out(i), v_safe(i), v_total_peak(i));
-end
+% --- Calculate w_min (Displacement Limit) ---
+% Max displacement is 75% of half the track length
+max_displacement = (T_c / 2) * 0.75; 
+
+% Find w_min: The frequency where our V_max_budget generates exactly max_displacement
+pos_error = @(w) (norm(evalfr(Gx, w*1j)) * V_max_budget) - max_displacement;
+w_min = abs(fzero(pos_error, 0.1)); % Start search at 0.1 rad/s
+
+disp('--- Dynamic Frequency Limits Computed ---');
+fprintf('Min Freq (Track Limit):  %.2f rad/s\n', w_min);
+fprintf('Max Freq (Torque Limit): %.2f rad/s\n\n', w_max);
 
 
-%%
-%% Schroeder-Phased Multi-Sine Generator
+%% 2. SCHROEDER-PHASED MULTI-SINE GENERATOR
 
-% --- 1. User Parameters ---
-w_min = 0.2;        % Minimum frequency (rad/s)
-w_max = 20.0;       % Maximum frequency (rad/s)
-N = 10;             % Number of frequencies
-V_max_budget = 3.0; % Max allowed peak voltage (after subtracting V_comp)
-T_test = 20;        % Duration of the experiment in seconds
-Fs = 1000;          % Controller sampling frequency in Hz (e.g., QUARC at 1ms)
+% --- User Parameters ---
+N_freq = 10; % Number of frequencies (Recommend 10-20 for good resolution)
+% Duration: Ensure we capture at least 3 full cycles of the lowest frequency
+T_test = max(20, 3 * (2*pi/w_min)); 
+Fs = 1/0.002; % Sampling frequency (500 Hz)
 
-% --- 2. Generate Logarithmic Frequencies ---
-% logspace works in powers of 10, so we pass the log10 of our limits
-w_vals = logspace(log10(w_min), log10(w_max), N);
+% --- Generate Logarithmic Frequencies ---
+w_vals = logspace(log10(w_min), log10(w_max), N_freq);
 
-% --- 3. Define Amplitudes and Phases ---
-% We start with a uniform amplitude weighting of 1 for all frequencies.
-% (You can alter this array later if you want to push more power to high freqs)
-A = ones(1, N); 
+% --- Define Amplitudes and Phases ---
+A = ones(1, N_freq); 
+k = 1:N_freq;
+phi = -pi * k .* (k - 1) / N_freq; % Schroeder phase formula
 
-% Calculate the Schroeder phase shift for each frequency
-k = 1:N;
-phi = -pi * k .* (k - 1) / N;
-
-% --- 4. Build the Time Vector and Signal ---
+% --- Build the Time Vector and Signal ---
 t = 0:(1/Fs):T_test;
 u_raw = zeros(size(t));
 
-% Superimpose all the sine waves
-for i = 1:N
+for i = 1:N_freq
     u_raw = u_raw + A(i) * sin(w_vals(i) * t + phi(i));
 end
 
-% --- 5. Safety Scaling ---
-% Find the absolute peak of the raw signal
+% --- Safety Scaling ---
 peak_raw = max(abs(u_raw));
-
-% Scale the entire array so the highest peak perfectly touches your voltage budget
+% Scale the array so the absolute highest peak touches our V_max_budget
 u_safe = (V_max_budget / peak_raw) * u_raw;
 
-% --- 6. Plot the Result ---
 % --- Apply the Friction Compensator Logic ---
 epsilon = 0.05; % Noise deadband threshold
 u_real = zeros(size(u_safe));
-
-% Vectorized inverse deadzone
 u_real(u_safe > epsilon)  = u_safe(u_safe > epsilon) + ud_pos;
 u_real(u_safe < -epsilon) = u_safe(u_safe < -epsilon) - ud_neg;
 
-% --- Updated Plotting Section ---
+
+%% 3. VISUALIZATION
+
 figure('Name', 'Schroeder Multi-Sine Validation', 'Position', [200 200 800 400]);
 
 % Plot the compensated "real" hardware command (in red)
 plot(t, u_real, 'r--', 'LineWidth', 1, 'DisplayName', 'Hardware Command ($u_{real}$)');
 hold on;
-
 % Plot the ideal linear command (in blue)
 plot(t, u_safe, 'b-', 'LineWidth', 1.2, 'DisplayName', 'Linear Command ($u_{safe}$)');
 
-% The actual peak voltage hitting the hardware is V_max_budget + friction
-V_total_peak = V_max_budget + max(ud_pos, ud_neg);
+V_total_peak = V_max_budget + v_friction_max;
 
 % Add threshold lines
 yline(V_total_peak, 'k-.', 'Hardware Peak Limit', 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
 yline(-V_total_peak, 'k-.', 'HandleVisibility', 'off');
 yline(V_max_budget, 'k--', 'Max Safe Limit', 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
 yline(-V_max_budget, 'k--', 'HandleVisibility', 'off');
-% Formatting (assuming your global LaTeX interpreters are still active)
-xlabel('Time [s]');
-ylabel('Voltage [V]');
-title('Schroeder-Phased Multi-Sine Input Vector');
+
+xlabel('Time [s]', 'Interpreter', 'latex');
+ylabel('Voltage [V]', 'Interpreter', 'latex');
+title('Schroeder-Phased Multi-Sine Input Vector', 'Interpreter', 'latex');
 grid on;
 legend('Location', 'northeast', 'Interpreter', 'latex');
 ylim([-V_total_peak*1.2, V_total_peak*1.2]);
 
-% Display statistics in the command window
 disp('--- Multi-Sine Profile Generated ---');
-fprintf('Frequencies:      %d (from %.2f to %.2f rad/s)\n', N, w_min, w_max);
+fprintf('Frequencies:      %d (from %.2f to %.2f rad/s)\n', N_freq, w_min, w_max);
 fprintf('Raw Peak:         %.2f V (Without scaling)\n', peak_raw);
 fprintf('Linear Peak:      %.2f V (u_safe)\n', max(abs(u_safe)));
-fprintf('Hardware Peak:    %.2f V (u_real)\n', max(abs(u_real)));
+fprintf('Hardware Peak:    %.2f V (u_real)\n\n', max(abs(u_real)));
 
-%
-% Pre-Flight Hardware Safety Verification
-disp(' ');
+
+%% 4. PRE-FLIGHT HARDWARE SAFETY CHECKLIST
+
 disp('==================================================');
 disp('      PRE-FLIGHT HARDWARE SAFETY CHECKLIST        ');
 disp('==================================================');
 
-% --- 1. Define Hardware Absolute Limits ---
-% From IP02 Datasheet and prior analysis
-LIMIT_V_PEAK    = 6.0;          % [V] Nominal maximum motor voltage
-LIMIT_I_PEAK    = 3.0;          % [A] Absolute peak current before coil damage
-LIMIT_I_RMS     = 1.0;          % [A] Continuous RMS current limit (thermal)
-LIMIT_X_MAX     = Tc/2 * 0.75;  % [m] Safe track boundary (Total travel is 0.814m, center +/- 0.4)
+% --- Define Hardware Absolute Limits ---
+LIMIT_V_PEAK    = 6.0;           % [V] Nominal maximum motor voltage
+LIMIT_I_PEAK    = 3.0;           % [A] Absolute peak current before coil damage
+LIMIT_I_RMS     = 1.0;           % [A] Continuous RMS current limit (thermal)
+LIMIT_X_MAX     = T_c/2 * 0.75;  % [m] Safe track boundary
+LIMIT_F_PEAK    = F_limit;       % [N] Gear clicking limit
 
-% Mechanical Force Limit (Recalculated from previous script)
-LIMIT_F_PEAK    = F_limit;      % [N] The 85% clicking limit we defined earlier
-
-% --- 2. Simulate the Physical Dynamics ---
-% Create the velocity transfer function G_v(s) = s * G_x(s)
-
-% Ensure inputs to lsim are column vectors
+% --- Simulate the Physical Dynamics ---
 u_sim = u_safe(:);
 t_sim = t(:);
 
-% Simulate Position, Velocity, and Rack Force
 [x_sim_resp, ~, ~] = lsim(Gx, u_sim, t_sim);
 [v_sim_resp, ~, ~] = lsim(Gv, u_sim, t_sim);
 [F_sim_resp, ~, ~] = lsim(G_force, u_sim, t_sim);
 
-% --- 3. Calculate Electrical Current ---
-% I = (V - V_emf) / Rm
-% V_emf = km * motor_speed = km * (v_cart * Kg / rmp)
+% --- Calculate Electrical Current ---
 v_emf_sim = k_m * (v_sim_resp * K_g / r_mp);
 i_sim_resp = (u_sim - v_emf_sim) / R_m;
 
-% --- 4. Extract Peak and RMS Values ---
-peak_V = max(abs(u_sim)) + v_friction_max; % Total voltage hitting amplifier
+% --- Extract Peak and RMS Values ---
+peak_V = max(abs(u_sim)) + v_friction_max; 
 peak_I = max(abs(i_sim_resp));
 rms_I  = sqrt(mean(i_sim_resp.^2));
 
-% Calculate the maximum dynamic force, PLUS the friction compensator's physical force
+% Calculate max dynamic force PLUS friction compensator's physical force
 peak_F_dynamic = max(abs(F_sim_resp));
 peak_F_total = peak_F_dynamic + (alpha_f * eta_m * v_friction_max); 
-
 peak_X = max(abs(x_sim_resp));
 
-% --- 5. Evaluate and Report ---
+% --- Evaluate and Report ---
 checks_passed = true;
-
 fprintf('%-20s | %-12s | %-12s | %-10s\n', 'PARAMETER', 'SIMULATED', 'LIMIT', 'STATUS');
 disp('------------------------------------------------------------------');
 
@@ -525,7 +460,7 @@ else
     checks_passed = false;
 end
 
-% RMS Current Check (Thermal Limit)
+% RMS Current Check
 if rms_I <= LIMIT_I_RMS
     fprintf('%-20s | %-10.2f A | %-10.2f A | [ PASS ]\n', 'RMS Current', rms_I, LIMIT_I_RMS);
 else
@@ -533,15 +468,15 @@ else
     checks_passed = false;
 end
 
-% Rack Force Check (Gear Clicking)
+% Rack Force Check
 if peak_F_total <= LIMIT_F_PEAK
-    fprintf('%-20s | %-10.2f N | %-10.2f N | [ PASS ]\n', 'Peak Force', peak_F, LIMIT_F_PEAK);
+    fprintf('%-20s | %-10.2f N | %-10.2f N | [ PASS ]\n', 'Peak Force', peak_F_total, LIMIT_F_PEAK);
 else
-    fprintf('%-20s | %-10.2f N | %-10.2f N | [ FAIL ]\n', 'Peak Force', peak_F, LIMIT_F_PEAK);
+    fprintf('%-20s | %-10.2f N | %-10.2f N | [ FAIL ]\n', 'Peak Force', peak_F_total, LIMIT_F_PEAK);
     checks_passed = false;
 end
 
-% Position Drift Check (End-Stops)
+% Position Drift Check
 if peak_X <= LIMIT_X_MAX
     fprintf('%-20s | %-10.2f m | %-10.2f m | [ PASS ]\n', 'Max Displacement', peak_X, LIMIT_X_MAX);
 else
@@ -551,10 +486,42 @@ end
 
 disp('==================================================');
 if checks_passed
-    disp('>>> SUCCESS: Signal is SAFE to deploy on hardware. <<<');
+    fprintf('>>> SUCCESS: Signal is SAFE to deploy on hardware. Run for %.2fs. <<<\n', T_test);
     disp('    (Ensure the cart is physically centered before starting!)');
+    
+    % --- Save Data for Simulink and Validation ---
+    % 1. Dynamically find the project root directory
+    if ~exist('SEESAW_ROOT', 'var')
+        % Assumes this script is run from a subfolder, climbing up twice
+        SEESAW_ROOT = fileparts(mfilename('fullpath')); 
+        SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); 
+    end
+    
+    % 2. Ensure the /data directory exists
+    data_dir = fullfile(SEESAW_ROOT, 'data', 'cartModeling');
+    if ~exist(data_dir, 'dir')
+        mkdir(data_dir);
+    end
+    
+    % 3. Format data specifically for Simulink "From File" block
+    simulink_multisine = [t(:)'; u_safe(:)'];
+    
+    % 4. Save the files separately to prevent Simulink confusion
+    simulink_file = fullfile(data_dir, 'multisine_simulink.mat');
+    params_file = fullfile(data_dir, 'multisine_params.mat');
+    
+    % Save ONLY the matrix for Simulink (100% safe)
+    save(simulink_file, 'simulink_multisine', '-v7.3');
+    
+    % Save all the metadata for your post-processing analysis script
+    save(params_file, 't', 'u_safe', 'w_vals', 'N_freq');
+    
+    fprintf('\n>>> Validation data successfully saved to the /data/cartModeling directory.\n');
+    disp('>>> In Simulink, point your "From File" block exactly to: multisine_simulink.mat');
+    fprintf('>>> Run the simulation for %.2fs\n\n', T_test);
+
 else
     disp('>>> WARNING: DANGER LIMITS EXCEEDED! <<<');
-    disp('    Do not deploy. Reduce V_max_budget or increase lowest frequency.');
+    disp('    Do not deploy. The safety limits were violated.');
 end
 disp(' ');
