@@ -67,7 +67,8 @@ xc_hw     = raw(3, :)'; % Cart position in meters
 % 1. Apply Zero-Phase Hardware Noise Filter
 dt = mean(diff(t_hw));
 Fs = 1/dt;
-[b, a] = butter(2, 50 / (Fs/2)); % 50 Hz cutoff protects our 30 rad/s test signals
+cutoff = 50; %[Hz]
+[b, a] = butter(2, cutoff / (Fs/2)); % 50 Hz cutoff protects our 30 rad/s test signals
 u_clean = filtfilt(b, a, V_cmd_hw);
 x_clean = filtfilt(b, a, xc_hw);
 
@@ -75,9 +76,10 @@ x_clean = filtfilt(b, a, xc_hw);
 % (Because x_clean is already filtered, gradient is extremely safe here)
 v_clean = gradient(x_clean) / dt;
 
-% 3. Trim the startup transient
+% 3. Trim the startup transient and the end
+T_test = max(20, 3 * (2*pi/w_vals(1)));
 T_settle = 3.0; 
-valid_idx = find(t_hw >= T_settle);
+valid_idx = find(t_hw >= T_settle & t_hw < T_test);
 u_ss = detrend(u_clean(valid_idx));
 v_ss = detrend(v_clean(valid_idx));
 

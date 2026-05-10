@@ -35,7 +35,7 @@ fprintf('  B_total  = %.2f N*s/m\n', B_total);
 fprintf('  alpha_f  = %.4f (motor force constant)\n', alpha_f);
 fprintf('-------------------------\n');
 
-%% 4. LOAD & INSPECT HARDWARE DATA
+%% 2. LOAD & INSPECT HARDWARE DATA
 %  Load the frequency sweep data collected from QUARC.
 %  Plot raw time traces to sanity-check before analysis.
 
@@ -99,7 +99,7 @@ plot(tdot_hw, xcdot_hw*100, 'k-'); ylabel('$\dot{x}_c$ [cm/s]'); title('Cart Vel
 xlabel('Time [s]'); grid on;
 sgtitle('Raw Hardware Step Response Data');
 
-%% TUNE BASED ON VELOCITY STEADY-STATE AFTER STEP RESPONSE
+%% 3. TUNE BASED ON VELOCITY STEADY-STATE AFTER STEP RESPONSE
 % Mathematically tuning eta_g and B_eq.
 % This does not mean that their real physical values will be these ones.
 % It means that we consider that the model behave as it would if the
@@ -108,7 +108,7 @@ sgtitle('Raw Hardware Step Response Data');
 V_step = 3 - 2*ud_pos;              % The step input applied
 
 % keep datasheet limits
-etag_min = eta_g_nominal * 0.5; % -10%
+etag_min = eta_g_nominal * 0.5; % -10% from datasheet, but we expect even less because of dust in bearings.
 etag_max = eta_g_nominal * 1.1; % +10%
 
 % Define the gain and time constant of hardware
@@ -217,7 +217,7 @@ legend('Location', 'southeast');
 
 sgtitle('Step Response Tuning');
 
-%% 7. APPLY TUNED PARAMETERS & REBUILD MODEL
+%% 4. APPLY TUNED PARAMETERS & REBUILD MODEL
 %  Overwrite B_eq with the tuned value, recompute all derived quantities,
 %  and rebuild both state-space models (cart-only and full seesaw).
 
@@ -245,7 +245,7 @@ den_x = [M_e B_total 0];
 
 fprintf(' Transfer Function and State-space model rebuilt (Gx, A_cart, B_cart)\n');
 
-%% 10. SUMMARY & SAVE
+%% 5. SUMMARY & SAVE
 %  Print final results and save tuned parameters.
 
 fprintf('\n');
@@ -283,8 +283,8 @@ save(save_file, 'B_eq', 'B_eq_nominal', 'B_total', 'alpha_f', 'B_emf', ...
 fprintf('\n  Tuned parameters saved to: data/tuned_cart.mat\n');
 fprintf('============================================================\n');
 
-%% DETERMINE TESTING FREQUENCIES
-%% 1. DETERMINE DYNAMIC PHYSICAL LIMITS
+%% 6. DETERMINE TESTING FREQUENCIES
+%% DETERMINE DYNAMIC PHYSICAL LIMITS
 
 % Hardware Friction Compensation Values
 v_friction_max = max(ud_pos, ud_neg); 
@@ -295,9 +295,11 @@ G_force = minreal(alpha_f * eta_m * (M_e * s + B_eq) / (M_e * s + B_total));
 
 % --- Calculate w_max (Control Target vs Torque Limit) ---
 % 1. Define closed-loop cascade targets
-w_bw_outer = 4.5;                 % [rad/s] NMP bounded target
-w_bw_inner_target = 4 * w_bw_outer; % [rad/s] Timescale separation
-w_validation_target = w_bw_inner_target * 1.5; % [rad/s] Add 1.5x buffer for phase margin
+% because of non-minimum phase plant, we define the ideal outer bandwidth
+% like the geometric mean of unstable pole and zero.
+w_bw_outer = sqrt(2.2144*8.8589);               % [rad/s] NMP bounded target
+w_bw_inner_target = 4 * w_bw_outer;             % [rad/s] Timescale separation
+w_validation_target = w_bw_inner_target * 1.5;  % [rad/s] Add 1.5x buffer for phase margin
 
 % 2. Extract the physical torque limit
 F_limit = 4 * norm(evalfr(G_force, 14j)); % 4V @ 14 rad/s clicking limit
@@ -336,13 +338,12 @@ fprintf('Min Freq (Track Limit):  %.2f rad/s\n', w_min);
 fprintf('Max Freq (Torque Limit): %.2f rad/s\n\n', w_max);
 
 
-%% 2. SCHROEDER-PHASED MULTI-SINE GENERATOR
+%% SCHROEDER-PHASED MULTI-SINE GENERATOR
 
 % --- User Parameters ---
 N_freq = 10; % Number of frequencies (Recommend 10-20 for good resolution)
 % Duration: Ensure we capture at least 3 full cycles of the lowest frequency
 T_test = max(20, 3 * (2*pi/w_min)); 
-Fs = 1/0.002; % Sampling frequency (500 Hz)
 
 % --- Generate Logarithmic Frequencies ---
 w_vals = logspace(log10(w_min), log10(w_max), N_freq);
@@ -353,7 +354,7 @@ k = 1:N_freq;
 phi = -pi * k .* (k - 1) / N_freq; % Schroeder phase formula
 
 % --- Build the Time Vector and Signal ---
-t = 0:(1/Fs):T_test;
+t = 0:(1/Fs_hw):T_test;
 u_raw = zeros(size(t));
 
 for i = 1:N_freq
@@ -372,7 +373,7 @@ u_real(u_safe > epsilon)  = u_safe(u_safe > epsilon) + ud_pos;
 u_real(u_safe < -epsilon) = u_safe(u_safe < -epsilon) - ud_neg;
 
 
-%% 3. VISUALIZATION
+%% VISUALIZATION
 
 figure('Name', 'Schroeder Multi-Sine Validation', 'Position', [200 200 800 400]);
 
@@ -404,7 +405,7 @@ fprintf('Linear Peak:      %.2f V (u_safe)\n', max(abs(u_safe)));
 fprintf('Hardware Peak:    %.2f V (u_real)\n\n', max(abs(u_real)));
 
 
-%% 4. PRE-FLIGHT HARDWARE SAFETY CHECKLIST
+%% PRE-FLIGHT HARDWARE SAFETY CHECKLIST
 
 disp('==================================================');
 disp('      PRE-FLIGHT HARDWARE SAFETY CHECKLIST        ');
