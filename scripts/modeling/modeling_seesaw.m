@@ -183,12 +183,16 @@ B_sw = [ zeros(2,1);
 C_sw = [eye(2), zeros(2)];
 D_sw = zeros(2,1);
 
+sys4 = ss(A_sw, B_sw, C_sw, D_sw);
+
 A5 = [A_sw, zeros(4,1);
       0, 1, 0, 0, 0];
 B5 = [B_sw;
       0];
 C5 = [C_sw, zeros(2,1)];
 D5 = D_sw;
+
+sys5 = ss(A5,B5,C5,D5);
 
 %% 10. SUMMARY & SAVE
 fprintf('\n');
@@ -202,7 +206,7 @@ fprintf('  D_C [m]          %8.3f   %8.3f     %+.1f%%\n', ...
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
 save_file = fullfile(SEESAW_ROOT, 'data', 'tuned_seesaw.mat');
 save(save_file, 'D_C', 'Gt', 'num_t', 'den_t', ...
-    'A_sw', 'B_sw', 'C_sw', 'D_sw', ...
-    'A5', 'B5', 'C5', 'D5');
+    'A_sw', 'B_sw', 'C_sw', 'D_sw', 'sys4', ...
+    'A5', 'B5', 'C5', 'D5', 'sys5');
 fprintf('\n  Tuned parameters saved to: data/tuned_seesaw.mat\n');
 fprintf('============================================================\n');

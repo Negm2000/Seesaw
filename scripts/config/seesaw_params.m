@@ -15,6 +15,7 @@ set(groot, 'defaultLegendInterpreter', 'latex');
 set(groot, 'defaultTextInterpreter', 'latex');
 %% ===== Matlab constants =====
 s = tf('s');
+Ts = 0.002;                 % Fixed-step sampling time [s]
 
 %% ===== Physical Constants =====
 g = 9.81;                   % Gravitational acceleration [m/s^2]
@@ -151,6 +152,8 @@ A_cart = [0,  1;
 B_cart = [0;  alpha_f*eta_m/M_e];
 C_cart = eye(2);        % output both states [x_c; x_c_dot]
 D_cart = zeros(2, 1);
+
+sys_cart = ss(A_cart, B_cart, C_cart, D_cart);
 fprintf('  [Phase 1] A_cart, B_cart, C_cart, D_cart computed.\n');
 
 %% ===== Transfer Function Model 2: Cart on Seesaw (Coupled, Linearised) =====
@@ -173,6 +176,8 @@ P22 = (J_pivot + M_total*D_T^2)*s^2 + B_SW*s - g*(M_total*D_T + M_SW*D_C);
 Gt = minreal(-P21/P22);
 num_t = [M_total*D_T, 0, -g*M_total];
 den_t = [(J_pivot + M_total*D_T^2), B_SW, -g*(M_total*D_T + M_SW*D_C)]; 
+
+fprintf('  [Phase 2] Gt computed (linearised seesaw pos-to-angle).\n');
 
 %% ===== Linear State-Space Model 2: Cart on Seesaw (Coupled, Linearised) =====
 % Linearised around equilibrium: x_c=0, x_c_dot=0, theta=0, theta_dot=0
@@ -225,11 +230,13 @@ B_sw = [ zeros(2,1);
 C_sw = [eye(2), zeros(2)];
 D_sw = zeros(2,1);
 
+sys4 = ss(A_sw, B_sw, C_sw, D_sw);
+
 fprintf('  [Phase 2] A_sw, B_sw, C_sw, D_sw computed (linearised seesaw).\n');
 
 % Print eigenvalues and verify the expected RHP pole (~+2.24 rad/s)
 ev = eig(A_sw);
-fprintf('  Seesaw SS eigenvalues (corrected linearisation):\n');
+fprintf('  Seesaw SS eigenvalues (linearisation):\n');
 for k = 1:length(ev)
     if abs(imag(ev(k))) > 1e-10
         fprintf('    lambda_%d = %.4f %+.4fi\n', k, real(ev(k)), imag(ev(k)));
@@ -253,6 +260,7 @@ B5 = [B_sw;
 C5 = [C_sw, zeros(2,1)];
 D5 = D_sw;
 
+sys5 = ss(A5,B5,C5,D5);
 
 fprintf('  [Phase 3] A5, B5, C5, D5 computed (linearised seesaw with integral state).\n');
 

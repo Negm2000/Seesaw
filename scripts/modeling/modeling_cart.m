@@ -235,6 +235,8 @@ B_cart = [0; alpha_f*eta_m/M_e];
 C_cart = eye(2);
 D_cart = zeros(2,1);
 
+sys_cart = ss(A_cart, B_cart, C_cart, D_cart);
+
 % Updated transfer functions
 Gx = minreal(Kdc_opt / (tau_opt*s^2 + s));
 Gv = s * Gx;
@@ -278,7 +280,7 @@ end
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
 save_file = fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat');
 save(save_file, 'B_eq', 'B_eq_nominal', 'B_total', 'alpha_f', 'B_emf', ...
-     'eta_g', 'A_cart', 'B_cart', 'C_cart', 'D_cart', ...
+     'eta_g', 'A_cart', 'B_cart', 'C_cart', 'D_cart', 'sys_cart', ...
      'Gx', 'num_x', 'den_x', 'rmse_tuned');
 fprintf('\n  Tuned parameters saved to: data/tuned_cart.mat\n');
 fprintf('============================================================\n');
