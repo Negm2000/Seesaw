@@ -238,7 +238,7 @@ wb_out = sqrt(sqrt(-den_t(3)/den_t(1))*sqrt(-num_t(3) / num_t(1)));
 w_min = wb_out/10 ;
 w_max = wb_out*3;     
 N_freq = 10;                
-THETA_MAX_BUDGET = 0.25;     % [Degrees] Halved to save the gears!
+THETA_MAX_BUDGET = 0.65;
 
 T_test = max(15, 3 * (2*pi/w_min)); 
 
@@ -247,29 +247,26 @@ w_vals = logspace(log10(w_min), log10(w_max), N_freq);
 k = 1:N_freq;
 phi = -pi * k .* (k - 1) / N_freq; 
 
-% --- 3. BANDPASS AMPLITUDE TAPERING ---
-% Focus the energy at the crossover frequency (~4.3 rad/s)
-% Taper low freq (prevent track drift) & Taper high freq (prevent gear clicking)
-wc_target = 4.3; 
-A = ones(1, N_freq);
-
-% Taper frequencies below crossover (Saves the Track)
-low_idx = w_vals < wc_target;
-A(low_idx) = (w_vals(low_idx) / wc_target) .^ 1.5;
-
-% Taper frequencies above crossover (Saves the Gears/Motor)
-high_idx = w_vals >= wc_target;
-A(high_idx) = (wc_target ./ w_vals(high_idx)) .^ 3.0; 
-
-t_ms = 0:0.005:T_test;
-theta_ref_raw = zeros(size(t_ms));
+% --- 3. CUSTOM AMPLITUDE TAPERING (Force-Safe) ---
+% We assign specific amplitudes based on frequency to keep F = m*A*w^2 constant.
+A = zeros(1, N_freq);
 
 for i = 1:N_freq
-    theta_ref_raw = theta_ref_raw + A(i) * sin(w_vals(i) * t_ms + phi(i));
+    if w_vals(i) < 2.5
+        % Low Freq: 1.5 degrees to beat stiction and quantization
+        A(i) = deg2rad(THETA_MAX_BUDGET); 
+    else
+        % High Freq: Roll off by w^2 to protect the gears from high acceleration
+        A(i) = deg2rad(THETA_MAX_BUDGET/10) * (2.5 / w_vals(i))^2; 
+    end
 end
 
-% Scale to exactly match our microscopic degree budget
-theta_ref_safe = deg2rad(THETA_MAX_BUDGET) * (theta_ref_raw / max(abs(theta_ref_raw)));
+t_ms = 0:0.005:T_test;
+theta_ref_safe = zeros(size(t_ms));
+
+for i = 1:N_freq
+    theta_ref_safe = theta_ref_safe + A(i) * sin(w_vals(i) * t_ms + phi(i));
+end
 
 % Fade-in window (prevents t=0 shocks)
 fade_time = 1.5; 
