@@ -318,5 +318,4 @@ else
 end
 
 init_cond_lift = [-0.407, deg2rad(11.66), 0, 0];
-init_cond_lift_obs = [-0.407, 0];
-init_cond_switch = [0.057, deg2rad(5), 0, 0.1];
+init_cond_switch = [0.057, deg2rad(5), 0, -0.1];
