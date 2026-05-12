@@ -39,7 +39,7 @@ else
 end
 
 % --- Load Recorded Hardware Data ---
-data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'multisine_output2.mat');
+data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'multisine_output.mat');
 if ~exist(data_file, 'file')
     error('Data not found. Run on hardware first.');
 end
