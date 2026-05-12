@@ -346,13 +346,15 @@ fprintf('Max Freq (Torque Limit): %.2f rad/s\n\n', w_max);
 % at every frequency in the band. No Schroeder-style peak rescaling needed.
 
 % --- Band (normalised to Nyquist for idinput) ---
-f_lo = 0.5;    % [Hz]
-f_hi = 18.0;   % [Hz]
+w_lo = 0.5;    % [rad/s]
+w_hi = 18.0;   % [rad/s]
+f_lo = w_lo / (2*pi);
+f_hi = w_hi / (2*pi);
 nyq  = Fs_hw / 2;
 band = [f_lo, f_hi] / nyq;
 
 % --- Length: cover several periods of the lowest frequency ---
-T_test = max(60, 5 / f_lo);
+T_test = max(60, 5 * (2*pi / w_lo));
 N      = round(T_test * Fs_hw);
 t      = (0:N-1) / Fs_hw;
 
