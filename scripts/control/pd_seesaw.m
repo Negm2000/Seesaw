@@ -87,13 +87,16 @@ C_theta = minreal(-K_pos * C_theta_unscaled);
 L_theta = minreal(series(C_theta, P_out));
 T_theta = minreal(feedback(L_theta, 1));
 
-% 6. Extract Standard PD Parameters
+% 6. Extract Standard PD Parameters (Ki zeroed for Simulink compatibility)
 N_out = p_lead;
 Kp_out = -K_pos * z_lead / N_out;
+Ki_out = 0;
 Kd_out = (-K_pos - Kp_out) / N_out;
+antiwindup_out = 0;
 
 fprintf('\n--- Outer Loop PD Gains ---\n');
 fprintf('Kp_out = %8.4f V/rad\n', Kp_out);
+fprintf('Ki_out = %8.4f V/(rad*s)  [zeroed]\n', Ki_out);
 fprintf('Kd_out = %8.4f V*s/rad\n', Kd_out);
 fprintf('N_out  = %8.1f\n', N_out);
 
@@ -218,7 +221,7 @@ yline(V_LIMIT, 'r--', 'HandleVisibility', 'off'); yline(-V_LIMIT, 'r--', 'Hardwa
 
 %% 7. SAVE PARAMS
 save_file = fullfile(SEESAW_ROOT, 'data', 'controller_outer_pd.mat');
-save(save_file, 'Kp_out', 'Kd_out', 'N_out', 'C_theta', 'L_theta', 'T_theta');
+save(save_file, 'Kp_out', 'Ki_out', 'Kd_out', 'N_out', 'antiwindup_out', 'C_theta', 'L_theta', 'T_theta');
 fprintf('\n>>> Outer Controller saved to: %s\n', save_file);
 
 %% 8. CLOSED-LOOP FREQUENCY VALIDATION (T_theta Multi-Sine)
