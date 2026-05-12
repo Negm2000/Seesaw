@@ -303,45 +303,19 @@ residual_rms = sqrt(mean(residual_check.^2, 2));
 
 %% 7. LIFT-UP
 
-% Create a simplified LQR for position only because we know that the
-% lift-off point is exactly at 0.0568m.
-% (from a starting position of -0.407m and 11.66°)
+% Re-use the tuned position-control PID from freq based technique to move
+% the cart up to 0.0568 because we know from the quasi-static test that
+% this is the point at which it starts to lift.
+% After that, use the flip-flop to switch from lift to stabilization only
+% the first time it crosses 5°.
 
-A_lift = [
-    A_sw(1,1), A_sw(1,3);
-    A_sw(3,1), A_sw(3,3)
-    ];
-
-B_lift = [
-    B_sw(1);
-    B_sw(3)
-    ];
-
-C_lift = [
-    1, 0;
-    ];
-
-D_lift = [
-    0, 0
-    ];
-
-Cq_lift = diag([50/req_dist, 1/req_speed]);
-Q_lift = Cq_lift' * Cq_lift;
-R_lift = R4;
-
-K_lift = lqr(A_lift, B_lift, Q_lift, R_lift);
-
-Gn_lift = eye(2);
-Qn_lift = diag([1e-6, 1e-3]);
-Rn_lift = 2.5e-7;
-
-L_lift = lqe(A_lift, Gn_lift, C_lift, Qn_lift, Rn_lift);
-
-Aobs_lift = A_lift - L_lift*C_lift;
-Bobs_lift = [B_lift, L_lift];
-Cobs_lift = eye(2);
-Dobs_lift = [0, 0;
-            0, 0];
+% Load the voltage non-linearities
+cart_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
+if exist(cart_file, 'file')
+    load(cart_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
+else
+    error('Inner-loop PID not found. Run pid_cart first.');
+end
 
 init_cond_lift = [-0.407, deg2rad(11.66), 0, 0];
 init_cond_lift_obs = [-0.407, 0];
