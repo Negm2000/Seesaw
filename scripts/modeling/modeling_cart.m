@@ -340,33 +340,25 @@ fprintf('Min Freq (Track Limit):  %.2f rad/s\n', w_min);
 fprintf('Max Freq (Torque Limit): %.2f rad/s\n\n', w_max);
 
 
-%% SCHROEDER-PHASED MULTI-SINE GENERATOR
+%% PRBS GENERATOR
+% Near-white spectrum across [f_lo, f_hi] with crest factor = 1 (every
+% sample is at ±A), so the full voltage budget contributes to excitation
+% at every frequency in the band. No Schroeder-style peak rescaling needed.
 
-% --- User Parameters ---
-N_freq = 10; % Number of frequencies (Recommend 10-20 for good resolution)
-% Duration: Ensure we capture at least 3 full cycles of the lowest frequency
-T_test = max(20, 3 * (2*pi/w_min)); 
+% --- Band (normalised to Nyquist for idinput) ---
+f_lo = w_min / (2*pi);
+f_hi = w_max / (2*pi);
+nyq  = Fs_hw / 2;
+band = [f_lo, f_hi] / nyq;
 
-% --- Generate Logarithmic Frequencies ---
-w_vals = logspace(log10(w_min), log10(w_max), N_freq);
+% --- Length: cover several periods of the slowest dynamics ---
+T_test = max(60, 5 * (2*pi/w_min));
+N      = round(T_test * Fs_hw);
+t      = (0:N-1) / Fs_hw;
 
-% --- Define Amplitudes and Phases ---
-A = ones(1, N_freq); 
-k = 1:N_freq;
-phi = -pi * k .* (k - 1) / N_freq; % Schroeder phase formula
-
-% --- Build the Time Vector and Signal ---
-t = 0:(1/Fs_hw):T_test;
-u_raw = zeros(size(t));
-
-for i = 1:N_freq
-    u_raw = u_raw + A(i) * sin(w_vals(i) * t + phi(i));
-end
-
-% --- Safety Scaling ---
-peak_raw = max(abs(u_raw));
-% Scale the array so the absolute highest peak touches our V_max_budget
-u_safe = (V_max_budget / peak_raw) * u_raw;
+% --- Generate PRBS at the voltage budget (System ID Toolbox) ---
+rng(0, 'twister');   % reproducibility across reruns
+u_safe = idinput(N, 'prbs', band, [-V_max_budget, V_max_budget])';
 
 % --- Apply the Friction Compensator Logic ---
 epsilon = 0.05; % Noise deadband threshold
@@ -377,7 +369,7 @@ u_real(u_safe < -epsilon) = u_safe(u_safe < -epsilon) - ud_neg;
 
 %% VISUALIZATION
 
-figure('Name', 'Schroeder Multi-Sine Validation', 'Position', [200 200 800 400]);
+figure('Name', 'PRBS Validation', 'Position', [200 200 800 400]);
 
 % Plot the compensated "real" hardware command (in red)
 plot(t, u_real, 'r--', 'LineWidth', 1, 'DisplayName', 'Hardware Command ($u_{real}$)');
@@ -395,14 +387,15 @@ yline(-V_max_budget, 'k--', 'HandleVisibility', 'off');
 
 xlabel('Time [s]', 'Interpreter', 'latex');
 ylabel('Voltage [V]', 'Interpreter', 'latex');
-title('Schroeder-Phased Multi-Sine Input Vector', 'Interpreter', 'latex');
+title('PRBS Input Vector', 'Interpreter', 'latex');
 grid on;
 legend('Location', 'northeast', 'Interpreter', 'latex');
 ylim([-V_total_peak*1.2, V_total_peak*1.2]);
 
-disp('--- Multi-Sine Profile Generated ---');
-fprintf('Frequencies:      %d (from %.2f to %.2f rad/s)\n', N_freq, w_min, w_max);
-fprintf('Raw Peak:         %.2f V (Without scaling)\n', peak_raw);
+disp('--- PRBS Profile Generated ---');
+fprintf('Band:             [%.2f, %.2f] Hz  ([%.2f, %.2f] rad/s)\n', f_lo, f_hi, w_min, w_max);
+fprintf('Duration:         %.1f s (%d samples @ Fs=%.0f Hz)\n', T_test, N, Fs_hw);
+fprintf('Crest factor:     %.2f  (PRBS = 1 by construction)\n', max(abs(u_safe))/rms(u_safe));
 fprintf('Linear Peak:      %.2f V (u_safe)\n', max(abs(u_safe)));
 fprintf('Hardware Peak:    %.2f V (u_real)\n\n', max(abs(u_real)));
 
@@ -507,20 +500,20 @@ if checks_passed
     end
     
     % 3. Format data specifically for Simulink "From File" block
-    simulink_multisine = [t(:)'; u_safe(:)'];
-    
+    simulink_prbs = [t(:)'; u_safe(:)'];
+
     % 4. Save the files separately to prevent Simulink confusion
-    simulink_file = fullfile(data_dir, 'multisine_simulink.mat');
-    params_file = fullfile(data_dir, 'multisine_params.mat');
-    
+    simulink_file = fullfile(data_dir, 'prbs_simulink.mat');
+    params_file = fullfile(data_dir, 'prbs_params.mat');
+
     % Save ONLY the matrix for Simulink (100% safe)
-    save(simulink_file, 'simulink_multisine', '-v7.3');
-    
+    save(simulink_file, 'simulink_prbs', '-v7.3');
+
     % Save all the metadata for your post-processing analysis script
-    save(params_file, 't', 'u_safe', 'w_vals', 'N_freq');
-    
+    save(params_file, 't', 'u_safe', 'band', 'f_lo', 'f_hi', 'T_test', 'Fs_hw');
+
     fprintf('\n>>> Validation data successfully saved to the /data/cartModeling directory.\n');
-    disp('>>> In Simulink, point your "From File" block exactly to: multisine_simulink.mat');
+    disp('>>> In Simulink, point your "From File" block exactly to: prbs_simulink.mat');
     fprintf('>>> Run the simulation for %.2fs\n\n', T_test);
 
 else
@@ -528,3 +521,76 @@ else
     disp('    Do not deploy. The safety limits were violated.');
 end
 disp(' ');
+
+%% 7. POST-HARDWARE: ETFE-BASED FRF VALIDATION (PRBS RUN)
+%  Run AFTER deploying prbs_simulink.mat on hardware.
+%  Expects the QUARC log saved as data/cartModeling/prbs_hardware.mat with
+%  rows [time; V_cmd; x_c] (same layout as step_3V.mat used in Section 2).
+%  Overlays the empirical FRF (etfe + spafdr) on the tuned analytical Gx.
+
+prbs_data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'prbs_hardware.mat');
+if ~exist(prbs_data_file, 'file')
+    fprintf('[Section 7] %s not found -- run the PRBS test, save it, then re-run this section.\n', prbs_data_file);
+else
+    fprintf('\n--- ETFE-based FRF validation ---\n');
+    loaded_p = load(prbs_data_file);
+    vars_p   = fieldnames(loaded_p);
+    if     ismember('ip02_freq_data', vars_p), raw_p = loaded_p.ip02_freq_data;
+    elseif ismember('data',           vars_p), raw_p = loaded_p.data;
+    else,  error('Expected ip02_freq_data or data in %s', prbs_data_file);
+    end
+
+    t_p  = raw_p(1, :)';
+    u_p  = raw_p(2, :)';     % V_cmd
+    xc_p = raw_p(3, :)';     % m
+    ts_p = mean(diff(t_p));
+
+    % iddata wrapper + detrend to remove DC walk-off from PRBS asymmetry
+    dat_p = detrend(iddata(xc_p, u_p, ts_p));
+
+    % Empirical FRF estimates
+    M_etfe = 1024;
+    G_etfe = etfe(dat_p, M_etfe);   % raw periodogram (Welch-style)
+    G_spa  = spafdr(dat_p);         % frequency-dependent smoothing
+
+    % Tuned analytical FRF for overlay
+    freq_rad = logspace(log10(w_min*0.5), log10(w_max*1.5), 300);
+    [mag_an, ph_an] = bode(Gx, freq_rad);
+    mag_an = squeeze(mag_an); ph_an = squeeze(ph_an);
+
+    [mag_e, ph_e, w_e] = bode(G_etfe);
+    w_e = squeeze(w_e); mag_e = squeeze(mag_e); ph_e = squeeze(ph_e);
+    [mag_s, ph_s, w_s] = bode(G_spa);
+    w_s = squeeze(w_s); mag_s = squeeze(mag_s); ph_s = squeeze(ph_s);
+
+    figure('Name', 'ETFE vs Tuned Model', 'Position', [180 160 1000 620]);
+    subplot(2,1,1);
+    semilogx(w_e, 20*log10(mag_e*100), 'Color', [1 0.6 0.6], 'LineWidth', 0.8); hold on;
+    semilogx(w_s, 20*log10(mag_s*100), 'r-', 'LineWidth', 1.6);
+    semilogx(freq_rad, 20*log10(mag_an*100), 'b-', 'LineWidth', 1.6);
+    xline(w_min, 'k--', 'HandleVisibility', 'off');
+    xline(w_max, 'k--', 'HandleVisibility', 'off');
+    grid on; ylabel('Mag [dB, cm/V]');
+    legend('etfe (raw)', 'spafdr (smoothed)', 'Tuned $G_x$', 'Location', 'best');
+    title('$V_{cmd} \to x_c$ --- PRBS empirical vs tuned analytical');
+    xlim([freq_rad(1), freq_rad(end)]);
+
+    subplot(2,1,2);
+    semilogx(w_e, ph_e, 'Color', [1 0.6 0.6], 'LineWidth', 0.8); hold on;
+    semilogx(w_s, ph_s, 'r-', 'LineWidth', 1.6);
+    semilogx(freq_rad, ph_an, 'b-', 'LineWidth', 1.6);
+    xline(w_min, 'k--', 'HandleVisibility', 'off');
+    xline(w_max, 'k--', 'HandleVisibility', 'off');
+    grid on; ylabel('Phase [deg]'); xlabel('Frequency [rad/s]');
+    xlim([freq_rad(1), freq_rad(end)]);
+
+    % Parametric refinement: 2 poles / 0 zeros matches the M_e s^2 + B_total s structure
+    try
+        sys_id = tfest(dat_p, 2, 0);
+        fprintf('  tfest(2,0) fit:    %.1f%%\n', sys_id.Report.Fit.FitPercent);
+        fprintf('  Identified poles:  %s rad/s\n', mat2str(pole(sys_id), 4));
+        fprintf('  Tuned-model poles: %s rad/s\n', mat2str(pole(Gx), 4));
+    catch ME
+        fprintf('  tfest skipped: %s\n', ME.message);
+    end
+end
