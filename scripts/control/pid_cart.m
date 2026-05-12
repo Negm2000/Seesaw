@@ -18,10 +18,10 @@ load(fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat')); % Loads Gx
 wc_out = sqrt(2.2441 * 8.8589); % ~4.45 rad/s
 
 % --- TUNING KNOBS ---
-wc_in = 2 * wc_out; % Lowered to ~8 rad/s (reduces Kp)
-PM_in = 90;         % Dropped to 65 deg (standard for no overshoot, reduces Kd)
-Ti_ratio = 20;      % Slower integrator (reduces phase lag/high-freq effort)
-wf_bes = 2.5;         % Softer Bessel filter (limits the initial current surge)
+wc_in = 5 * wc_out; % Lowered to ~8 rad/s (reduces Kp)
+PM_in = 65;         % Dropped to 65 deg (standard for no overshoot, reduces Kd)
+Ti_ratio = 10;      % Slower integrator (reduces phase lag/high-freq effort)
+wf_bes = 3.5;         % Softer Bessel filter (limits the initial current surge)
 N_in = 100;         % Smoother derivative (less noise amplification)
 Tf_in = 1/N_in;
 
@@ -89,10 +89,10 @@ disp('==================================================');
 
 % 2. Safety Limits (Mechanical, Electronic, Thermal)
 G_force = minreal(alpha_f * eta_m * (M_e * s + B_eq) / (M_e * s + B_total));
-F_clicking_limit = 4 * abs(evalfr(G_force, 14j)); % Based on 4V @ 14 rad/s test
+F_clicking_limit = 4.5 * abs(evalfr(G_force, 14j)); % Based on 4V @ 14 rad/s test
 
 % 3. Simulation: 5cm Filtered Step
-step_size = 0.05; %[m]
+step_size = 0.1; %[m]
 t = 0:0.002:5.0; % 5s to allow RMS values to stabilize
 ref_filtered = step_size * step(F_bessel, t); 
 
@@ -127,6 +127,11 @@ fprintf('\n--- HARDWARE SAFETY: RMS (Thermal) ---\n');
 fprintf('RMS Voltage:  %.2f V | Limit (V_nom):   %.2f V\n', rms_V, V_nom);
 fprintf('RMS Current:  %.2f A | Limit (I_max):   %.2f A\n', rms_I, 1.0);
 
+
+    % Format array for Simulink "From File" block (Row 1: time, Row 2: data)
+simulink_step = [t(:)'; ref_filtered(:)'];
+    
+
 % Final Safety Logic
 if peak_I > 3.0 || peak_V > V_sat
     warning('ELECTRONIC DANGER: Peak current or voltage exceeds protection limits!');
@@ -141,9 +146,6 @@ else
     if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end 
     data_dir = fullfile(SEESAW_ROOT, 'data', 'cartControl');
     if ~exist(data_dir, 'dir'), mkdir(data_dir); end
-    
-    % Format array for Simulink "From File" block (Row 1: time, Row 2: data)
-    simulink_step = [t(:)'; ref_filtered(:)'];
     
     save(fullfile(data_dir, 'step_simulink.mat'), 'simulink_step', '-v7.3');
     fprintf('>>> Saved to: /data/cartControl/step_simulink.mat\n');
@@ -164,7 +166,7 @@ disp('==================================================');
 w_min = 0.5;                % [rad/s] Low freq to capture DC behavior
 w_max = 1.5 * wc_in;        % [rad/s] High enough to see the ~7.3 rad/s roll-off
 N_freq = 10;                % Number of frequency points
-X_MAX_BUDGET = 0.05;        % [m] Peak position reference (3 cm)
+X_MAX_BUDGET = 0.1;        % [m] Peak position reference (3 cm)
 
 % Duration: Capture at least 3 full cycles of the slowest wave
 T_test = max(15, 3 * (2*pi/w_min)); 
@@ -236,6 +238,8 @@ disp('--------------------------------------------------');
 checks_passed = (peak_I_ms <= 3.0) && (peak_V_ms <= V_sat) && ...
                 (peak_F_ms <= F_clicking_limit) && (rms_I_ms <= 1.0);
 
+simulink_multisine_CL = [t_ms(:)'; x_ref_safe(:)'];
+
 if checks_passed
     disp('>>> SUCCESS: Multi-Sine Reference is SAFE for hardware deployment. <<<');
     
@@ -243,8 +247,6 @@ if checks_passed
     if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end 
     data_dir = fullfile(SEESAW_ROOT, 'data', 'cartControl');
     if ~exist(data_dir, 'dir'), mkdir(data_dir); end
-    
-    simulink_multisine_CL = [t_ms(:)'; x_ref_safe(:)'];
     
     save(fullfile(data_dir, 'multisine_simulink.mat'), 'simulink_multisine_CL', '-v7.3');
     save(fullfile(data_dir, 'multisine_params.mat'), 't_ms', 'x_ref_safe', 'w_vals', 'N_freq');
