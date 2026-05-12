@@ -18,8 +18,8 @@ load(fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat')); % Loads Gx
 wc_out = sqrt(2.2441 * 8.8589); % ~4.45 rad/s
 
 % --- TUNING KNOBS ---
-wc_in = 5 * wc_out; % Lowered to ~8 rad/s (reduces Kp)
-PM_in = 65;         % Dropped to 65 deg (standard for no overshoot, reduces Kd)
+wc_in = 2.5 * wc_out; % Lowered to ~8 rad/s (reduces Kp)
+PM_in = 85;         % Dropped to 65 deg (standard for no overshoot, reduces Kd)
 Ti_ratio = 10;      % Slower integrator (reduces phase lag/high-freq effort)
 wf_bes = 3.5;         % Softer Bessel filter (limits the initial current surge)
 N_in = 100;         % Smoother derivative (less noise amplification)

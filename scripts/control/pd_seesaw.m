@@ -59,7 +59,7 @@ disp('P_out = T_in(s) * Gt(s)');
 
 %% 3. LEAD (PD) POLE PLACEMENT
 wn_target = 4.3;    % Speed of balance reaction
-zeta_target = 0.65;  % Tolerance for overshoot
+zeta_target = 0.6;  % Tolerance for overshoot
 p_lead = 25;        % Derivative filter pole (N)
 
 % 1. Target Pole
