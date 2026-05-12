@@ -40,7 +40,7 @@ fprintf('-------------------------\n');
 %  Plot raw time traces to sanity-check before analysis.
 
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'step_3V.mat');
+data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'step_output.mat');
 
 if ~exist(data_file, 'file')
     error('data not found. Run on hardware first.');
@@ -105,7 +105,7 @@ sgtitle('Raw Hardware Step Response Data');
 % It means that we consider that the model behave as it would if the
 % hardware had these values.
 
-V_step = 3 - 2*ud_pos;              % The step input applied
+V_step = 2;              % The step input applied
 
 % keep datasheet limits
 etag_min = eta_g_nominal * 0.5; % -10% from datasheet, but we expect even less because of dust in bearings.
@@ -117,14 +117,14 @@ pulse_end_time = 1.0;
 pulse_indices = tdot_hw >= pulse_start_time & tdot_hw <= pulse_end_time;
 
 ss_indices = tdot_hw >= (pulse_end_time - 0.2) & tdot_hw <= pulse_end_time;
-V_ss = mean(xcdot_hw(ss_indices));
-V_target = 0.632 * V_ss;
+xcdot_ss = mean(xcdot_hw(ss_indices));
+V_target = 0.632 * xcdot_ss;
 
 crossing_index = find(xcdot_hw(pulse_indices) >= V_target, 1, 'first');
 
 t_pulse_window = tdot_hw(pulse_indices);
 tau_meas = t_pulse_window(crossing_index) - pulse_start_time;
-K_meas = V_ss / V_step;
+K_meas = xcdot_ss / V_step;
 
 % 3. Define the Simulation Logic using Anonymous Functions
 % The algorithm will only tweak these two values:

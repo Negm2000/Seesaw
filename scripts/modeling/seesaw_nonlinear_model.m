@@ -33,7 +33,7 @@ seesaw_params;
 %  Plot raw time traces to sanity-check before analysis.
 
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'non_linear.mat');
+data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'nonlinear_output2.mat');
 
 if ~exist(data_file, 'file')
     error('data not found. Run on hardware first.');
@@ -59,6 +59,11 @@ xc_hw     = raw(3, :)';      % [m] — with corrected encoder gain
 dt_hw     = mean(diff(t_hw));
 Fs_hw     = 1 / dt_hw;
 
+%non_lin_input = [t_hw(:)'; 1.2*V_cmd_hw(:)'];
+%save_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'nonlinear_simulink.mat');
+%save(save_file, 'non_lin_input');
+
+%%
 % Compute the velocity in post-processing to avoid phase-lag
 cutoff_freq = B_total/M_e * 2;
 [b, a] = butter(2, cutoff_freq / (Fs_hw/2));
