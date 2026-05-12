@@ -40,7 +40,7 @@ fprintf('-------------------------\n');
 %  Plot raw time traces to sanity-check before analysis.
 
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'step_output.mat');
+data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'step_output2.mat');
 
 if ~exist(data_file, 'file')
     error('data not found. Run on hardware first.');
@@ -290,7 +290,7 @@ fprintf('============================================================\n');
 
 % Hardware Friction Compensation Values
 v_friction_max = max(ud_pos, ud_neg); 
-V_max_budget = 3.0 - v_friction_max; % Available budget for the linear sine wave
+V_max_budget = 1.5 - v_friction_max; % Available budget for the linear sine wave
 
 % Reconstruct the Force Transfer Function
 G_force = minreal(alpha_f * eta_m * (M_e * s + B_eq) / (M_e * s + B_total));
@@ -352,22 +352,23 @@ f_lo = w_lo / (2*pi);
 f_hi = w_hi / (2*pi);
 nyq  = Fs_hw / 2;
 band = [f_lo, f_hi] / nyq;
-
+max_fs = 40
 % --- Length: cover several periods of the lowest frequency ---
-T_test = max(60, 5 * (2*pi / w_lo));
-N      = round(T_test * Fs_hw);
-t      = (0:N-1) / Fs_hw;
+T_test = min(20, 5 * (2*pi / w_lo));
+N      = round(T_test * max_fs);
+t      = (0:N-1) / max_fs;
 
 % --- Generate PRBS at the voltage budget (System ID Toolbox) ---
 rng(0, 'twister');   % reproducibility across reruns
 u_safe = idinput(N, 'prbs', band, [-V_max_budget, V_max_budget])';
 
 % --- Apply the Friction Compensator Logic ---
-epsilon = 0.05; % Noise deadband threshold
+epsilon = 0.1; % Noise deadband threshold
 u_real = zeros(size(u_safe));
 u_real(u_safe > epsilon)  = u_safe(u_safe > epsilon) + ud_pos;
 u_real(u_safe < -epsilon) = u_safe(u_safe < -epsilon) - ud_neg;
 
+simulink_prbs = [t(:)'; u_safe(:)'];
 
 %% VISUALIZATION
 

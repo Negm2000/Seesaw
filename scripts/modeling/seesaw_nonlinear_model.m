@@ -33,7 +33,7 @@ seesaw_params;
 %  Plot raw time traces to sanity-check before analysis.
 
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'nonlinear_output2.mat');
+data_file = fullfile(SEESAW_ROOT, 'data', 'cartModeling', 'nonlinear_output3.mat');
 
 if ~exist(data_file, 'file')
     error('data not found. Run on hardware first.');
