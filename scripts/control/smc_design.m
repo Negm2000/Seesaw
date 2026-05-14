@@ -113,40 +113,53 @@ fprintf('S*B = %+.4f\n\n', SB)
 L_dist = 18;                        % matched-perturbation rate bound [1/s^2]
 k1 = 1.5 * sqrt(L_dist);
 k2 = 1.1 * L_dist;
-fprintf('Super-twisting gains: L = %.1f -> k1 = %.3f, k2 = %.3f\n\n', ...
+fprintf('Super-twisting gains: L = %.1f -> k1 = %.3f, k2 = %.3f\n', ...
     L_dist, k1, k2)
 
-%% 4. Closed-loop simulation -- STA vs. classic relay SMC
+% --- Boundary layer: the chattering-killer under encoder quantization ---
+% Pure super-twisting is continuous in CONTINUOUS time, but on hardware the
+% sliding variable s = S*x is reconstructed from QUANTIZED encoder counts.
+% s therefore never reaches exactly zero -- it jitters within a band
+%   ds ~ |S(1)|*q_xc + |S(3)|*q_alpha
+% and a bare sign(s) flips every sample inside that band. Replacing sign(s)
+% by the continuous sat(s/phi_bl), with phi_bl sized to swallow the
+% quantization band, makes the commanded voltage continuous and removes
+% the sampling-induced chattering, at the price of a thin phi_bl-sized
+% accuracy layer around s = 0.
+q_alpha = K_E_SW / K_gs;            % seesaw encoder resolution [rad]
+q_xc    = K_ec;                     % cart encoder resolution [m]
+ds_quant = abs(S(1))*q_xc + abs(S(3))*q_alpha;
+phi_bl  = 2.5 * ds_quant;           % boundary-layer half-width
+fprintf('Quantization band on s: %.4f -> boundary layer phi = %.4f\n\n', ...
+    ds_quant, phi_bl)
+
+%% 4. Closed-loop simulation -- boundary-layer STA vs. bare-sign STA
 %
-% Both controllers use the SAME surface and equivalent control; only the
-% reaching law differs. A matched disturbance (offset mass + Coulomb
-% friction) and encoder quantization are injected so the chattering
-% comparison is meaningful.
+% Both runs use the SAME surface, equivalent control and super-twisting
+% gains; only the switching function differs (sat(s/phi) vs. sign(s)).
+% A matched disturbance (offset mass + Coulomb friction) and encoder
+% quantization are injected so the chattering comparison is meaningful.
 
 Ts       = 0.002;                   % QUARC fixed step [s]
 t        = (0:Ts:6)';
 x0       = [0; 0; deg2rad(2.5); 0]; % initial seesaw tilt
-q_alpha  = K_E_SW / K_gs;           % seesaw encoder resolution [rad]
-q_xc     = K_ec;                    % cart encoder resolution [m]
 
 % Matched disturbance d(t) entering through the input channel [N-equiv].
 % Constant bias-load torque + a slow drift to exercise the STA integrator.
 d_fun = @(tt) 0.6 + 0.4 * sin(0.8 * tt);
 
-phi_bl = 0.05;                      % boundary-layer width for the relay law
-
 sta = sim_smc(A, B, S, K_eq, t, x0, V_sat, q_xc, q_alpha, d_fun, ...
-              'sta', k1, k2, []);
-rel = sim_smc(A, B, S, K_eq, t, x0, V_sat, q_xc, q_alpha, d_fun, ...
-              'relay', k1, k2, phi_bl);
+              'sta_bl',   k1, k2, phi_bl);
+raw = sim_smc(A, B, S, K_eq, t, x0, V_sat, q_xc, q_alpha, d_fun, ...
+              'sta_sign', k1, k2, phi_bl);
 
 % Chattering metric: total variation of the control signal per second.
 tv_sta = sum(abs(diff(sta.u))) / (t(end) - t(1));
-tv_rel = sum(abs(diff(rel.u))) / (t(end) - t(1));
-fprintf('Control total variation [V/s]:  STA = %.2f   relay(boundary) = %.2f\n', ...
-    tv_sta, tv_rel)
-fprintf('Chattering reduction: %.1fx smoother voltage with STA\n\n', ...
-    tv_rel / max(tv_sta, eps))
+tv_raw = sum(abs(diff(raw.u))) / (t(end) - t(1));
+fprintf('Control total variation [V/s]:  boundary-layer STA = %.2f   bare-sign STA = %.2f\n', ...
+    tv_sta, tv_raw)
+fprintf('Chattering reduction: %.1fx smoother voltage with the boundary layer\n\n', ...
+    tv_raw / max(tv_sta, eps))
 
 fprintf('Settling (|alpha| < 0.2 deg):    STA = %.2f s\n', ...
     settle_time(t, sta.x(:,3), deg2rad(0.2)))
@@ -171,17 +184,17 @@ saveas(gcf, fullfile(figdir, 'SMC-STA-Response.png'))
 
 figure('Name', 'SMC -- chattering comparison')
 subplot(2,1,1); hold on; grid on
-plot(t, rel.u, 'LineWidth', 1.0)
+plot(t, raw.u, 'LineWidth', 1.0)
 plot(t, sta.u, 'LineWidth', 1.3)
 ylabel('$V_m$ [V]')
-legend('Relay SMC (boundary layer)', 'Super-twisting SMC', ...
+legend('Bare-sign STA', 'Boundary-layer STA (deployed)', ...
     'Location', 'best')
 title('Commanded Voltage -- Chattering Comparison')
 subplot(2,1,2); hold on; grid on
-plot(t, rel.s, 'LineWidth', 1.0)
+plot(t, raw.s, 'LineWidth', 1.0)
 plot(t, sta.s, 'LineWidth', 1.3)
 ylabel('Sliding variable $s$'); xlabel('Time [s]')
-legend('Relay SMC', 'Super-twisting SMC', 'Location', 'best')
+legend('Bare-sign STA', 'Boundary-layer STA', 'Location', 'best')
 saveas(gcf, fullfile(figdir, 'SMC-Chattering-Comparison.png'))
 
 figure('Name', 'SMC -- phase portrait')
@@ -195,8 +208,9 @@ save(fullfile(root, 'data', 'controller_smc.mat'), ...
      'S', 'K_eq', 'k1', 'k2', 'L_dist', 'p_slide', 'sigma_s', 'zeta_s', ...
      'p_real', 'V_sat', 'Ts', 'phi_bl')
 fprintf('Saved data/controller_smc.mat\n')
-fprintf(['Deploy: s = S*x;  v is an integrator state (v_dot = -k2*sign(s));\n' ...
-         '        u = sat( -K_eq*x + (-k1*sqrt(|s|)*sign(s) + v)/(S*B), V_sat )\n'])
+fprintf(['Deploy: s = S*x;  sigma = sat(s/phi_bl);  v is an integrator state\n' ...
+         '        v_dot = -k2*sigma;\n' ...
+         '        u = sat( -K_eq*x + (-k1*sqrt(|s|)*sigma + v)/(S*B), V_sat )\n'])
 
 %% Helpers --------------------------------------------------------------
 function out = sim_smc(A, B, S, K_eq, t, x0, Vsat, q_xc, q_al, d_fun, ...
@@ -222,12 +236,15 @@ function out = sim_smc(A, B, S, K_eq, t, x0, Vsat, q_xc, q_al, d_fun, ...
 
         % --- reaching law ---
         switch law
-            case 'sta'
+            case 'sta_bl'
+                % boundary-layer super-twisting (deployed): sign -> sat
+                sig = sat_fun(s/phi);
+                u_n = (-k1*sqrt(abs(s))*sig + v) / SB;
+                v   = v - k2*sig*h;              % integrator update
+            case 'sta_sign'
+                % bare-sign super-twisting (chattering baseline)
                 u_n = (-k1*sqrt(abs(s))*sign(s) + v) / SB;
-                v   = v - k2*sign(s)*h;          % integrator update
-            case 'relay'
-                % classic first-order law, boundary-layer smoothed
-                u_n = (-(k1+k2)*sat_fun(s/phi)) / SB;
+                v   = v - k2*sign(s)*h;
         end
         u = -K_eq*xm + u_n;
         u = max(min(u, Vsat), -Vsat);
