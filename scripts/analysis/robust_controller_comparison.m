@@ -118,6 +118,11 @@ fprintf('\nTuning softened scheduled SMC...\n')
 controllers(end+1) = smc_scheduled_controller('SMC scheduled soft', smc_soft_data, smc_soft_info.note);
 controllers(end).data.info = smc_soft_info;
 
+fprintf('\nTuning u-augmented super-twisting SMC (5-state, V/s as virtual input)...\n')
+[smc_aug_data, smc_aug_info] = tune_augmented_smc(plant, constraints, tune_scenario);
+controllers(end+1) = smc_augmented_controller('SMC u-aug super-twist', smc_aug_data, smc_aug_info.note);
+controllers(end).data.info = smc_aug_info;
+
 fprintf('\nTuning manual fuzzy gain scheduler...\n')
 [fuzzy_data, fuzzy_info] = tune_fuzzy_controller(plant, constraints, tune_scenario, ...
     ctrl.Kf, K_lmi, K_hinf);
@@ -209,6 +214,14 @@ end
 function ctrl = smc_scheduled_controller(name, data, notes)
     ctrl.name = name;
     ctrl.type = 'smc_scheduled';
+    ctrl.K = [];
+    ctrl.data = data;
+    ctrl.notes = notes;
+end
+
+function ctrl = smc_augmented_controller(name, data, notes)
+    ctrl.name = name;
+    ctrl.type = 'smc_augmented';
     ctrl.K = [];
     ctrl.data = data;
     ctrl.notes = notes;
@@ -899,6 +912,93 @@ function [best, info] = tune_scheduled_smc(plant, constraints, scenario, smc_bas
     info.candidates = rows;
 end
 
+function [best, info] = tune_augmented_smc(plant, constraints, scenario)
+    % Super-twisting SMC on the lifted plant [x; u] with u_dot (V/s) as the
+    % virtual control input.  With B_aug = [0;0;0;0;1] the regular-form
+    % transform is identity, so the 4-state sliding subsystem is just the
+    % original plant and the surface is s = F*x + u with F placing
+    % eig(A - B*F).  Integrating the SMC output directly bounds the
+    % commanded voltage slew rate, which is the metric we want to optimise.
+    A_aug = [plant.A, plant.B; zeros(1, 4), 0];
+
+    sigma_set = [3.0 4.0 5.0 6.0];
+    zeta_set = [0.7 0.8 0.9];
+    L_set = [10 18 30 50];
+    phi_scale_set = [1.5 2.5 4.0 6.0];
+
+    best_score = inf;
+    best = struct();
+    rows = [];
+    for sigma_s = sigma_set
+        for zeta_s = zeta_set
+            wn_s = sigma_s / zeta_s;
+            p_slide = [-sigma_s + 1j * wn_s * sqrt(1 - zeta_s^2);
+                       -sigma_s - 1j * wn_s * sqrt(1 - zeta_s^2);
+                       -1.6 * sigma_s;
+                       -1.2 * sigma_s];
+            try
+                F = place(plant.A, plant.B, p_slide);
+            catch
+                continue
+            end
+            S = [F, 1];                    % already in regular form
+            K_eq = S * A_aug;              % S*B_aug = S(5) = 1
+            ds_quant = abs(S(1)) * constraints.q_xc + ...
+                       abs(S(3)) * constraints.q_theta;
+            for L = L_set
+                for phi_scale = phi_scale_set
+                    data = struct();
+                    data.S = S;
+                    data.K_eq = K_eq;
+                    data.k1 = 1.5 * sqrt(L);
+                    data.k2 = 1.1 * L;
+                    data.phi_bl = phi_scale * ds_quant;
+                    data.sigma_s = sigma_s;
+                    data.zeta_s = zeta_s;
+                    data.L_dist = L;
+                    c = smc_augmented_controller('candidate', data, '');
+                    sim = simulate_controller(plant.A, plant.B, c, constraints, scenario);
+                    score = hardware_friendly_score(sim.metrics);
+                    rows = [rows; sigma_s, zeta_s, L, phi_scale, score, ...
+                            sim.metrics.theta_p2p_deg, sim.metrics.u_rms, ...
+                            sim.metrics.u_slew_peak, sim.metrics.u_peak]; %#ok<AGROW>
+                    if score < best_score
+                        best_score = score;
+                        best = data;
+                    end
+                end
+            end
+        end
+    end
+
+    if isempty(fieldnames(best))
+        warning('Augmented SMC tuning failed; using nominal fixed design.')
+        sigma_s = 4.0; zeta_s = 0.80;
+        wn_s = sigma_s / zeta_s;
+        p_slide = [-sigma_s + 1j * wn_s * sqrt(1 - zeta_s^2);
+                   -sigma_s - 1j * wn_s * sqrt(1 - zeta_s^2);
+                   -1.6 * sigma_s; -1.2 * sigma_s];
+        F = place(plant.A, plant.B, p_slide);
+        best.S = [F, 1];
+        best.K_eq = best.S * A_aug;
+        L = 18;
+        best.k1 = 1.5 * sqrt(L);
+        best.k2 = 1.1 * L;
+        ds_quant = abs(best.S(1)) * constraints.q_xc + ...
+                   abs(best.S(3)) * constraints.q_theta;
+        best.phi_bl = 2.5 * ds_quant;
+        best.sigma_s = sigma_s;
+        best.zeta_s = zeta_s;
+        best.L_dist = L;
+        info.note = 'Fallback: augmented SMC sweep failed; nominal fixed design used.';
+    else
+        info.note = sprintf(['Augmented STA SMC over [x; u]; voltage slew is the ' ...
+            'virtual control. sigma=%.1f, zeta=%.2f, L=%.0f.'], ...
+            best.sigma_s, best.zeta_s, best.L_dist);
+    end
+    info.candidates = rows;
+end
+
 function result = simulate_controller(A, B, controller, constraints, scenario)
     Ts = scenario.Ts;
     N = round(scenario.T / Ts) + 1;
@@ -1037,6 +1137,27 @@ function [u, smc_v, u_act_state, xk] = controller_voltage(controller, x, smc_v, 
             u_unsmoothed = -d.K_eq * x + (-k1 * sqrt(abs(s)) * sig + smc_v) / SB;
             u = (1 - d.slew_penalty) * u_unsmoothed + d.slew_penalty * u_act_state;
             u_act_state = u;
+        case 'smc_augmented'
+            % Augmented state x_aug = [x; u_prev].  The plant is lifted to
+            %   x_aug_dot = [A B; 0 0] x_aug + [0;0;0;0;1] * u_dot,
+            % so u_dot (V/s) is the SMC virtual control.  With B_aug having
+            % only the last entry non-zero, the regular-form transform is
+            % the identity: sliding subsystem dynamics are A - B*F and the
+            % surface is s = F*x + u.  Integrating u_dot inherently bounds
+            % the commanded voltage slew rate.
+            d = controller.data;
+            S = d.S;
+            x_aug = [x; u_act_state];
+            SB = S(5);                              % S * B_aug
+            s = S * x_aug;
+            sig = clamp(s / max(d.phi_bl, eps), -1, 1);
+            smc_v = smc_v - d.k2 * sig * Ts;
+            v_clip = 10 * d.L_dist;                 % loose bound on STA integrator
+            smc_v = clamp(smc_v, -v_clip, v_clip);
+            u_dot = -d.K_eq * x_aug + (-d.k1 * sqrt(abs(s)) * sig + smc_v) / SB;
+            u_new = u_act_state + Ts * u_dot;
+            u_act_state = clamp(u_new, -constraints.V_sat, constraints.V_sat);
+            u = u_act_state;
         otherwise
             error('Unknown controller type: %s', controller.type)
     end
