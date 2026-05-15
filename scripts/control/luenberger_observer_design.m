@@ -69,33 +69,27 @@ for i = 1:numel(k_sweep)
         k_sweep(i), abs(KL_i(1))*q_xc, abs(KL_i(2))*q_theta, ts);
 end
 
-% At least 3x faster than the controller's dominant theta pair in real-part
-% decay. Use all-real poles to avoid oscillatory observer estimates.
-% Small offsets avoid repeated/near-repeated observer poles.
-k_obs     = 3.0;
-sigma_obs = k_obs * ctrl.sigma_th;
-delta_obs = [0.3; 0.8; 1.5];
-p_obs  = [-sigma_obs;
-          -(sigma_obs + delta_obs(1));
-          -(sigma_obs + delta_obs(2));
-          -(sigma_obs + delta_obs(3))];
+% About 2x faster than the controller's dominant theta pair while avoiding
+% the pathological KL gain produced by direct scaling of all controller poles.
+k_obs  = 5.0;
+p_obs = k_obs*real(p_ctrl);
+
+delta = 0.1;
+p_obs = [
+    p_obs(1) + delta;
+    p_obs(2) - delta;
+    p_obs(3) + delta;
+    p_obs(4) - delta;
+];
 L      = place(A_sw', C_meas', p_obs)';
 
 %% Simulink Observer State-Space Matrices
 % Input vector:  [u; x_c_measured; theta_measured]
-% Output vector: x_feedback = [x_c_measured; x_c_dot_hat; theta_measured; theta_dot_hat]
-% Positions are measured directly, so pass them through instead of feeding
-% estimated positions to the controller. The observer is used for velocities.
+% Output vector: xhat = [x_c; x_c_dot; theta; theta_dot]
 A_obs = A_sw - L*C_meas;
 B_obs = [B_sw L];
-C_obs = [0 0 0 0;
-         0 1 0 0;
-         0 0 0 0;
-         0 0 0 1];
-D_obs = [0 1 0;
-         0 0 0;
-         0 0 1;
-         0 0 0];
+C_obs = eye(4);
+D_obs = zeros(4, 3);
 
 %% Separation Principle Verification
 A_combined = [A_sw - B_sw*Kf,   B_sw*Kf;
