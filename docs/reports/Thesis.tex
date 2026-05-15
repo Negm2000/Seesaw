@@ -819,6 +819,143 @@ The observer is verified sequentially to ensure model fidelity:
 % TODO: Hardware test — bias load response with integral action
 % TODO: Compare simulation vs hardware results, discuss discrepancies
 
+\subsection{AI-Assisted Rapid Prototyping of Robust Controllers}
+\label{sec:ai_robust_prototyping}
+
+The pole-placement controller and the integral-action extension are both derived from the local linear model. In practice, however, the measured seesaw response showed the same qualitative limitation for several linear designs: instead of converging asymptotically to $\theta=0$, the hardware settles into a bounded rocking motion. The preceding bias-load study already shows that integral action can recenter the average angle, but it does not remove the hardware limit cycle itself. Since the identified model had proven unreliable outside small local predictions, the next step was not to commit immediately to one controller family, but to rapidly prototype several robust alternatives and compare them on a common nonlinear benchmark.
+
+This exploration was carried out with AI-assisted scripting. The useful role of the AI tool was not to replace control-design judgement, but to accelerate the repetitive parts of the study: generating candidate synthesis scripts, wiring each controller into the same simulation harness, collecting comparable metrics, and quickly discarding controllers that failed the nonlinear constraints. The final decision remains based on the physical metrics: peak-to-peak rocking, voltage effort, voltage slew rate, saturation, and survival under motor-protection limits.
+
+\subsubsection{Nonlinear limit-cycle simulation}
+\label{sssec:nonlinear_limit_cycle_sim}
+
+The robust-controller benchmark uses the identified linear matrices $A_{sw},B_{sw}$ as the nominal plant, but inserts the main non-ideal hardware effects in the simulation loop. The state-feedback controller receives quantised encoder measurements
+\begin{equation}
+    x_{c,q} = q_x \operatorname{round}\!\left(\frac{x_c}{q_x}\right), \qquad
+    \theta_q = q_\theta \operatorname{round}\!\left(\frac{\theta}{q_\theta}\right),
+\end{equation}
+where $q_x = K_{ec}$ and $q_\theta = K_{E,SW}/K_{gs}$. The motor command is then passed through saturation, deadzone, and asymmetric drive gain:
+\begin{equation}
+    u_s = \operatorname{sat}(u,\pm 6\,\mathrm{V}), \qquad
+    u_d =
+    \begin{cases}
+        0, & |u_s| < 0.12\,\mathrm{V},\\
+        u_s - 0.12\operatorname{sign}(u_s), & |u_s| \geq 0.12\,\mathrm{V},
+    \end{cases}
+\end{equation}
+\begin{equation}
+    u_{eff} =
+    \begin{cases}
+        1.0\,u_d, & u_d \geq 0,\\
+        0.5\,u_d, & u_d < 0.
+    \end{cases}
+\end{equation}
+A Coulomb-friction disturbance is added in the cart acceleration channel,
+\begin{equation}
+    d_f = \begin{bmatrix}0 & -F_c\operatorname{sign}(\dot{x}_c)/M_c & 0 & 0\end{bmatrix}^\top,
+    \qquad F_c = 0.18\,\mathrm{N},
+\end{equation}
+and the simulated cart and seesaw are clamped at the physical rail and angle limits. This combination introduces the same mechanism observed on hardware: close to zero angle, the requested voltage often lies inside the deadzone, quantisation prevents infinitesimal feedback corrections, Coulomb friction produces stick--slip motion, and the asymmetric actuator gain biases the two half-cycles. The result is a bounded limit cycle rather than exact convergence.
+
+The baseline pole-placement controller reproduces the large rocking effect in this benchmark. With the same $2^\circ$ initial release used in the controller tests, the simulated pole-placement steady-state rocking is $3.38^\circ$ peak-to-peak, matching the order of the hardware observation and motivating the robust-controller comparison.
+
+\subsubsection{Controllers compared}
+
+The benchmark in \texttt{scripts/analysis/robust\_controller\_comparison.m} evaluates the following controller families on the same nonlinear plant:
+\begin{itemize}
+    \item pole-placement state feedback, used as the baseline;
+    \item an LMI-certified state-feedback gain, where high-performing candidates are checked by common quadratic Lyapunov inequalities over uncertainty vertices;
+    \item an $H_\infty$ Riccati state-feedback design;
+    \item an actuator-aware $H_\infty$ design with an augmented actuator-voltage state to penalise aggressive voltage motion;
+    \item super-twisting sliding-mode control (SMC) with a boundary layer;
+    \item a softened scheduled SMC variant;
+    \item a Takagi--Sugeno fuzzy gain scheduler implemented using the Fuzzy Logic Toolbox.
+\end{itemize}
+True dynamic \texttt{hinfsyn} controllers were also attempted after installing the Robust Control Toolbox. Although the resulting dynamic controllers were linearly stabilising, none survived the nonlinear deadzone and constraint validation from the $2^\circ$ release without falling into saturation or an angle stop. They were therefore excluded from the final surviving-controller table rather than reported as valid.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{../figures/Robust-Control-Comparison.png}
+    \caption{AI-assisted robust-controller comparison on the nonlinear limit-cycle benchmark. All controllers are simulated with the same quantisation, deadzone, asymmetric actuator gain, Coulomb friction, saturation, and stops.}
+    \label{fig:robust_comparison}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{../figures/Robust-Control-SteadyState.png}
+    \caption{Steady-state rocking window for the robust-controller comparison. The pole-placement controller keeps the plant bounded but leaves a much larger oscillation envelope than the robust candidates.}
+    \label{fig:robust_steady_state}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{../figures/Robust-Control-ThetaPhasePlane.png}
+    \caption{Steady-state phase-plane portraits, $\theta$ versus $\dot\theta$, for the robust-controller candidates. The plot visualises the remaining limit cycles after the transient has decayed.}
+    \label{fig:robust_phase_plane}
+\end{figure}
+
+\subsubsection{Nominal nonlinear benchmark results}
+
+Table~\ref{table:robust_nominal_metrics} reports the final comparison metrics over the last five seconds of a 20 s simulation. The primary objective is minimising $\theta$ peak-to-peak; control effort and voltage slew are treated as secondary hardware-stress metrics.
+
+\begin{table}[H]
+    \centering
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{lcccccc}
+        \hline
+        \rowcolor{bluePoli!40}
+        Controller & OK & $\theta_{pp}$ [deg] & $\theta_{rms}$ [deg] & $u_{rms}$ [V] & $u_{pk}$ [V] & peak slew [V/s] \T\B \\
+        \hline\hline
+        $H_\infty$ Riccati SF & yes & 0.269 & 0.087 & 0.662 & 6.000 & 654.8 \T\\
+        SMC super-twist & yes & 0.275 & 0.095 & 0.759 & 6.000 & 270.2 \\
+        Fuzzy scheduled SF & yes & 0.312 & 0.104 & 0.638 & 6.000 & 338.5 \\
+        SMC scheduled soft & yes & 0.359 & 0.124 & 1.127 & 6.000 & 609.3 \\
+        $H_\infty$ actuator-aware & yes & 0.382 & 0.132 & 0.640 & 6.000 & 120.0 \\
+        LMI-screened SF & yes & 0.755 & 0.280 & 0.967 & 6.000 & 108.9 \\
+        Pole placement & yes & 3.385 & 1.235 & 0.726 & 6.000 & 153.6 \B\\
+        \hline
+    \end{tabular}}
+    \caption{Nominal nonlinear robust-controller benchmark. Metrics are computed on the steady-state window $t\geq15$ s.}
+    \label{table:robust_nominal_metrics}
+\end{table}
+
+The best nominal peak-to-peak result is obtained by the $H_\infty$ Riccati state-feedback controller, closely followed by the super-twisting SMC. However, both achieve this by allowing relatively aggressive voltage changes. The actuator-aware $H_\infty$ controller is more hardware-friendly: it increases the angle envelope to $0.382^\circ$ peak-to-peak but reduces the peak voltage slew to approximately $120$ V/s and avoids saturation in the nominal run. The LMI-screened controller also has a low slew requirement, but at the cost of a larger $0.755^\circ$ oscillation.
+
+\subsubsection{Motor-protection and slew-rate survival}
+
+To evaluate weak-hardware operation, the same controllers were tested with an explicit voltage slew-rate limiter. This is not intended as the final design method; it is a stress test showing which controllers remain viable if the motor amplifier must be protected from fast voltage changes. Table~\ref{table:robust_slew_survival} gives the lowest slew-rate limit at which each controller still satisfies the simulation constraints.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \hline
+        \rowcolor{bluePoli!40}
+        Controller & lowest surviving limit [V/s] & $\theta_{pp}$ [deg] & $u_{rms}$ [V] \T\B \\
+        \hline\hline
+        Pole placement & 10 & 3.421 & 0.767 \T\\
+        Fuzzy scheduled SF & 35 & 0.341 & 0.643 \\
+        LMI-screened SF & 50 & 0.760 & 0.978 \\
+        $H_\infty$ Riccati SF & 100 & 0.280 & 0.616 \\
+        $H_\infty$ actuator-aware & 100 & 0.382 & 0.661 \\
+        SMC super-twist & 100 & 0.273 & 0.766 \\
+        SMC scheduled soft & 100 & 0.360 & 1.116 \B\\
+        \hline
+    \end{tabular}
+    \caption{Slew-rate survival test. The reported row is the lowest voltage slew limit for which the controller remains within the nonlinear simulation constraints.}
+    \label{table:robust_slew_survival}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{../figures/Robust-Control-RateLimitSurvival.png}
+    \caption{Controller survival under voltage slew-rate limits. Fuzzy scheduling is the best low-slew robust candidate: it remains below $0.35^\circ$ peak-to-peak at 35 V/s, while the more aggressive $H_\infty$ and SMC candidates require about 100 V/s.}
+    \label{fig:robust_rate_limit}
+\end{figure}
+
+The low-slew test changes the preferred controller. If the hardware can tolerate slew rates of approximately $100$ V/s or higher, the $H_\infty$ Riccati and SMC controllers give the smallest angle envelopes. If the design priority is weak-hardware protection, the fuzzy scheduled controller is more attractive: it is the best surviving robust controller at 75, 50, and 35 V/s, with $\theta_{pp}=0.341^\circ$ at 35 V/s. Below that level only the pole-placement controller survives in this benchmark, but it returns to the original large limit cycle of approximately $3.4^\circ$ peak-to-peak.
+
+Based on these results, the most promising next hand-designed controller is the fuzzy scheduled state-feedback law. It does not give the absolute smallest nominal peak-to-peak angle, but it offers the best compromise between strong rocking suppression and low voltage slew-rate requirements. The next design step is therefore to replace the automatically swept fuzzy scheduler by an explicitly engineered rule base, using the robust-comparison results as the target envelope.
+
 \section{Experience 3: Periodic trajectory tracking for the body and lift-up}
 
 
