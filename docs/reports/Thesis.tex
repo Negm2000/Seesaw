@@ -787,13 +787,6 @@ zeroing only the unmeasured velocities. With this initialisation the only nonzer
 
 \begin{figure}[H]
 	\centering
-	\includegraphics[width=0.85\linewidth]{../figures/Observer-Error.png}
-	\caption{Estimation error $e = \mathbf{x} - \hat{\mathbf{x}}$ from cold start ($\hat{\mathbf{x}}(0) = 0$) under $\mathbf{x}(0) = [0,0,2^\circ,0]^\top$. All error components settle within $0.90$ s, consistent with the slowest observer pole at $-9.0$ rad/s.}
-	\label{fig:obs_error}
-\end{figure}
-
-\begin{figure}[H]
-	\centering
 	\includegraphics[width=0.85\linewidth]{../figures/Observer-IC-Response.png}
 	\caption{Cold-start IC response with the observer in the loop at $\theta(0) = 2^\circ$. The cart peaks at $3.3$ cm, $\theta$ overshoots to $3.0^\circ$ (well inside the $\pm 11.5^\circ$ stops, dashed red), and $V_m$ peaks at $6.40$ V, slightly exceeding the saturation envelope (dashed red). With the realistic initialisation \eqref{eq:obs_init} the voltage trace drops to the controller-only profile (peak $3.87$ V).}
 	\label{fig:obs_ic}
