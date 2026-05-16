@@ -1,43 +1,76 @@
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+# AGENTS.md — Quanser IP02 + SEESAW-E
 
-This project is indexed by GitNexus as **Seesaw** (103 symbols, 90 relationships, 0 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+## Quick Start
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+```matlab
+>> startup        % adds folders to path, sets SEESAW_ROOT, runs seesaw_params
+>> seesaw_params  % loads hardware params, builds state-space matrices
+```
 
-## Always Do
+Always call `startup` first — it calls `seesaw_params` and sets `SEESAW_ROOT` for all scripts.
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+## Pipeline (run section-by-section with Ctrl+Enter per `%%` block)
 
-## Never Do
+1. **Modeling** — `scripts/modeling/modeling_pipeline.m`
+   - Sections 1–3: analytical model, build `IP02_FreqTest.slx` for chirp
+   - §4: load `data/data.mat` (recorded from QUARC hardware)
+   - §6: `fminsearch` auto-tunes `B_eq` (cart friction)
+   - §10: saves `data/tuned_params.mat`
+2. **Control Design** — `scripts/control/`:
+   - `pole_placement_design.m` — frequency-domain lead+PI cascade
+   - `smc_design.m` — super-twisting sliding mode
+   - `mpc_design.m` — model predictive control
+   - `luenberger_observer_design.m` — 4-state estimator from `[x_c, theta]`
+3. **Evaluation** — `scripts/analysis/`:
+   - `robust_controller_comparison.m` — ranks all controllers by theta p2p, voltage effort, smoothness
+   - `smc_vs_pp_nonlinear.m` — nonlinear Euler sim with deadzone + Coulomb friction + directional gain bias
+   - `hardware_verification.m` — time & frequency domain vs logged QUARC data
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+## Hardware Deployment
 
-## Resources
+- Model: `models/Seesaw_Control.slx` (cascade), or `models/PolePlacementObserver2024.slx` (state feedback + observer)
+- Simulink → **External** mode → Build (`Ctrl+B`) → Connect (`Ctrl+T`) → Start
+- **Always hold seesaw level before Start, release gently after.**
+- If voltage scopes show rail-to-rail (±22 V) **Stop immediately** and reduce gains.
+- Motor nominal limit is **6 V** (not 22 V amplifier limit).
+- VoltPAQ-X1 gain switch must be **1×**.
 
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/Seesaw/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/Seesaw/clusters` | All functional areas |
-| `gitnexus://repo/Seesaw/processes` | All execution flows |
-| `gitnexus://repo/Seesaw/process/{name}` | Step-by-step execution trace |
+## Critical System Knowledge
 
-## CLI
+- **Plant**: Cart on a seesaw — open-loop unstable (RHP pole ≈ +2.15 rad/s). States: `[x_c, x_c_dot, alpha, alpha_dot]`.
+- **Hardware defects** (permanent, software-only mitigation):
+  1. **Stiction dead-zone**: ~±0.12 V voltage band where cart won't move.
+  2. **Directional asymmetry**: ~2:1 gain bias (fast direction vs slow direction).
+  3. These cause a **limit cycle** (±5 cm cart, ±2 deg seesaw) under any linear controller.
+- **No current limiting** in the signal chain. Motor current is governed by Ohm's law + back-EMF only.
+- **V_sat = 6.0 V** (motor rating). VoltPAQ can output 22 V but will burn the motor.
+- **All Simulink models are built programmatically** — do not hand-edit `.slx` files. See `scripts/setup/build_simulink_models.m`.
+- **S-functions** in `src/` (cart_table_sfun.m, seesaw_plant_sfun.m) are legacy — main pipeline uses standard State-Space blocks.
+- **Build artifacts** go to `build/` (configured by `startup.m` via `Simulink.fileGenControl`).
+- **Pole placement design** adds 0.370 kg to cart mass (`M_c_added`).
+- **Model tuning**: `fminsearch` on `B_eq` using velocity RMS cost. Tuned params saved to `data/tuned_params.mat`.
 
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+## Architecture
 
-<!-- gitnexus:end -->
+- `scripts/config/seesaw_params.m` — single source of truth for all parameters and SS matrices
+- `data/tuned_params.mat` — tuned B_eq, rebuilt A/B/C/D for both cart-only and full seesaw
+- `data/controller_freq.mat` — pole placement gains
+- `data/controller_smc.mat` — SMC gains (sliding surface S, K_eq, k1, k2, phi_bl)
+- `data/observer.mat` — Luenberger observer SS matrices
+
+Latest robust benchmark (from deployment plan):
+| Controller | theta p2p | Lowest slew limit |
+|---|---|---:|
+| Fuzzy scheduled SF | ~0.34 deg | 35 V/s |
+| LMI-screened SF | ~0.76 deg | 50 V/s |
+| Hinf / SMC | ~0.27 deg | 100 V/s |
+| Pole placement | ~3.4 deg | 10 V/s |
+
+## Repository Structure
+
+- `scripts/` — MATLAB scripts (config/, control/, modeling/, analysis/). All section-based notebooks.
+- `models/` — Simulink models (.slx). Include `Seesaw_Template.slx`, `Seesaw_SMC_*.slx`, `PolePlacement*.slx`, `Seesaw_PP.slx`.
+- `data/` — .mat files from hardware runs, tuning, and controller designs.
+- `docs/` — figures, deployment plans, thesis source (LaTeX).
+- `build/` — Simulink cache + codegen artifacts (gitignored).
+- `src/` — legacy S-functions (reference only).
