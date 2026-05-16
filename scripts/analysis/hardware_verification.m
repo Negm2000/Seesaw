@@ -1,73 +1,58 @@
 %% HARDWARE VERIFICATION PIPELINE — Closed-Loop Seesaw Control
 %  =====================================================================
-%  Master script for verifying the closed-loop seesaw controller against
-%  hardware data.  Covers both time-domain (step response, bounded
-%  oscillation analysis) and frequency-domain (closed-loop Bode from
-%  chirp perturbation) verification.
+%  ONE script, two phases.  Run it before AND after each experiment.
+%
+%  Phase 1 (BEFORE testing) — Section 0.5 runs unconditionally:
+%    - Builds models/PolePlacement{,Observer}2024_HWTest.slx if missing
+%      (disturbance injection + logging spliced into the PP model)
+%    - Saves data/hw_test_signals.mat with d_inj presets:
+%        d_free   (Exp A: zero perturbation)
+%        d_step   (Exp B: 0.5 V step at t=2 s)
+%        d_prbs   (Exp C: PRBS 0..0.4*fNyq, +-0.5 V, 90 s)  <- preferred
+%        d_chirp  (Exp C fallback: linear chirp 0.1-10 Hz)
+%
+%  Phase 2 (AFTER each experiment) — re-run this script:
+%    - Detects whichever hw_*.mat files are in data/
+%    - Time-domain (A, B), frequency-domain (C: CL + IV plant), observer (F)
+%    - Saves data/verification_results.mat
 %
 %  KEY INSIGHT:  The seesaw does NOT achieve asymptotic stability at
-%  theta = 0.  Nonlinearities (Coulomb friction, encoder quantization,
+%  alpha = 0.  Nonlinearities (Coulomb friction, encoder quantization,
 %  backlash, static friction) produce a bounded limit cycle.  The
-%  controller constrains rocking between ±theta_bound — the better the
+%  controller constrains rocking between +-alpha_bound — the better the
 %  controller, the tighter the bound.  This script quantifies that bound
 %  rather than chasing an unachievable zero steady-state error.
 %
 %  =====================================================================
-%  HARDWARE DATA COLLECTION (before running this script):
+%  HARDWARE PROCEDURE (on the QUARC PC, per experiment)
 %  =====================================================================
 %
-%  Model:   models/PolePlacementObserver2024.slx
-%  Control: u = -K*x (regulator — drives state to zero)
+%  1. >> load data/hw_test_signals.mat       % loads d_free/d_step/d_prbs/d_chirp
+%  2. >> d_inj = d_free;                     % pick the experiment
+%  3. Open the appropriate model:
+%       - Exp A, B, C:  models/PolePlacement2024_HWTest.slx
+%       - Exp D (obs):  models/PolePlacementObserver2024_HWTest.slx
+%  4. QUARC External -> Build (Ctrl+B) -> Connect (Ctrl+T) -> Start.
+%     Hold seesaw level; release gently after Start.
+%  5. After the run, To Host File output columns are:
+%       PP2024_HWTest:    [time | x_c | alpha | V_m | d]
+%       PPObs2024_HWTest: [time | x_c | alpha | V_m | d | x_hat(4)]
+%     where x_hat = [x_c_hat ; x_c_dot_hat ; alpha_hat ; alpha_dot_hat].
+%  6. Split into named vars and save to data/ as:
+%       Exp A: hw_free_run.mat      with hw_t,hw_xc,hw_alpha,hw_vm
+%       Exp B: hw_step_response.mat with hw_t,hw_d,hw_xc,hw_alpha,hw_vm
+%       Exp C: hw_chirp_response.mat (same vars as B)
+%       Exp D: hw_obs_free.mat      with hw_t,hw_xc,hw_alpha,hw_vm,
+%              hw_xc_hat,hw_xcdot_hat,hw_alpha_hat,hw_alphadot_hat
+%  7. Re-run this script to get the analysis.
 %
-%  For Experiments B & C you need a one-time model modification:
-%    Inject a disturbance signal d(t) into the control voltage, after
-%    the feedback gain and before saturation: u_sat = sat(-K*x + d).
-%    Add a "From Workspace" block for d and a manual switch to toggle
-%    between d=0 (normal) and an injected signal (step or chirp).
-%    Log d alongside everything else.
-%    (Do NOT inject as cart/angle reference — commanding arbitrary
-%     positions on an unstable seesaw is nonsense. Disturbance injection
-%     excites the plant while the regulator still does its job.)
-%
-%  Experiment A — Free-Run (unperturbed rocking, DD-in-loop):
-%    1. Open models/PolePlacementObserver2024.slx (QUARC External)
-%    2. Set d=0 (no disturbance injected)
-%    3. Hold seesaw level, Start controller, release gently
-%    4. Let run for 30-60 s, logging: t, x_c, alpha, V_m
-%    5. Save as: data/hw_free_run.mat
-%       Variables: hw_t, hw_xc, hw_alpha, hw_vm  (each Nx1)
-%
-%  Experiment B — Step Response (disturbance step, observer-in-loop):
-%    1. Switch to observer-in-loop variant of model
-%    2. Inject a disturbance step via d: 0 -> ±0.5 V at t=2 s
-%    3. Hold seesaw level, Start controller, release gently
-%    4. Let run 20 s, logging: t, d, x_c, alpha, V_m
-%    5. Save as: data/hw_step_response.mat
-%       Variables: hw_t, hw_d, hw_xc, hw_alpha, hw_vm
-%
-%  Experiment C — Chirp Perturbation (frequency response):
-%    1. Same model as B. Replace step with chirp:
-%       - Amplitude: 0.5-1.0 V (too large may destabilize)
-%       - Frequency: 0.1 to 10 Hz (linear chirp)
-%       - Duration: 60 s
-%    2. Log: t, d, x_c, alpha, V_m
-%    3. Save as: data/hw_chirp_response.mat
-%       Variables: hw_t, hw_d, hw_xc, hw_alpha, hw_vm
-%
-%  Experiment D — Observer free-run (observer-in-loop, for Section F):
-%    1. Observer-in-loop variant, d=0
-%    2. Log observer outputs alongside measurements:
-%         xc_hat, xcdot_hat, alpha_hat, alphadot_hat
-%    3. Free-run 30-60 s, save as: data/hw_obs_free.mat
-%       Variables: hw_t, hw_xc, hw_alpha, hw_vm,
-%                  hw_xc_hat, hw_xcdot_hat, hw_alpha_hat, hw_alphadot_hat
-%
-%  Run individual sections (Ctrl+Enter) as data is available.
 %  =====================================================================
-%
-%  Requires:  startup.m  (or at minimum  seesaw_params.m and path setup)
-%  Outputs:   docs/figures/Verification-*.png
-%             data/verification_results.mat
+%  Requires:  startup.m  (paths + seesaw_params)
+%             data/tuned_params.mat, data/controller_freq.mat
+%  Outputs:   models/PolePlacement{,Observer}2024_HWTest.slx (Phase 1)
+%             data/hw_test_signals.mat                       (Phase 1)
+%             docs/figures/Verification-*.png                (Phase 2)
+%             data/verification_results.mat                  (Phase 2)
 %  =====================================================================
 
 %% 0. SETUP — Load parameters and paths
@@ -108,6 +93,61 @@ p_unstable_hint = max(real(ev));
 fprintf('  Plant RHP pole = +%.3f rad/s\n', p_unstable_hint);
 fprintf('\n');
 
+%% 0.5 PRE-TEST SETUP — Build HW test models and prepare excitation signals
+% Runs unconditionally so a fresh checkout is testing-ready after one
+% call to this script.  Cheap and idempotent.
+
+fprintf('Pre-test setup: building HW test models...\n');
+run(fullfile(root, 'scripts', 'control', 'build_pp_hwtest_models.m'));
+
+% --- d_inj presets ---
+exp_duration_s = 90;        % B/C run length
+exp_fs_Hz      = 500;       % QUARC sample rate (Ts = 2 ms)
+prbs_amp_V     = 0.5;       % stays well under V_sat = 6 V
+prbs_bw_frac   = 0.4;       % PRBS upper band edge, fraction of Nyquist
+step_amp_V     = 0.5;
+step_t_s       = 2.0;
+chirp_f0_Hz    = 0.1;
+chirp_f1_Hz    = 10.0;
+
+t_vec = (0:1/exp_fs_Hz:exp_duration_s)';
+N_pts = numel(t_vec);
+
+% A: free-run (zero perturbation, held forever)
+d_free = [0 0; 1e6 0];
+
+% B: disturbance step at t = step_t_s
+d_step = [0 0; step_t_s 0; step_t_s step_amp_V; 1e6 step_amp_V];
+
+% C: PRBS (preferred broadband perturbation)
+if license('test', 'Identification_Toolbox')
+    prbs_unit = idinput(N_pts, 'prbs', [0 prbs_bw_frac], [-1 1]);
+else
+    rng(42, 'twister');
+    prbs_unit = sign(randn(N_pts, 1));
+    warning(['System Identification Toolbox not available; using ' ...
+             'sign(randn) instead of true PRBS.']);
+end
+d_prbs = [t_vec, prbs_amp_V * prbs_unit];
+
+% C fallback: linear chirp
+d_chirp = [t_vec, prbs_amp_V * chirp(t_vec, chirp_f0_Hz, ...
+                                     exp_duration_s, chirp_f1_Hz)];
+
+sig_path = fullfile(root, 'data', 'hw_test_signals.mat');
+save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp');
+fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp)\n');
+
+fprintf('\n----------------------------------------\n');
+fprintf(' Pre-test ready. On the QUARC PC:\n');
+fprintf('----------------------------------------\n');
+fprintf('   >> load data/hw_test_signals.mat\n');
+fprintf('   >> d_inj = d_free;       %% or d_step / d_prbs / d_chirp\n');
+fprintf('   Open models/PolePlacement2024_HWTest.slx\n');
+fprintf('       (or *Observer*_HWTest for Experiment D)\n');
+fprintf('   QUARC External -> Build -> Connect -> Start.\n');
+fprintf('----------------------------------------\n');
+
 % ---- Scanners for what data files exist ----
 has_free_run  = exist(fullfile(root, 'data', 'hw_free_run.mat'), 'file') == 2;
 has_step      = exist(fullfile(root, 'data', 'hw_step_response.mat'), 'file') == 2;
@@ -115,12 +155,13 @@ has_chirp     = exist(fullfile(root, 'data', 'hw_chirp_response.mat'), 'file') =
 has_obs       = exist(fullfile(root, 'data', 'hw_obs_free.mat'), 'file') == 2;
 
 if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
-    fprintf('No hardware verification data found in data/.\n');
-    fprintf('Run at least one experiment (see header comments) then re-run.\n');
+    fprintf('\nNo hardware data in data/ yet — Phase 1 complete.\n');
+    fprintf('Run an experiment, save the data, then re-run for Phase 2.\n\n');
     return;
 end
 
-fprintf('Data available:  free-run=%d  step=%d  chirp=%d  obs=%d\n', ...
+fprintf('\nPhase 2: analysis.  Data available:\n');
+fprintf('  free-run=%d  step=%d  chirp=%d  obs=%d\n', ...
     has_free_run, has_step, has_chirp, has_obs);
 
 
@@ -486,19 +527,27 @@ end
 
 
 %% =====================================================================
-%  SECTION C — FREQUENCY-DOMAIN: DISTURBANCE-TO-OUTPUT BODE FROM CHIRP
+%  SECTION C — FREQUENCY-DOMAIN: CLOSED-LOOP AND PLANT BODE
 %  =====================================================================
-%  A small-amplitude chirp disturbance is injected into the control
-%  signal:  u = sat(-K*x + d),  d = chirp (0.1–10 Hz, 0.5–1.0 V pk).
-%  From logged data we estimate disturbance-to-output transfer functions:
+%  A small-amplitude broadband disturbance d (PRBS preferred, chirp OK)
+%  is injected into the control signal:  u = sat(-K*x + d).
 %
-%    G_xc(s)    = X_c(s) / d(s)      (cart sensitivity)
-%    G_vm(s)    = V_m(s) / d(s)      (control response)
-%    G_alpha(s) = α(s) / d(s)        (angle sensitivity)
+%  From logged d, V_m, x_c, alpha we estimate two families of FRFs:
 %
-%  These reveal the closed-loop disturbance rejection bandwidth and
-%  resonance.  The H1 estimator (Welch's method via tfestimate) is used
-%  for robust cross-spectral estimation.
+%  (1) Closed-loop disturbance sensitivity (what the script originally did):
+%        X_c(s)/d(s)   = G_xc * S      <- cart disturbance rejection
+%        alpha(s)/d(s) = G_alpha * S   <- angle disturbance rejection
+%        V_m(s)/d(s)   = S             <- input sensitivity
+%      Compared to (sI - A + BK)^-1 B from the model -> CL-rejection check.
+%
+%  (2) Open-loop PLANT FRF via the indirect / IV method:
+%        G_xc(jw)    = (X_c/d) / (V_m/d) = H_xc(jw) / H_vm(jw)
+%        G_alpha(jw) = (alpha/d) / (V_m/d)
+%      Compared to (sI - A)^-1 B from the model -> plant-model check.
+%      d acts as an instrumental variable, so this is asymptotically
+%      unbiased despite the unstable plant being in closed loop.
+%      Trustworthy only where coherence(d,V_m) AND coherence(d,y) are
+%      both high; the rest is NaN-masked.
 %  =====================================================================
 
 if ~has_chirp
@@ -535,6 +584,20 @@ else
 
     [C_xc, ~]    = mscohere(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
     [C_alpha, ~] = mscohere(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
+    [C_vm, ~]    = mscohere(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
+
+    % --- Indirect / IV plant FRF (closed-loop ID) -----------------------
+    % With u = -Kx + d and plant G:    y/d = G*S,   V_m/d = S
+    % => G(jw) = (y/d)/(V_m/d) = H_yd / H_vm
+    % Recovers the OPEN-LOOP plant from CLOSED-LOOP data without ever
+    % opening the (unstable) loop. d is the instrumental variable, so
+    % the estimate is unbiased even though u is correlated with noise.
+    G_xc_plant    = H_xc    ./ H_vm;
+    G_alpha_plant = H_alpha ./ H_vm;
+
+    coh_thresh    = 0.5;
+    mask_xc_iv    = (C_vm > coh_thresh) & (C_xc    > coh_thresh);
+    mask_alpha_iv = (C_vm > coh_thresh) & (C_alpha > coh_thresh);
 
     f_lo = 0.1; f_hi = 10.0;
     f_mask = f_tfe >= f_lo & f_tfe <= f_hi;
@@ -566,15 +629,30 @@ else
         mag_xc_mean);
 
     % Coherence quality
-    coh_xc_avg = mean(C_xc(f_mask));
+    coh_xc_avg    = mean(C_xc(f_mask));
     coh_alpha_avg = mean(C_alpha(f_mask));
+    coh_vm_avg    = mean(C_vm(f_mask));
     fprintf('\n  --- Coherence ---\n');
-    fprintf('    Mean coh (x_c):     %.2f  (>0.7 = good FRF)\n', coh_xc_avg);
+    fprintf('    Mean coh (x_c):     %.2f  (>0.7 = good CL FRF)\n', coh_xc_avg);
     fprintf('    Mean coh (alpha):   %.2f  (lower = rocking dominates)\n', coh_alpha_avg);
+    fprintf('    Mean coh (V_m):     %.2f  (>0.7 = good IV plant FRF)\n', coh_vm_avg);
     if coh_alpha_avg < 0.5
         fprintf('    Note: alpha coherence may be low because the unmeasured\n');
         fprintf('          rocking disturbance is uncorrelated with injected d(t).\n');
         fprintf('          This is expected.\n');
+    end
+
+    %% C2b. Open-loop plant FRF coverage (indirect estimate)
+    iv_coverage_xc    = sum(mask_xc_iv(f_mask))    / sum(f_mask) * 100;
+    iv_coverage_alpha = sum(mask_alpha_iv(f_mask)) / sum(f_mask) * 100;
+    fprintf('\n  --- Indirect Plant FRF Coverage (coh > %.1f) ---\n', coh_thresh);
+    fprintf('    X_c/V_m reliable:    %.0f%%%% of [%.2f, %.2f] Hz\n', ...
+        iv_coverage_xc, f_lo, f_hi);
+    fprintf('    alpha/V_m reliable:  %.0f%%%% of [%.2f, %.2f] Hz\n', ...
+        iv_coverage_alpha, f_lo, f_hi);
+    if iv_coverage_xc < 30
+        fprintf('    Warning: indirect estimate has poor coverage. Use PRBS\n');
+        fprintf('             and/or a longer record (>= 90 s).\n');
     end
 
     %% C3. Figures — Disturbance-to-Output Bode
@@ -675,6 +753,80 @@ else
 
     saveas(gcf, fullfile(figdir, 'Verification-CLBode-ModelVsHW.png'));
     fprintf('  Saved: docs/figures/Verification-CLBode-ModelVsHW.png\n');
+
+    %% C5. Open-loop PLANT Bode: indirect IV estimate vs analytical model
+    % This is the plant-model check. (sI-A)^-1 B is the OPEN-LOOP plant,
+    % recovered from closed-loop data via G(jw) = H_xc(jw) / H_vm(jw).
+    G_xc_plant_model    = tf(ss(A_sw, B_sw, [1 0 0 0], 0));
+    G_alpha_plant_model = tf(ss(A_sw, B_sw, [0 0 1 0], 0));
+
+    [mag_p_xc,    phase_p_xc]    = bode(G_xc_plant_model,    2*pi*f_use);
+    [mag_p_alpha, phase_p_alpha] = bode(G_alpha_plant_model, 2*pi*f_use);
+    mag_p_xc_db       = 20*log10(squeeze(mag_p_xc));
+    mag_p_alpha_db    = 20*log10(squeeze(mag_p_alpha));
+    phase_p_xc_deg    = squeeze(phase_p_xc);
+    phase_p_alpha_deg = squeeze(phase_p_alpha);
+
+    % NaN-mask the indirect estimate where coherence is too low to trust
+    G_xc_iv_plot    = G_xc_plant(f_mask);
+    G_alpha_iv_plot = G_alpha_plant(f_mask);
+    G_xc_iv_plot(~mask_xc_iv(f_mask))       = NaN;
+    G_alpha_iv_plot(~mask_alpha_iv(f_mask)) = NaN;
+
+    mag_xc_iv_db       = 20*log10(abs(G_xc_iv_plot));
+    mag_alpha_iv_db    = 20*log10(abs(G_alpha_iv_plot));
+    phase_xc_iv_deg    = unwrap(angle(G_xc_iv_plot)) * 180/pi;
+    phase_alpha_iv_deg = unwrap(angle(G_alpha_iv_plot)) * 180/pi;
+
+    figure('Name', 'Verification: OL Plant Bode (Indirect) vs Model', ...
+        'Position', [100 100 1100 700]);
+
+    subplot(2,2,1);
+    semilogx(f_use, mag_xc_iv_db, 'b-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, mag_p_xc_db,  'k--', 'LineWidth', 2);
+    grid on; xlim([f_lo f_hi]);
+    ylabel('|G_{xc}| [dB m/V]');
+    legend('Hardware (IV indirect)', 'Model (sI-A)^{-1}B', 'Location', 'best');
+    title('Plant: X_c / V_m');
+
+    subplot(2,2,2);
+    semilogx(f_use, phase_xc_iv_deg, 'b-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, phase_p_xc_deg,  'k--', 'LineWidth', 2);
+    grid on; xlim([f_lo f_hi]);
+    ylabel('Phase [deg]');
+    title('Phase X_c / V_m');
+
+    subplot(2,2,3);
+    semilogx(f_use, mag_alpha_iv_db, 'r-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, mag_p_alpha_db,  'k--', 'LineWidth', 2);
+    grid on; xlim([f_lo f_hi]);
+    ylabel('|G_{\alpha}| [dB rad/V]'); xlabel('Frequency [Hz]');
+    legend('Hardware (IV indirect)', 'Model (sI-A)^{-1}B', 'Location', 'best');
+    title('Plant: \alpha / V_m');
+
+    subplot(2,2,4);
+    semilogx(f_use, phase_alpha_iv_deg, 'r-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, phase_p_alpha_deg,  'k--', 'LineWidth', 2);
+    grid on; xlim([f_lo f_hi]);
+    ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
+    title('Phase \alpha / V_m');
+
+    % Mag-error metrics (in the coherent band only)
+    err_xc    = mag_xc_iv_db    - mag_p_xc_db;
+    err_alpha = mag_alpha_iv_db - mag_p_alpha_db;
+    plant_err_xc_rms    = rms(err_xc(~isnan(err_xc)));
+    plant_err_alpha_rms = rms(err_alpha(~isnan(err_alpha)));
+
+    fprintf('\n  --- Plant Model vs Indirect Estimate ---\n');
+    fprintf('    RMS mag error (X_c/V_m):    %.2f dB  (coherent band)\n', ...
+        plant_err_xc_rms);
+    fprintf('    RMS mag error (alpha/V_m):  %.2f dB  (coherent band)\n', ...
+        plant_err_alpha_rms);
+
+    sgtitle('Hardware Verification — Open-Loop PLANT Bode (Indirect)', ...
+        'FontWeight', 'bold');
+    saveas(gcf, fullfile(figdir, 'Verification-PlantBode-Indirect.png'));
+    fprintf('  Saved: docs/figures/Verification-PlantBode-Indirect.png\n');
 end
 
 
@@ -1155,13 +1307,18 @@ end
 % Frequency response metrics
 if has_chirp
     results.freq = struct(...
-        'bandwidth_hz',     bw_hz, ...
-        'peak_mag_db',      mag_peak_db, ...
-        'peak_freq_hz',     f_peak, ...
-        'dc_gain_db',       dc_gain_db, ...
-        'coh_xc_mean',      coh_xc_avg, ...
-        'coh_alpha_mean',   coh_alpha_avg, ...
-        'model_hw_rms_db',  mag_err_rms);
+        'bandwidth_hz',           bw_hz, ...
+        'peak_mag_db',            mag_peak_db, ...
+        'peak_freq_hz',           f_peak, ...
+        'dc_gain_db',             dc_gain_db, ...
+        'coh_xc_mean',            coh_xc_avg, ...
+        'coh_alpha_mean',         coh_alpha_avg, ...
+        'coh_vm_mean',            coh_vm_avg, ...
+        'cl_model_hw_rms_db',     mag_err_rms, ...
+        'plant_err_xc_rms_db',    plant_err_xc_rms, ...
+        'plant_err_alpha_rms_db', plant_err_alpha_rms, ...
+        'iv_coverage_xc_pct',     iv_coverage_xc, ...
+        'iv_coverage_alpha_pct',  iv_coverage_alpha);
 end
 
 % Observer metrics
