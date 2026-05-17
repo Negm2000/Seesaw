@@ -108,6 +108,11 @@ fprintf('\nTuning actuator-aware Hinf/Riccati gain...\n')
 controllers(end+1) = actuator_aware_controller('Hinf actuator-aware', act_data, act_info.note);
 controllers(end).data.info = act_info;
 
+fprintf('\nTuning linear ADRC (ESO + state feedback)...\n')
+[adrc_data, adrc_info] = tune_adrc_controller(plant, constraints, tune_scenario);
+controllers(end+1) = adrc_controller('ADRC linear ESO', adrc_data, adrc_info.note);
+controllers(end).data.info = adrc_info;
+
 fprintf('\nPreparing existing super-twisting SMC...\n')
 smc_data = load_or_design_smc(root, plant.A, plant.B, constraints);
 controllers(end+1) = smc_controller('SMC super-twist', smc_data, ...
@@ -246,6 +251,14 @@ end
 function ctrl = fuzzy_controller(name, data, notes)
     ctrl.name = name;
     ctrl.type = 'fuzzy';
+    ctrl.K = [];
+    ctrl.data = data;
+    ctrl.notes = notes;
+end
+
+function ctrl = adrc_controller(name, data, notes)
+    ctrl.name = name;
+    ctrl.type = 'adrc';
     ctrl.K = [];
     ctrl.data = data;
     ctrl.notes = notes;
@@ -717,6 +730,118 @@ function [data_best, info] = tune_actuator_aware_gain(plant, constraints, scenar
     info.candidates = rows;
 end
 
+function [data_best, info] = tune_adrc_controller(plant, constraints, scenario)
+    % Linear ADRC: extended-state observer estimates the 4 plant states plus
+    % a lumped matched input disturbance d (Coulomb friction, deadzone, drive
+    % asymmetry, parameter drift).  The augmented model is
+    %   x_dot   = A x + B (u + d),   d_dot = 0,
+    % and the control law u = -K * x_hat - d_hat cancels the estimate of d.
+    %
+    % Improvements vs. the first cut:
+    %   - Observer hot-starts from the first measurement (no initial x_hat
+    %     error dumped into d_hat).  Done at runtime in controller_voltage.
+    %   - Anti-windup: the saturated u is fed back into the ESO, and d_hat
+    %     is hard-clipped at a multiple of V_sat.
+    %   - Sweep widened: aggressive theta weights, low effort weight r, two
+    %     observer-pole spread shapes, and omega_o up to where Ts*omega_o
+    %     stays inside the forward-Euler stability margin.
+    A = plant.A;
+    B = plant.B;
+    nx = size(A, 1);
+    A_aug = [A, B; zeros(1, nx + 1)];
+    B_aug = [B; 0];
+    C_aug = [eye(nx), zeros(nx, 1)];
+
+    theta_weights = [4000 8000 15000 25000 40000];
+    r_weights     = [0.06 0.12 0.25 0.6 1.2];
+    omega_o_set   = [15 22 32 45 65 90 120];
+    spread_set    = [1.2 1.8 2.6];           % obs_pole = -omega_o * linspace(1, spread, n+1)
+
+    omega_o_set = omega_o_set(omega_o_set * scenario.Ts < 0.6);
+    if isempty(omega_o_set)
+        omega_o_set = 30;
+    end
+
+    best_score = inf;
+    data_best = struct();
+    rows = [];
+    for qth = theta_weights
+        Q = diag([0.5, 0.03, qth, 10]);
+        for r = r_weights
+            try
+                K = lqr(A, B, Q, r);
+            catch
+                continue
+            end
+            if any(~isfinite(K)) || max(real(eig(A - B * K))) >= -0.05
+                continue
+            end
+            for omega_o = omega_o_set
+                for spread = spread_set
+                    obs_poles = -omega_o * linspace(1, spread, nx + 1).';
+                    try
+                        L = place(A_aug', C_aug', obs_poles)';
+                    catch
+                        continue
+                    end
+                    if any(~isfinite(L(:)))
+                        continue
+                    end
+                    data = struct();
+                    data.A_aug = A_aug;
+                    data.B_aug = B_aug;
+                    data.C_aug = C_aug;
+                    data.L = L;
+                    data.K = K;
+                    data.omega_o = omega_o;
+                    data.spread = spread;
+                    data.qth = qth;
+                    data.r = r;
+                    data.d_clip = 3 * constraints.V_sat;
+                    c = adrc_controller('candidate', data, '');
+                    sim = simulate_controller(A, B, c, constraints, scenario);
+                    score = hardware_friendly_score(sim.metrics);
+                    rows = [rows; qth, r, omega_o, spread, score, ...
+                            sim.metrics.theta_p2p_deg, sim.metrics.u_rms, ...
+                            sim.metrics.u_slew_peak, sim.metrics.u_peak, ...
+                            double(sim.metrics.constraint_ok)]; %#ok<AGROW>
+                    if sim.metrics.constraint_ok && score < best_score
+                        best_score = score;
+                        data_best = data;
+                    end
+                end
+            end
+        end
+    end
+
+    if isempty(fieldnames(data_best))
+        warning('ADRC sweep found no constraint-feasible design; falling back to a known-stable design.')
+        Q = diag([0.5, 0.03, 15000, 10]);
+        K = lqr(A, B, Q, 0.25);
+        omega_o = 35;
+        spread = 1.8;
+        obs_poles = -omega_o * linspace(1, spread, nx + 1).';
+        L = place(A_aug', C_aug', obs_poles)';
+        data_best.A_aug = A_aug;
+        data_best.B_aug = B_aug;
+        data_best.C_aug = C_aug;
+        data_best.L = L;
+        data_best.K = K;
+        data_best.omega_o = omega_o;
+        data_best.spread = spread;
+        data_best.qth = 15000;
+        data_best.r = 0.25;
+        data_best.d_clip = 3 * constraints.V_sat;
+        info.note = 'Fallback: ADRC sweep produced no feasible candidate; nominal LQR + ESO used.';
+    else
+        info.note = sprintf(['Linear ADRC with full-state extended observer ' ...
+            '(omega_o=%.0f rad/s, spread=%.1f) and LQR inner gain ' ...
+            '(qth=%g, r=%g); hot-started, anti-windup on d_hat.'], ...
+            data_best.omega_o, data_best.spread, data_best.qth, data_best.r);
+    end
+    info.candidates = rows;
+end
+
 function score = hardware_friendly_score(metrics)
     penalty = 0;
     if ~metrics.constraint_ok, penalty = penalty + 1e4; end
@@ -1050,6 +1175,11 @@ end
 function xk = controller_initial_state(controller)
     if strcmp(controller.type, 'hinf_dynamic') && isfield(controller.data, 'xk0')
         xk = controller.data.xk0;
+    elseif strcmp(controller.type, 'adrc')
+        % Returning [] forces a hot-start from the first measurement inside
+        % controller_voltage; this kills the initial x_hat error that would
+        % otherwise dump straight into d_hat and overshoot.
+        xk = [];
     else
         xk = [];
     end
@@ -1102,6 +1232,26 @@ function [u, smc_v, u_act_state, xk] = controller_voltage(controller, x, smc_v, 
         case 'fuzzy'
             K = fuzzy_gain(controller.data, x);
             u = -K * x;
+        case 'adrc'
+            d = controller.data;
+            y = x;
+            if isempty(xk)
+                % Hot-start: x_hat <- first measurement, d_hat <- 0.
+                xk = [y; 0];
+            end
+            x_hat = xk(1:end-1);
+            d_hat = xk(end);
+            % Inner control: state feedback minus disturbance estimate, then
+            % saturate.  Feeding the saturated u into the ESO is the standard
+            % anti-windup for the lumped-disturbance state.
+            u_cmd = -d.K * x_hat - d_hat;
+            u = clamp(u_cmd, -constraints.V_sat, constraints.V_sat);
+            z_dot = d.A_aug * xk + d.B_aug * u + d.L * (y - d.C_aug * xk);
+            xk = xk + Ts * z_dot;
+            % Bound d_hat so a long saturation episode cannot poison the loop.
+            if abs(xk(end)) > d.d_clip
+                xk(end) = sign(xk(end)) * d.d_clip;
+            end
         case 'smc'
             d = controller.data;
             S = d.S;
