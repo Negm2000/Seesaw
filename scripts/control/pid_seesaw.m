@@ -96,9 +96,9 @@ Kd_out = (-K_pos - Kp_out) / N_out;
 antiwindup_out = Ki_out / Kp_out;
 
 fprintf('\n--- Outer Loop PID Gains ---\n');
-fprintf('Kp_out = %8.4f V/rad\n', Kp_out);
-fprintf('Ki_out = %8.4f V/(rad*s)\n', Ki_out);
-fprintf('Kd_out = %8.4f V*s/rad\n', Kd_out);
+fprintf('Kp_out = %8.4f m/rad\n', Kp_out);
+fprintf('Ki_out = %8.4f m/(rad*s)\n', Ki_out);
+fprintf('Kd_out = %8.4f m*s/rad\n', Kd_out);
 fprintf('N_out  = %8.1f\n', N_out);
 
 %% 4. ROOT LOCUS VISUALIZATION

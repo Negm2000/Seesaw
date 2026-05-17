@@ -213,6 +213,8 @@ fprintf('  [Phase 2] Gt computed (linearised seesaw pos-to-angle).\n');
 M_eff = [M_e,          -M_total*D_T;
          -M_total*D_T,      J_pivot + M_total*D_T^2];
 
+M_inv = inv(M_eff);
+
 State_matrix = [ 0,         -g*M_total,                 -B_total,   0;
                 -g*M_total, g*(M_total*D_T + M_SW*D_C),     0,    -B_SW];
 

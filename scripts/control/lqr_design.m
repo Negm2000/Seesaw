@@ -12,9 +12,9 @@ if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
 seesaw_params; 
 
 % Load the voltage non-linearities
-cart_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
-if exist(cart_file, 'file')
-    load(cart_file, 'ud_pos', 'ud_neg', 'ud_sym');
+nonlinear_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
+if exist(nonlinear_file, 'file')
+    load(nonlinear_file, 'ud_pos', 'ud_neg', 'ud_sym');
 else
     error('Non-linearities not found. Run seesaw nonlinear first.');
 end
@@ -28,9 +28,9 @@ else
 end
 
 % Load the tuned state-space representation
-cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned_seesaw.mat');
-if exist(cart_file, 'file')
-    load(cart_file);
+seesaw_file = fullfile(SEESAW_ROOT, 'data', 'tuned_seesaw.mat');
+if exist(seesaw_file, 'file')
+    load(seesaw_file);
 else
     error('Tuned seesaw model not found. Run seesaw modeling first.');
 end
@@ -88,11 +88,11 @@ else
 end
 %% 4. DETERMINE THE GAINS OF CONTROLLER
 
-K4 = lqr(A_sw, B_sw, Q4, R4);
+[K4, P4, ~] = lqr(A_sw, B_sw, Q4, R4);
 eig_open_4  = eig(A_sw);
 eig_close_4 = eig(A_sw - B_sw*K4);
 
-K5 = lqr(A5,B5,Q5,R5);
+[K5, P5, ~] = lqr(A5,B5,Q5,R5);
 eig_open_5  = eig(A5);
 eig_close_5 = eig(A5 - B5*K5);
 
@@ -107,7 +107,6 @@ end
 
 % derivative filter to get velocities
 dom_pole4 = real(min(eig_close_4));
-dom_pole5 = real(min(eig_close_5));
 
 N4 = 25*abs(dom_pole4);
 
@@ -115,7 +114,7 @@ H4 = N4*s / (s + N4);
 H4d = c2d(H4, Ts, 'tustin');
 
 % initial conditions
-init_cond4 = [0, 0, deg2rad(1), 0];
+init_cond4 = [0, deg2rad(1), 0, 0];
 
 %% 5. PERFORM THE LQR/LQI IN DISCRETE TIME FOR THE HARDWARE
 
@@ -310,9 +309,9 @@ residual_rms = sqrt(mean(residual_check.^2, 2));
 % the first time it crosses 5°.
 
 % Load the voltage non-linearities
-cart_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
-if exist(cart_file, 'file')
-    load(cart_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
+inner_pid_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
+if exist(inner_pid_file, 'file')
+    load(inner_pid_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
 else
     error('Inner-loop PID not found. Run pid_cart first.');
 end
