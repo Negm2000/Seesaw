@@ -13,7 +13,8 @@
 %
 %  Phase 2 (AFTER each experiment) — re-run this script:
 %    - Detects whichever hw_*.mat files are in data/
-%    - Time-domain (A, B), frequency-domain (C: CL + IV plant), observer (F)
+%    - Time-domain (A, B), frequency-domain (C: CL + IV plant),
+%      Hammerstein-Wiener identification from total voltage (C6), observer (F)
 %    - Saves data/verification_results.mat
 %
 %  KEY INSIGHT:  The seesaw does NOT achieve asymptotic stability at
@@ -41,7 +42,7 @@
 %  6. Split into named vars and save to data/ as:
 %       Exp A: hw_free_run.mat      with hw_t,hw_xc,hw_alpha,hw_vm
 %       Exp B: hw_step_response.mat with hw_t,hw_d,hw_xc,hw_alpha,hw_vm
-%       Exp C: hw_chirp_response.mat (same vars as B)
+%       Exp C: hw_prbs_response.mat or hw_chirp_response.mat (same vars as B)
 %       Exp D: hw_obs_free.mat      with hw_t,hw_xc,hw_alpha,hw_vm,
 %              hw_xc_hat,hw_xcdot_hat,hw_alpha_hat,hw_alphadot_hat
 %  7. Re-run this script to get the analysis.
@@ -151,8 +152,21 @@ fprintf('----------------------------------------\n');
 % ---- Scanners for what data files exist ----
 has_free_run  = exist(fullfile(root, 'data', 'hw_free_run.mat'), 'file') == 2;
 has_step      = exist(fullfile(root, 'data', 'hw_step_response.mat'), 'file') == 2;
-has_chirp     = exist(fullfile(root, 'data', 'hw_chirp_response.mat'), 'file') == 2;
+freq_file_prbs  = fullfile(root, 'data', 'hw_prbs_response.mat');
+freq_file_chirp = fullfile(root, 'data', 'hw_chirp_response.mat');
+if exist(freq_file_prbs, 'file') == 2
+    freq_file = freq_file_prbs;
+    freq_label = 'PRBS';
+elseif exist(freq_file_chirp, 'file') == 2
+    freq_file = freq_file_chirp;
+    freq_label = 'chirp/PRBS legacy';
+else
+    freq_file = freq_file_chirp;
+    freq_label = 'missing';
+end
+has_chirp     = exist(freq_file, 'file') == 2;
 has_obs       = exist(fullfile(root, 'data', 'hw_obs_free.mat'), 'file') == 2;
+has_hammerstein_wiener = false;
 
 if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
     fprintf('\nNo hardware data in data/ yet — Phase 1 complete.\n');
@@ -161,8 +175,8 @@ if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
 end
 
 fprintf('\nPhase 2: analysis.  Data available:\n');
-fprintf('  free-run=%d  step=%d  chirp=%d  obs=%d\n', ...
-    has_free_run, has_step, has_chirp, has_obs);
+fprintf('  free-run=%d  step=%d  freq=%d (%s)  obs=%d\n', ...
+    has_free_run, has_step, has_chirp, freq_label, has_obs);
 
 
 %% =====================================================================
@@ -551,13 +565,14 @@ end
 %  =====================================================================
 
 if ~has_chirp
-    fprintf('\n*** SECTION C SKIPPED — hw_chirp_response.mat not found ***\n');
+    fprintf('\n*** SECTION C SKIPPED — hw_prbs_response.mat/hw_chirp_response.mat not found ***\n');
 else
     fprintf('\n========================================\n');
     fprintf(' SECTION C: Disturbance-to-Output Frequency Response\n');
     fprintf('========================================\n');
 
-    d = load(fullfile(root, 'data', 'hw_chirp_response.mat'));
+    fprintf('  Using %s data: %s\n', freq_label, freq_file);
+    d = load(freq_file);
 
     t      = d.hw_t(:);
     d_inj  = d.hw_d(:);
@@ -827,6 +842,145 @@ else
         'FontWeight', 'bold');
     saveas(gcf, fullfile(figdir, 'Verification-PlantBode-Indirect.png'));
     fprintf('  Saved: docs/figures/Verification-PlantBode-Indirect.png\n');
+
+    %% C6. Hammerstein-Wiener identification from total motor voltage
+    % The FRF sections use injected d as the instrumental variable.  For a
+    % nonlinear predictive model, use the total applied voltage V_m as the
+    % input so the identified input nonlinearity can absorb dead-zone,
+    % stiction, and directional gain bias seen by the motor.
+    fprintf('\n========================================\n');
+    fprintf(' SECTION C6: Hammerstein-Wiener Identification\n');
+    fprintf('========================================\n');
+
+    if ~license('test', 'Identification_Toolbox') || exist('nlhw', 'file') ~= 2
+        fprintf('  Skipped: System Identification Toolbox nlhw() is not available.\n');
+    else
+        id_trim_s     = 3.0;
+        id_target_fs  = 100;
+        id_split_frac = 0.70;
+        id_orders     = [4 4 1];  % nb, nf, nk for the voltage-to-output dynamics
+
+        finite_mask = isfinite(t) & isfinite(vm) & isfinite(xc) & isfinite(alpha);
+        id_mask = finite_mask & t >= id_trim_s;
+        id_idx = find(id_mask);
+        id_decim = max(1, round(Fs / id_target_fs));
+        id_idx = id_idx(1:id_decim:end);
+
+        if numel(id_idx) < 500
+            fprintf('  Skipped: only %d usable samples after trim/downsample.\n', numel(id_idx));
+        else
+            t_id = t(id_idx) - t(id_idx(1));
+            u_id = vm(id_idx);
+            y_xc_id = xc(id_idx);
+            y_alpha_id = alpha(id_idx);
+            Ts_id = median(diff(t_id));
+
+            % Demean the closed-loop record so nlhw fits the perturbed
+            % voltage-to-motion dynamics rather than static encoder offsets.
+            u_id = u_id - mean(u_id);
+            y_xc_id = y_xc_id - mean(y_xc_id);
+            y_alpha_id = y_alpha_id - mean(y_alpha_id);
+
+            split_idx = floor(id_split_frac * numel(t_id));
+            est_idx = 1:split_idx;
+            val_idx = split_idx+1:numel(t_id);
+
+            ze_xc = iddata(y_xc_id(est_idx), u_id(est_idx), Ts_id);
+            zv_xc = iddata(y_xc_id(val_idx), u_id(val_idx), Ts_id);
+            ze_alpha = iddata(y_alpha_id(est_idx), u_id(est_idx), Ts_id);
+            zv_alpha = iddata(y_alpha_id(val_idx), u_id(val_idx), Ts_id);
+
+            ze_xc.InputName = {'V_m_total'}; ze_xc.OutputName = {'x_c'};
+            zv_xc.InputName = {'V_m_total'}; zv_xc.OutputName = {'x_c'};
+            ze_alpha.InputName = {'V_m_total'}; ze_alpha.OutputName = {'alpha'};
+            zv_alpha.InputName = {'V_m_total'}; zv_alpha.OutputName = {'alpha'};
+
+            [in_nl_xc, out_nl_xc] = make_hw_nonlinearities();
+            [in_nl_alpha, out_nl_alpha] = make_hw_nonlinearities();
+
+            fprintf('  Input: logged total V_m, not injected d.\n');
+            fprintf('  Fit data: %.1f s to %.1f s | Validation: %.1f s to %.1f s | Fs ~= %.0f Hz\n', ...
+                t_id(est_idx(1)), t_id(est_idx(end)), t_id(val_idx(1)), t_id(val_idx(end)), 1/Ts_id);
+            fprintf('  Orders: nb=%d, nf=%d, nk=%d\n', id_orders(1), id_orders(2), id_orders(3));
+
+            try
+                if exist('nlhwOptions', 'file') == 2
+                    opt = nlhwOptions;
+                    opt.Display = 'off';
+                    hw_xc_model = nlhw(ze_xc, id_orders, in_nl_xc, out_nl_xc, opt);
+                    hw_alpha_model = nlhw(ze_alpha, id_orders, in_nl_alpha, out_nl_alpha, opt);
+                else
+                    hw_xc_model = nlhw(ze_xc, id_orders, in_nl_xc, out_nl_xc);
+                    hw_alpha_model = nlhw(ze_alpha, id_orders, in_nl_alpha, out_nl_alpha);
+                end
+
+                [y_xc_hat, fit_xc] = compare(zv_xc, hw_xc_model);
+                [y_alpha_hat, fit_alpha] = compare(zv_alpha, hw_alpha_model);
+                if iscell(y_xc_hat), y_xc_hat = y_xc_hat{1}; end
+                if iscell(y_alpha_hat), y_alpha_hat = y_alpha_hat{1}; end
+
+                hw_fit_xc_pct = fit_xc(1);
+                hw_fit_alpha_pct = fit_alpha(1);
+                has_hammerstein_wiener = true;
+
+                fprintf('\n  --- Validation Fit ---\n');
+                fprintf('    x_c:    %.1f%%%%\n', hw_fit_xc_pct);
+                fprintf('    alpha:  %.1f%%%%\n', hw_fit_alpha_pct);
+
+                t_val = t_id(val_idx);
+                xc_val = iddata_output_vector(zv_xc);
+                alpha_val = iddata_output_vector(zv_alpha);
+                xc_hat = iddata_output_vector(y_xc_hat);
+                alpha_hat = iddata_output_vector(y_alpha_hat);
+
+                figure('Name', 'Verification: Hammerstein-Wiener ID', ...
+                    'Position', [80 80 1100 750]);
+
+                subplot(3,1,1);
+                plot(t_val, u_id(val_idx), 'Color', [0 0.6 0], 'LineWidth', 0.9);
+                grid on; ylabel('V_m [V]');
+                title(sprintf('Identification Input: Total Motor Voltage (%s record)', freq_label));
+
+                subplot(3,1,2);
+                plot(t_val, xc_val*100, 'b-', 'LineWidth', 1.0); hold on;
+                plot(t_val, xc_hat*100, 'k--', 'LineWidth', 1.1);
+                grid on; ylabel('x_c [cm]');
+                legend('Hardware', 'HW model', 'Location', 'best');
+                title(sprintf('Hammerstein-Wiener Validation: x_c fit = %.1f%%%%', hw_fit_xc_pct));
+
+                subplot(3,1,3);
+                plot(t_val, rad2deg(alpha_val), 'r-', 'LineWidth', 1.0); hold on;
+                plot(t_val, rad2deg(alpha_hat), 'k--', 'LineWidth', 1.1);
+                grid on; ylabel('\alpha [deg]'); xlabel('Time [s]');
+                legend('Hardware', 'HW model', 'Location', 'best');
+                title(sprintf('Hammerstein-Wiener Validation: alpha fit = %.1f%%%%', hw_fit_alpha_pct));
+
+                sgtitle('Hardware Verification — Hammerstein-Wiener Model ID', ...
+                    'FontWeight', 'bold');
+                saveas(gcf, fullfile(figdir, 'Verification-HammersteinWiener.png'));
+                fprintf('  Saved: docs/figures/Verification-HammersteinWiener.png\n');
+
+                hw_id_info = struct( ...
+                    'source_file', freq_file, ...
+                    'source_label', freq_label, ...
+                    'input', 'logged total motor voltage hw_vm', ...
+                    'outputs', {{'x_c', 'alpha'}}, ...
+                    'trim_s', id_trim_s, ...
+                    'sample_time_s', Ts_id, ...
+                    'decimation', id_decim, ...
+                    'orders_nb_nf_nk', id_orders, ...
+                    'split_fraction', id_split_frac, ...
+                    'fit_xc_pct', hw_fit_xc_pct, ...
+                    'fit_alpha_pct', hw_fit_alpha_pct);
+                save(fullfile(root, 'data', 'hammerstein_wiener_hw.mat'), ...
+                    'hw_xc_model', 'hw_alpha_model', 'hw_id_info');
+                fprintf('  Saved: data/hammerstein_wiener_hw.mat\n');
+            catch ME
+                fprintf('  Hammerstein-Wiener identification failed: %s\n', ME.message);
+                fprintf('  Frequency-domain validation results are unaffected.\n');
+            end
+        end
+    end
 end
 
 
@@ -1321,6 +1475,11 @@ if has_chirp
         'iv_coverage_alpha_pct',  iv_coverage_alpha);
 end
 
+% Hammerstein-Wiener identification metrics
+if has_hammerstein_wiener
+    results.hammerstein_wiener = hw_id_info;
+end
+
 % Observer metrics
 if has_obs
     results.observer = struct(...
@@ -1361,6 +1520,19 @@ fprintf('========================================\n\n');
 
 function s = cond_str(cond)
     if cond, s = 'PASS'; else, s = 'FAIL'; end
+end
+
+function [input_nl, output_nl] = make_hw_nonlinearities()
+    % Flexible enough to capture motor dead-zone and asymmetric gain without
+    % forcing a hand-tuned dead-zone width before identification.
+    input_nl = 'pwlinear';
+    output_nl = 'pwlinear';
+end
+
+function y = iddata_output_vector(z)
+    y = z.OutputData;
+    if iscell(y), y = y{1}; end
+    y = y(:);
 end
 
 function s = skewness(x)
