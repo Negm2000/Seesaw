@@ -67,10 +67,10 @@
 %% 0. SETUP — Load parameters and paths
 close all; clc;
 
-root   = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+root   = SEESAW_ROOT;
 valdir = fullfile(root, 'validation');
 if ~exist('SEESAW_ROOT', 'var') || ~strcmp(SEESAW_ROOT, root)
-    run(fullfile(root, 'startup.m'));
+    run(fullfile(root, 'seesawstartup.m'));
 end
 
 figdir = fullfile(valdir, 'docs', 'figures');
