@@ -210,7 +210,7 @@ save(fullfile(root, 'data', 'controller_smc.mat'), ...
 fprintf('Saved data/controller_smc.mat\n')
 fprintf(['Deploy: s = S*x;  sigma = sat(s/phi_bl);  v is an integrator state\n' ...
          '        v_dot = -k2*sigma;\n' ...
-         '        u = sat( -K_eq*x + (-k1*sqrt(|s|)*sigma + v)/(S*B), V_sat )\n'])
+         '        u = sat( -K_eq*x + (-k1*sqrt(max(abs(s), phi_bl))*sigma + v)/(S*B), V_sat )\n'])
 
 %% Helpers --------------------------------------------------------------
 function out = sim_smc(A, B, S, K_eq, t, x0, Vsat, q_xc, q_al, d_fun, ...
@@ -239,7 +239,8 @@ function out = sim_smc(A, B, S, K_eq, t, x0, Vsat, q_xc, q_al, d_fun, ...
             case 'sta_bl'
                 % boundary-layer super-twisting (deployed): sign -> sat
                 sig = sat_fun(s/phi);
-                u_n = (-k1*sqrt(abs(s))*sig + v) / SB;
+                % Use max(abs(s), phi) to preserve local linear damping inside the boundary layer
+                u_n = (-k1*sqrt(max(abs(s), phi))*sig + v) / SB;
                 v   = v - k2*sig*h;              % integrator update
             case 'sta_sign'
                 % bare-sign super-twisting (chattering baseline)
