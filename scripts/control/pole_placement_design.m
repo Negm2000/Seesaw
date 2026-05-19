@@ -271,10 +271,10 @@ p_obs = [
 
 L      = place(A_sw', C_sw', p_obs)';
 
-A_obs = A_sw - L*C_sw;
-B_obs = [B_sw L];
-C_obs = eye(4);
-D_obs = zeros(4, 3);
+Aobs = A_sw - L*C_sw;
+Bobs = [B_sw L];
+Cobs = eye(4);
+Dobs = zeros(4, 3);
 
 A_combined = [A_sw - B_sw*K4,   B_sw*K4;
               zeros(4,4),       A_sw - L*C_sw];
@@ -288,10 +288,10 @@ fprintf('\nSeparation principle mismatch: %.2e\n', err_eig);
 p_obsd = exp(p_obs * Ts);
 Ld = place(Ad', Cd', p_obsd)';
 
-A_obsd = Ad - Ld*Cd;
-B_obsd = [Bd Ld];
-C_obsd = eye(4);
-D_obsd = zeros(4, 3);
+Aobs_d = Ad - Ld*Cd;
+Bobs_d = [Bd Ld];
+Cobs_d = eye(4);
+Dobs_d = zeros(4, 3);
 %% Simulation
 x0     = [0; 0; deg2rad(theta0_deg); 0];
 % In hardware, only positions are measured at startup. Initialize the
@@ -330,7 +330,7 @@ saveas(gcf, fullfile(figdir, 'Observer-IC-Response.png'))
 %% Save
 save(fullfile(SEESAW_ROOT, 'data', 'observer.mat'), ...
      'L', 'p_obs', 'k_obs', 'A_sw', 'B_sw', 'K4', ...
-     'A_obs', 'B_obs', 'C_obs', 'D_obs');
+     'Aobs', 'Bobs', 'Cobs', 'Dobs');
 fprintf('Saved data/observer.mat\n')
 
 %% LIFT-UP

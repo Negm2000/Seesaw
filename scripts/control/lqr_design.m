@@ -161,8 +161,8 @@ eig_close_5d = eig(A5d - B5d*K5d);
 % In practice, Rn is usually estimated from sensor data first,
 % while Qn is then tuned to reflect the confidence in the model.
 Gn = eye(4);
-Qn = diag([1e-6, 7.6154e-7, 1e-3, 1.2185e-3]);
-Rn = diag([2.5e-7, 7.6154e-7]);
+Qn = diag([1e-7, 7.6154e-7, 1e-4, 1.2185e-4]);
+Rn = diag([2.275e-5, 0.00015]);
 
 L = lqe(A_sw, Gn, C_sw, Qn, Rn);
 
