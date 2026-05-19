@@ -14,7 +14,7 @@ set(groot, 'defaultTextInterpreter', 'latex');
 root_dir = fileparts(mfilename('fullpath'));
 
 % Define subdirectories
-subfolders = {'data', 'docs', 'models', 'scripts', 'src'};
+subfolders = {'data', 'docs', 'models', 'scripts', 'src', 'validation'};
 
 % Add all subdirectories to the MATLAB path
 for i = 1:length(subfolders)
