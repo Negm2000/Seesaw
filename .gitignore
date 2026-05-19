@@ -18,8 +18,9 @@ slprj/
 .claude/
 .vscode/
 
-# LaTeX build output (all artifacts go here)
+# Build output and scratch build scripts (all artifacts go here)
 build/
+build_*
 *.bak*
 indent.log
 

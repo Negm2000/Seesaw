@@ -3,8 +3,6 @@
 %  ONE script, two phases.  Run it before AND after each experiment.
 %
 %  Phase 1 (BEFORE testing) — Section 0.5 runs unconditionally:
-%    - Builds models/HardwareValidation_HWTest.slx from the organized
-%      PolePlacement_Liftoff_HW_2024 hardware layout, without catch/latch
 %    - Controller slot is plug-and-play: pole_placement, LQR, PID
 %    - Observer slot is plug-and-play: raw derivatives, Leuenberger, Kalman
 %    - Saves data/hw_test_signals.mat with d_inj presets:
@@ -34,7 +32,7 @@
 %  2. >> d_inj = d_free;                     % pick the experiment
 %  3. Configure and open the generic hardware validation model:
 %       >> load_hardware_validation_config('pole_placement','none')
-%       >> open_system('models/HardwareValidation_HWTest.slx')
+%       >> open_system(fullfile(SEESAW_ROOT, 'models', 'hardware_validation', 'HardwareValidation_HWTest.slx'))
 %     Swap in other designs without changing the model, e.g.:
 %       >> load_hardware_validation_config('lqr','leuenberger')
 %       >> load_hardware_validation_config('pid','kalman')
@@ -56,13 +54,12 @@
 %       Exp C: hw_prbs_response.mat or hw_chirp_response.mat (same vars as B)
 %       Exp D: hw_obs_free.mat      with hw_t,hw_xc,hw_alpha,hw_vm,
 %              hw_xc_hat,hw_xcdot_hat,hw_alpha_hat,hw_alphadot_hat
-%  7. Re-run this script to get the analysis.
+%  8. Re-run this script to get the analysis.
 %
 %  =====================================================================
 %  Requires:  startup.m  (paths + seesaw_params)
 %             data/tuned_params.mat, data/controller_freq.mat
-%  Outputs:   models/HardwareValidation_HWTest.slx (Phase 1)
-%             data/hw_test_signals.mat                       (Phase 1)
+%  Outputs:   data/hw_test_signals.mat                       (Phase 1)
 %             docs/figures/Verification-*.png                (Phase 2)
 %             data/verification_results.mat                  (Phase 2)
 %  =====================================================================
@@ -105,12 +102,11 @@ p_unstable_hint = max(real(ev));
 fprintf('  Plant RHP pole = +%.3f rad/s\n', p_unstable_hint);
 fprintf('\n');
 
-%% 0.5 PRE-TEST SETUP — Build HW test models and prepare excitation signals
+%% 0.5 PRE-TEST SETUP — Prepare excitation signals
 % Runs unconditionally so a fresh checkout is testing-ready after one
 % call to this script.  Cheap and idempotent.
 
-fprintf('Pre-test setup: building HW test models...\n');
-run(fullfile(root, 'scripts', 'control', 'build_hardware_validation_model.m'));
+fprintf('Pre-test setup: preparing hardware excitation signals...\n');
 
 % --- d_inj presets ---
 exp_duration_s = 90;        % B/C run length
@@ -157,7 +153,7 @@ fprintf('   >> load data/hw_test_signals.mat\n');
 fprintf('   >> d_inj = d_free;       %% or d_step / d_prbs / d_chirp\n');
 fprintf('   >> load_hardware_validation_config(''pole_placement'', ''none'')\n');
 fprintf('      %% swap in ''lqr''/''pid'' and ''leuenberger''/''kalman'' as needed\n');
-fprintf('   Open models/HardwareValidation_HWTest.slx\n');
+fprintf('   Open models/hardware_validation/HardwareValidation_HWTest.slx\n');
 fprintf('   QUARC External -> Build -> Connect -> Start.\n');
 fprintf('----------------------------------------\n');
 

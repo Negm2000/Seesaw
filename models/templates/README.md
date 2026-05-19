@@ -1,0 +1,3 @@
+# Templates
+
+Reusable Simulink templates.

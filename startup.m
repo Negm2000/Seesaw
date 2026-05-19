@@ -8,6 +8,32 @@ fprintf('Initializing Seesaw Project...\n');
 % Get the directory where startup.m is located
 root_dir = fileparts(mfilename('fullpath'));
 
+% Initialize the Simulink Agentic Toolkit from the current user's profile
+user_home = getenv('USERPROFILE');
+if isempty(user_home)
+    user_home = getenv('HOME');
+end
+
+simulink_toolkit_dir = fullfile(user_home, '.config', 'opencode', 'servers', 'simulink-agentic-toolkit');
+if exist(simulink_toolkit_dir, 'dir')
+    addpath(simulink_toolkit_dir);
+    if exist('satk_initialize', 'file')
+        try
+            mcp_server_path = fullfile(user_home, '.config', 'opencode', 'bin', 'matlab-mcp-core-server-win64-v0.9.1.exe');
+            if exist(mcp_server_path, 'file')
+                satk_initialize(MCPServerPath=mcp_server_path);
+            else
+                satk_initialize;
+            end
+            fprintf('  Simulink Agentic Toolkit initialized.\n');
+        catch ME
+            fprintf('  Simulink Agentic Toolkit initialization skipped: %s\n', ME.message);
+        end
+    else
+        fprintf('  Simulink Agentic Toolkit path added, but satk_initialize was not found.\n');
+    end
+end
+
 % Define subdirectories
 subfolders = {'data', 'docs', 'models', 'scripts', 'src'};
 
