@@ -28,7 +28,8 @@
 %  HARDWARE PROCEDURE (on the QUARC PC, per experiment)
 %  =====================================================================
 %
-%  1. >> load data/hw_test_signals.mat       % loads d_free/d_step/d_prbs/d_chirp
+%  1. >> load validation/data/hw_test_signals.mat
+%        % loads d_free/d_step/d_prbs/d_chirp/d_stepped_sine
 %  2. >> d_inj = d_free;                     % pick the experiment
 %  3. Configure and open the generic hardware validation model:
 %       >> load_hardware_validation_config('pole_placement','none')
@@ -57,8 +58,8 @@
 %  8. Re-run this script to get the analysis.
 %
 %  =====================================================================
-%  Requires:  startup.m  (paths + seesaw_params)
-%             data/tuned_params.mat, data/controller_freq.mat
+%  Requires:  project startup script (paths + seesaw_params)
+%             final-model data/*.mat files or legacy tuned/controller data
 %  Outputs:   data/hw_test_signals.mat                       (Phase 1)
 %             docs/figures/Verification-*.png                (Phase 2)
 %             data/verification_results.mat                  (Phase 2)
@@ -67,37 +68,35 @@
 %% 0. SETUP — Load parameters and paths
 close all; clc;
 
-root   = SEESAW_ROOT;
+root   = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 valdir = fullfile(root, 'validation');
 if ~exist('SEESAW_ROOT', 'var') || ~strcmp(SEESAW_ROOT, root)
-    run(fullfile(root, 'seesawstartup.m'));
+    run_project_startup(root);
 end
+set(groot, 'defaultAxesTickLabelInterpreter', 'none');
+set(groot, 'defaultLegendInterpreter', 'none');
+set(groot, 'defaultTextInterpreter', 'none');
 
 figdir = fullfile(valdir, 'docs', 'figures');
 if ~exist(figdir, 'dir'), mkdir(figdir); end
 
-tuned  = load(fullfile(root, 'data', 'tuned_params.mat'));
-ctrl   = load(fullfile(root, 'data', 'controller_freq.mat'));
-
-B_eq  = tuned.B_eq;
-K_fb  = ctrl.Kf;
-p_cl  = ctrl.p_final;
+[B_eq, tuned] = load_tuned_parameters(root);
+[K_fb, K_fb_final_order, ctrl, ctrl_source] = load_nominal_controller(root);
+p_cl = get_optional_field(ctrl, 'p_final', []);
 
 fprintf('\n========================================\n');
 fprintf(' Hardware Verification Pipeline\n');
 fprintf('========================================\n');
 fprintf('  B_eq          = %.4f N*s/m\n', B_eq);
 fprintf('  K_fb          = [%.3f, %.3f, %.3f, %.3f]\n', K_fb);
-fprintf('  Dominant pole = %.2f rad/s\n', ctrl.sigma_th);
+fprintf('  Controller    = %s\n', ctrl_source);
+if isfield(ctrl, 'sigma_th')
+    fprintf('  Dominant pole = %.2f rad/s\n', ctrl.sigma_th);
+end
 
-% Rebuild seesaw plant for eigenvalue reference
-M_c_use = M_c + ctrl.M_c_added;
-B_total = B_eq + B_emf;
-M_eff = [M_c_use, -M_c_use*D_T; -M_c_use*D_T, J_pivot + M_c_use*D_T^2];
-M_inv = inv(M_eff);
-G_rhs = [0, -B_total, -g*M_c_use, 0; -g*M_c_use, 0, g*(M_c_use*D_T + M_SW*D_C), -B_SW];
-A_sw_plant = [0 1 0 0; M_inv(1,:)*G_rhs; 0 0 0 1; M_inv(2,:)*G_rhs];
-B_sw_plant = [0; M_inv(1,:)*[alpha_f*eta_m; 0]; 0; M_inv(2,:)*[alpha_f*eta_m; 0]];
+% Rebuild seesaw plant for eigenvalue reference in final-model state order
+% [x_c; alpha; x_c_dot; alpha_dot].
+[A_sw_plant, B_sw_plant] = build_validation_plant(root, B_eq, ctrl);
 ev = eig(A_sw_plant);
 p_unstable_hint = max(real(ev));
 fprintf('  Plant RHP pole = +%.3f rad/s\n', p_unstable_hint);
@@ -120,6 +119,11 @@ step_amp_V     = 0.5;
 step_t_s       = 2.0;
 chirp_f0_Hz    = 0.1;
 chirp_f1_Hz    = validation_f_hi_Hz;
+stepped_sine_f0_Hz = 0.1;
+stepped_sine_f1_Hz = validation_f_hi_Hz;
+stepped_sine_n_freqs = 18;
+stepped_sine_block_s = 5;
+stepped_sine_settle_frac = 0.2;
 
 t_vec = (0:1/exp_fs_Hz:exp_duration_s)';
 N_pts = numel(t_vec);
@@ -145,43 +149,59 @@ d_prbs = [t_vec, prbs_amp_V * prbs_unit];
 d_chirp = [t_vec, prbs_amp_V * chirp(t_vec, chirp_f0_Hz, ...
                                      exp_duration_s, chirp_f1_Hz)];
 
+% C option: stepped/sweep sine, preferred when the hardware dislikes chirps.
+[t_stepped, d_stepped, stepped_sine_freqs_Hz, stepped_sine_info] = ...
+    stepped_sine(stepped_sine_f0_Hz, stepped_sine_f1_Hz, ...
+    stepped_sine_n_freqs, prbs_amp_V, 1/exp_fs_Hz, ...
+    stepped_sine_block_s, stepped_sine_settle_frac);
+d_stepped_sine = [t_stepped, d_stepped];
+
 sig_path = fullfile(valdir, 'data', 'hw_test_signals.mat');
-save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp');
-fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp)\n');
+save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp', ...
+    'd_stepped_sine', 'stepped_sine_freqs_Hz', 'stepped_sine_info');
+fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp, d_stepped_sine)\n');
 fprintf('  Validation band: 0.1-%.2f Hz (0.63-%.1f rad/s)\n', ...
     validation_f_hi_Hz, validation_w_hi_rad_s);
 
 fprintf('\n----------------------------------------\n');
 fprintf(' Pre-test ready. On the QUARC PC:\n');
 fprintf('----------------------------------------\n');
-fprintf('   >> load data/hw_test_signals.mat\n');
-fprintf('   >> d_inj = d_free;       %% or d_step / d_prbs / d_chirp\n');
+fprintf('   >> load validation/data/hw_test_signals.mat\n');
+fprintf('   >> d_inj = d_free;       %% or d_step / d_prbs / d_chirp / d_stepped_sine\n');
 fprintf('   >> load_hardware_validation_config(''pole_placement'', ''none'')\n');
 fprintf('      %% swap in ''lqr''/''pid'' and ''leuenberger''/''kalman'' as needed\n');
-fprintf('   Open models/hardware_validation/HardwareValidation_HWTest.slx\n');
+fprintf('   Open validation/models/HardwareValidation_HWTest.slx\n');
 fprintf('   QUARC External -> Build -> Connect -> Start.\n');
 fprintf('----------------------------------------\n');
 
 % ---- Scanners for what data files exist ----
 has_free_run  = exist(fullfile(valdir, 'data', 'hw_free_run.mat'), 'file') == 2;
 has_step      = exist(fullfile(valdir, 'data', 'hw_step_response.mat'), 'file') == 2;
-freq_file_prbs  = fullfile(valdir, 'data', 'hw_prbs_response.mat');
-freq_file_chirp = fullfile(valdir, 'data', 'hw_chirp_response.mat');
-if exist(freq_file_prbs, 'file') == 2
+freq_file_stepped = fullfile(valdir, 'data', 'hw_stepped_sine_response.mat');
+freq_file_prbs    = fullfile(valdir, 'data', 'hw_prbs_response.mat');
+freq_file_chirp   = fullfile(valdir, 'data', 'hw_chirp_response.mat');
+if exist(freq_file_stepped, 'file') == 2
+    freq_file = freq_file_stepped;
+    freq_label = 'stepped sine';
+    freq_mode = 'stepped_sine';
+elseif exist(freq_file_prbs, 'file') == 2
     freq_file = freq_file_prbs;
     freq_label = 'PRBS';
+    freq_mode = 'welch';
 elseif exist(freq_file_chirp, 'file') == 2
     freq_file = freq_file_chirp;
     freq_label = 'chirp/PRBS legacy';
+    freq_mode = 'welch';
 else
     freq_file = freq_file_chirp;
     freq_label = 'missing';
+    freq_mode = 'welch';
 end
-has_chirp     = exist(freq_file, 'file') == 2;
+has_freq      = exist(freq_file, 'file') == 2;
 has_obs       = exist(fullfile(valdir, 'data', 'hw_obs_free.mat'), 'file') == 2;
 has_hammerstein_wiener = false;
 
-if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
+if ~has_free_run && ~has_step && ~has_freq && ~has_obs
     fprintf('\nNo hardware data in data/ yet — Phase 1 complete.\n');
     fprintf('Run an experiment, save the data, then re-run for Phase 2.\n\n');
     return;
@@ -189,7 +209,7 @@ end
 
 fprintf('\nPhase 2: analysis.  Data available:\n');
 fprintf('  free-run=%d  step=%d  freq=%d (%s)  obs=%d\n', ...
-    has_free_run, has_step, has_chirp, freq_label, has_obs);
+    has_free_run, has_step, has_freq, freq_label, has_obs);
 
 
 %% =====================================================================
@@ -309,7 +329,7 @@ else
     % FFT to identify the dominant rocking frequency and harmonics
     % (harmonics = signature of dead-zone nonlinearity).
     n_fft     = 2^nextpow2(length(alpha_demean));
-    win       = hanning(length(alpha_demean));
+    win       = local_hann(length(alpha_demean));
     alpha_fft = fft(alpha_demean .* win, n_fft);
     alpha_psd = abs(alpha_fft(1:n_fft/2+1)).^2 / (Fs * sum(win.^2));
     f_psd     = Fs * (0:n_fft/2)' / n_fft;
@@ -577,8 +597,8 @@ end
 %      both high; the rest is NaN-masked.
 %  =====================================================================
 
-if ~has_chirp
-    fprintf('\n*** SECTION C SKIPPED — hw_prbs_response.mat/hw_chirp_response.mat not found ***\n');
+if ~has_freq
+    fprintf('\n*** SECTION C SKIPPED — hw_stepped_sine_response.mat/hw_prbs_response.mat/hw_chirp_response.mat not found ***\n');
 else
     fprintf('\n========================================\n');
     fprintf(' SECTION C: Disturbance-to-Output Frequency Response\n');
@@ -597,22 +617,33 @@ else
     Fs = 1/dt;
     fprintf('  Duration: %.1f s  |  Fs: %.0f Hz  |  N: %d\n', t(end), Fs, length(t));
 
-    %% C1. Estimate disturbance-to-output transfer functions (Welch)
-    n_seg = min(4096, 2^nextpow2(length(t)/10));
-    n_seg = max(n_seg, 512);
-    n_overlap = n_seg / 2;
+    %% C1. Estimate disturbance-to-output transfer functions
+    if strcmp(freq_mode, 'stepped_sine')
+        [freqs_Hz, t_block_s, settle_frac] = stepped_sine_metadata(d);
+        fprintf('\n  Stepped-sine parameters: %d frequencies, block=%.1f s, settle=%.0f%%%%\n', ...
+            numel(freqs_Hz), t_block_s, settle_frac*100);
 
-    fprintf('\n  Welch parameters: n_seg=%d, overlap=%d, segments≈%d\n', ...
-        n_seg, n_overlap, floor(length(t)/(n_seg - n_overlap)));
+        [H_xc, C_xc, f_tfe] = stepped_sine_frf(t, d_inj, xc, freqs_Hz, t_block_s, settle_frac);
+        [H_alpha, C_alpha]  = stepped_sine_frf(t, d_inj, alpha, freqs_Hz, t_block_s, settle_frac);
+        [H_vm, C_vm]        = stepped_sine_frf(t, d_inj, vm, freqs_Hz, t_block_s, settle_frac);
+    else
+        n_seg = min(4096, 2^nextpow2(length(t)/10));
+        n_seg = max(n_seg, 512);
+        n_overlap = n_seg / 2;
 
-    % H1 estimator from disturbance d to each output
-    [H_xc, f_tfe]    = tfestimate(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [H_alpha, ~]     = tfestimate(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
-    [H_vm, ~]        = tfestimate(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
+        fprintf('\n  Welch parameters: n_seg=%d, overlap=%d, segments≈%d\n', ...
+            n_seg, n_overlap, floor(length(t)/(n_seg - n_overlap)));
 
-    [C_xc, ~]    = mscohere(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [C_alpha, ~] = mscohere(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
-    [C_vm, ~]    = mscohere(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
+        % H1 estimator from disturbance d to each output
+        welch_window = local_hann(n_seg);
+        [H_xc, f_tfe]    = tfestimate(d_inj, xc,    welch_window, n_overlap, n_seg, Fs);
+        [H_alpha, ~]     = tfestimate(d_inj, alpha, welch_window, n_overlap, n_seg, Fs);
+        [H_vm, ~]        = tfestimate(d_inj, vm,    welch_window, n_overlap, n_seg, Fs);
+
+        [C_xc, ~]    = mscohere(d_inj, xc,    welch_window, n_overlap, n_seg, Fs);
+        [C_alpha, ~] = mscohere(d_inj, alpha, welch_window, n_overlap, n_seg, Fs);
+        [C_vm, ~]    = mscohere(d_inj, vm,    welch_window, n_overlap, n_seg, Fs);
+    end
 
     % --- Indirect / IV plant FRF (closed-loop ID) -----------------------
     % With u = -Kx + d and plant G:    y/d = G*S,   V_m/d = S
@@ -629,12 +660,25 @@ else
 
     f_lo = 0.1;
     f_hi = validation_f_hi_Hz;
-    f_mask = f_tfe >= f_lo & f_tfe <= f_hi;
+    f_mask = f_tfe >= f_lo & f_tfe <= f_hi & isfinite(H_xc) & isfinite(H_vm);
     f_use = f_tfe(f_mask);
+    if isempty(f_use)
+        error('No valid frequency-response points in %.2f-%.2f Hz band.', f_lo, f_hi);
+    end
 
     %% C2. Cart disturbance sensitivity bandwidth
-    mag_xc_db = 20*log10(abs(H_xc(f_mask)));
-    dc_gain_db = mag_xc_db(find(f_use >= f_lo, 1, 'first'));
+    H_xc_use = H_xc(f_mask);
+    H_alpha_use = H_alpha(f_mask);
+    H_vm_use = H_vm(f_mask);
+    C_xc_use = C_xc(f_mask);
+    C_alpha_use = C_alpha(f_mask);
+    C_vm_use = C_vm(f_mask);
+    mag_xc_db = 20*log10(abs(H_xc_use));
+    finite_mag = isfinite(mag_xc_db);
+    if ~any(finite_mag)
+        error('No finite cart frequency-response magnitudes in %.2f-%.2f Hz band.', f_lo, f_hi);
+    end
+    dc_gain_db = mag_xc_db(find(finite_mag, 1, 'first'));
     idx_bw = find(mag_xc_db < dc_gain_db - 3, 1, 'first');
     if isempty(idx_bw)
         bw_hz = f_use(end);
@@ -648,7 +692,7 @@ else
     f_peak = f_use(idx_peak);
 
     % Mean sensitivity magnitude (lower = better rejection)
-    mag_xc_mean = mean(abs(H_xc(f_mask)));
+    mag_xc_mean = mean_omitnan(abs(H_xc_use));
 
     fprintf('\n  --- Disturbance-to-Output Frequency Metrics ---\n');
     fprintf('    Sensitivity BW (-3 dB):  %.2f Hz%s\n', bw_hz, bw_warning);
@@ -658,9 +702,9 @@ else
         mag_xc_mean);
 
     % Coherence quality
-    coh_xc_avg    = mean(C_xc(f_mask));
-    coh_alpha_avg = mean(C_alpha(f_mask));
-    coh_vm_avg    = mean(C_vm(f_mask));
+    coh_xc_avg    = mean_omitnan(C_xc_use);
+    coh_alpha_avg = mean_omitnan(C_alpha_use);
+    coh_vm_avg    = mean_omitnan(C_vm_use);
     fprintf('\n  --- Coherence ---\n');
     fprintf('    Mean coh (x_c):     %.2f  (>0.7 = good CL FRF)\n', coh_xc_avg);
     fprintf('    Mean coh (alpha):   %.2f  (lower = rocking dominates)\n', coh_alpha_avg);
@@ -672,8 +716,10 @@ else
     end
 
     %% C2b. Open-loop plant FRF coverage (indirect estimate)
-    iv_coverage_xc    = sum(mask_xc_iv(f_mask))    / sum(f_mask) * 100;
-    iv_coverage_alpha = sum(mask_alpha_iv(f_mask)) / sum(f_mask) * 100;
+    mask_xc_iv_use = mask_xc_iv(f_mask);
+    mask_alpha_iv_use = mask_alpha_iv(f_mask);
+    iv_coverage_xc    = sum(mask_xc_iv_use)    / numel(f_use) * 100;
+    iv_coverage_alpha = sum(mask_alpha_iv_use) / numel(f_use) * 100;
     fprintf('\n  --- Indirect Plant FRF Coverage (coh > %.1f) ---\n', coh_thresh);
     fprintf('    X_c/V_m reliable:    %.0f%%%% of [%.2f, %.2f] Hz\n', ...
         iv_coverage_xc, f_lo, f_hi);
@@ -689,35 +735,35 @@ else
         'Position', [50 50 1100 800]);
 
     subplot(3,2,1);
-    semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); grid on; hold on;
+    semilogx(f_use, mag_xc_db, 'b-', 'LineWidth', 1.5); grid on; hold on;
     yline(dc_gain_db - 3, 'r--', sprintf('-3 dB → %.1f Hz', bw_hz));
     xlim([f_lo f_hi]);
     ylabel('Magnitude [dB m/V]');
     title(sprintf('G_{xc}(s) = X_c / d  (BW = %.2f Hz)', bw_hz));
 
     subplot(3,2,2);
-    phase_xc_deg = unwrap(angle(H_xc(f_mask))) * 180/pi;
+    phase_xc_deg = unwrap(angle(H_xc_use)) * 180/pi;
     semilogx(f_use, phase_xc_deg, 'b-', 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
     ylabel('Phase [deg]');
     title('Phase G_{xc}(s)');
 
     subplot(3,2,3);
-    mag_vm_db = 20*log10(abs(H_vm(f_mask)));
+    mag_vm_db = 20*log10(abs(H_vm_use));
     semilogx(f_use, mag_vm_db, 'Color', [0 0.6 0], 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
     ylabel('Magnitude [dB V/V]');
     title('Control Response: V_m / d');
 
     subplot(3,2,4);
-    phase_vm_deg = unwrap(angle(H_vm(f_mask))) * 180/pi;
+    phase_vm_deg = unwrap(angle(H_vm_use)) * 180/pi;
     semilogx(f_use, phase_vm_deg, 'Color', [0 0.6 0], 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
     ylabel('Phase [deg]');
     title('Phase V_m / d');
 
     subplot(3,2,5);
-    mag_alpha_db = 20*log10(abs(H_alpha(f_mask)));
+    mag_alpha_db = 20*log10(abs(H_alpha_use));
     semilogx(f_use, mag_alpha_db, 'r-', 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
     ylabel('Magnitude [dB rad/V]');
@@ -725,8 +771,8 @@ else
     title('Angle Sensitivity: α / d');
 
     subplot(3,2,6);
-    semilogx(f_use, C_xc(f_mask), 'b-', 'LineWidth', 1.2); hold on;
-    semilogx(f_use, C_alpha(f_mask), 'r-', 'LineWidth', 1.2); grid on;
+    semilogx(f_use, C_xc_use, 'b-', 'LineWidth', 1.2); hold on;
+    semilogx(f_use, C_alpha_use, 'r-', 'LineWidth', 1.2); grid on;
     yline(0.7, 'k--');
     xlim([f_lo f_hi]); ylim([0 1]);
     ylabel('Coherence');
@@ -740,18 +786,10 @@ else
     fprintf('  Saved: docs/figures/Verification-CLBode.png\n');
 
     %% C4. Overlay with analytical prediction
-    M_c_added = ctrl.M_c_added;
-    if ~exist('M_c_added', 'var'), M_c_added = 0; end
-    M_c_use = M_c + M_c_added;
-    B_total = B_eq + B_emf;
-    M_eff = [M_c_use, -M_c_use*D_T; -M_c_use*D_T, J_pivot + M_c_use*D_T^2];
-    M_inv = inv(M_eff);
-    G_rhs = [0, -B_total, -g*M_c_use, 0; -g*M_c_use, 0, g*(M_c_use*D_T + M_SW*D_C), -B_SW];
-    A_sw = [0 1 0 0; M_inv(1,:)*G_rhs; 0 0 0 1; M_inv(2,:)*G_rhs];
-    B_sw = [0; M_inv(1,:)*[alpha_f*eta_m; 0]; 0; M_inv(2,:)*[alpha_f*eta_m; 0]];
+    [A_sw, B_sw] = build_validation_plant(root, B_eq, ctrl);
 
     % Closed-loop with disturbance input: x_dot = (A - B*K)*x + B*d
-    A_cl = A_sw - B_sw * K_fb;
+    A_cl = A_sw - B_sw * K_fb_final_order;
     C_xc_out = [1 0 0 0];
 
     G_xc_model = tf(ss(A_cl, B_sw, C_xc_out, 0));
@@ -763,7 +801,7 @@ else
     figure('Name', 'Verification: Dist. Bode Model vs Hardware', ...
         'Position', [100 100 1000 600]);
     subplot(2,1,1);
-    semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, mag_xc_db, 'b-', 'LineWidth', 1.5); hold on;
     semilogx(f_use, mag_model_db, 'k--', 'LineWidth', 2);
     grid on; xlim([f_lo f_hi]);
     ylabel('Magnitude [dB m/V]');
@@ -776,7 +814,7 @@ else
     grid on; xlim([f_lo f_hi]);
     ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
 
-    mag_err_rms = rms(mag_xc_db(f_mask) - mag_model_db(:));
+    mag_err_rms = rms_or_nan(mag_xc_db(:) - mag_model_db(:));
     fprintf('\n  --- Model-Hardware Agreement ---\n');
     fprintf('    RMS magnitude error:  %.2f dB  (in validation band)\n', mag_err_rms);
 
@@ -787,7 +825,7 @@ else
     % This is the plant-model check. (sI-A)^-1 B is the OPEN-LOOP plant,
     % recovered from closed-loop data via G(jw) = H_xc(jw) / H_vm(jw).
     G_xc_plant_model    = tf(ss(A_sw, B_sw, [1 0 0 0], 0));
-    G_alpha_plant_model = tf(ss(A_sw, B_sw, [0 0 1 0], 0));
+    G_alpha_plant_model = tf(ss(A_sw, B_sw, [0 1 0 0], 0));
 
     [mag_p_xc,    phase_p_xc]    = bode(G_xc_plant_model,    2*pi*f_use);
     [mag_p_alpha, phase_p_alpha] = bode(G_alpha_plant_model, 2*pi*f_use);
@@ -799,8 +837,8 @@ else
     % NaN-mask the indirect estimate where coherence is too low to trust
     G_xc_iv_plot    = G_xc_plant(f_mask);
     G_alpha_iv_plot = G_alpha_plant(f_mask);
-    G_xc_iv_plot(~mask_xc_iv(f_mask))       = NaN;
-    G_alpha_iv_plot(~mask_alpha_iv(f_mask)) = NaN;
+    G_xc_iv_plot(~mask_xc_iv_use)       = NaN;
+    G_alpha_iv_plot(~mask_alpha_iv_use) = NaN;
 
     mag_xc_iv_db       = 20*log10(abs(G_xc_iv_plot));
     mag_alpha_iv_db    = 20*log10(abs(G_alpha_iv_plot));
@@ -843,8 +881,8 @@ else
     % Mag-error metrics (in the coherent band only)
     err_xc    = mag_xc_iv_db    - mag_p_xc_db;
     err_alpha = mag_alpha_iv_db - mag_p_alpha_db;
-    plant_err_xc_rms    = rms(err_xc(~isnan(err_xc)));
-    plant_err_alpha_rms = rms(err_alpha(~isnan(err_alpha)));
+    plant_err_xc_rms    = rms_or_nan(err_xc(~isnan(err_xc)));
+    plant_err_alpha_rms = rms_or_nan(err_alpha(~isnan(err_alpha)));
 
     fprintf('\n  --- Plant Model vs Indirect Estimate ---\n');
     fprintf('    RMS mag error (X_c/V_m):    %.2f dB  (coherent band)\n', ...
@@ -1087,9 +1125,9 @@ if has_free_run
 end
 
 % --- Tile 7: Disturbance-to-output Bode magnitude ---
-if has_chirp
+if has_freq
     subplot(3,3,7);
-    semilogx(f_use, mag_xc_db(f_mask), 'b-', 'LineWidth', 1.5); grid on; hold on;
+    semilogx(f_use, mag_xc_db, 'b-', 'LineWidth', 1.5); grid on; hold on;
     yline(dc_gain_db - 3, 'r--');
     xlim([f_lo f_hi]);
     ylabel('|G_{xc}| [dB m/V]');
@@ -1098,10 +1136,10 @@ if has_chirp
 end
 
 % --- Tile 8: Coherence ---
-if has_chirp
+if has_freq
     subplot(3,3,8);
-    semilogx(f_use, C_xc(f_mask), 'b-', 'LineWidth', 1.2); hold on;
-    semilogx(f_use, C_alpha(f_mask), 'r-', 'LineWidth', 1.2); grid on;
+    semilogx(f_use, C_xc_use, 'b-', 'LineWidth', 1.2); hold on;
+    semilogx(f_use, C_alpha_use, 'r-', 'LineWidth', 1.2); grid on;
     xlim([f_lo f_hi]); ylim([0 1]);
     ylabel('Coherence'); xlabel('Freq [Hz]');
     legend('x_c', '\alpha', 'Location', 'best');
@@ -1113,7 +1151,7 @@ subplot(3,3,9); axis off;
 summary_lines = {
     '═══ VERIFICATION SUMMARY ═══';
     '';
-    sprintf('Controller:  σ=%.1f, ζ=%.1f', ctrl.sigma_th, ctrl.zeta_th);
+    sprintf('Controller:  %s', controller_summary(ctrl));
     '';
     'FREE-RUN:';
     };
@@ -1146,7 +1184,7 @@ end
 
 li = li + 1; summary_lines{li} = '';
 li = li + 1; summary_lines{li} = 'FREQUENCY (dist-to-output):';
-if has_chirp
+if has_freq
     li = li + 1; summary_lines{li} = sprintf('  Sensitivity BW: %.2f Hz', bw_hz);
     li = li + 1; summary_lines{li} = sprintf('  Model-HW err:   %.2f dB', mag_err_rms);
 else
@@ -1161,7 +1199,7 @@ if has_free_run
 else
     li = li + 1; summary_lines{li} = '  (no free-run data)';
 end
-if has_chirp
+if has_freq
     li = li + 1; summary_lines{li} = sprintf('  BW > 1 Hz?     %s', cond_str(bw_hz > 1));
 else
     li = li + 1; summary_lines{li} = '  BW > 1 Hz?     N/A';
@@ -1285,7 +1323,7 @@ else
 
     % Observer velocity PSD
     win_len = min(length(t), 4096);
-    win = hanning(win_len);
+    win = local_hann(win_len);
     n_seg_psd = max(win_len/2, 256);
     [P_xcd_obs, f_psd] = pwelch(xcd_hat, win, n_seg_psd, n_fft, Fs);
     [P_ald_obs, ~]     = pwelch(ald_hat, win, n_seg_psd, n_fft, Fs);
@@ -1473,7 +1511,7 @@ if has_step
 end
 
 % Frequency response metrics
-if has_chirp
+if has_freq
     results.freq = struct(...
         'bandwidth_hz',           bw_hz, ...
         'peak_mag_db',            mag_peak_db, ...
@@ -1516,8 +1554,9 @@ end
 
 % Controller info
 results.controller = struct(...
-    'sigma_th', ctrl.sigma_th, ...
-    'zeta_th',  ctrl.zeta_th, ...
+    'source', ctrl_source, ...
+    'sigma_th', get_optional_field(ctrl, 'sigma_th', NaN), ...
+    'zeta_th',  get_optional_field(ctrl, 'zeta_th', NaN), ...
     'K_fb',     K_fb);
 
 save(fullfile(valdir, 'data', 'verification_results.mat'), 'results');
@@ -1534,6 +1573,200 @@ fprintf('========================================\n\n');
 
 function s = cond_str(cond)
     if cond, s = 'PASS'; else, s = 'FAIL'; end
+end
+
+function run_project_startup(root)
+startup_candidates = {'seesawstartup.m', 'seesaw_startup.m', 'startup.m'};
+for k = 1:numel(startup_candidates)
+    startup_file = fullfile(root, startup_candidates{k});
+    if exist(startup_file, 'file') == 2
+        run(startup_file);
+        return;
+    end
+end
+error('No project startup script found under %s.', root);
+end
+
+function [B_eq, tuned] = load_tuned_parameters(root)
+tuned = struct();
+cart_file = fullfile(root, 'data', 'tuned_cart.mat');
+seesaw_file = fullfile(root, 'data', 'tuned_seesaw.mat');
+legacy_file = fullfile(root, 'data', 'tuned_params.mat');
+
+if exist(cart_file, 'file') == 2
+    tuned.cart = load(cart_file);
+end
+if exist(seesaw_file, 'file') == 2
+    tuned.seesaw = load(seesaw_file);
+end
+
+if isfield(tuned, 'cart') && isfield(tuned.cart, 'B_eq')
+    B_eq = tuned.cart.B_eq;
+elseif isfield(tuned, 'seesaw') && isfield(tuned.seesaw, 'B_eq')
+    B_eq = tuned.seesaw.B_eq;
+elseif exist(legacy_file, 'file') == 2
+    tuned.legacy = load(legacy_file);
+    B_eq = tuned.legacy.B_eq;
+else
+    error('No tuned parameters found. Expected data/tuned_cart.mat, data/tuned_seesaw.mat, or data/tuned_params.mat.');
+end
+end
+
+function [K_validation, K_final, ctrl, source_file] = load_nominal_controller(root)
+candidates = { ...
+    fullfile(root, 'data', 'pole_placement.mat'), {'K4d', 'K4', 'Kf'}, 'final'; ...
+    fullfile(root, 'data', 'controller_lqr.mat'), {'K4d', 'K4', 'K_lqr'}, 'final'; ...
+    fullfile(root, 'data', 'controller_freq.mat'), {'Kf'}, 'validation'};
+
+for i = 1:size(candidates, 1)
+    source_file = candidates{i, 1};
+    if exist(source_file, 'file') ~= 2
+        continue;
+    end
+    ctrl = load(source_file);
+    fields = candidates{i, 2};
+    for j = 1:numel(fields)
+        if isfield(ctrl, fields{j})
+            K = ctrl.(fields{j});
+            if strcmp(candidates{i, 3}, 'final')
+                K_final = K(:).';
+                K_validation = final_gain_to_validation_order(K_final);
+            else
+                K_validation = K(:).';
+                K_final = validation_gain_to_final_order(K_validation);
+            end
+            return;
+        end
+    end
+end
+error('No nominal pole-placement/LQR controller data found.');
+end
+
+function [A_sw_final, B_sw_final] = build_validation_plant(root, B_eq, ctrl)
+data_file = fullfile(root, 'data', 'tuned_seesaw.mat');
+if exist(data_file, 'file') == 2
+    s = load(data_file);
+    if isfield(s, 'A_sw') && isfield(s, 'B_sw')
+        A_sw_final = s.A_sw;
+        B_sw_final = s.B_sw;
+        return;
+    end
+end
+
+if evalin('base', 'exist(''A_sw'', ''var'')') && evalin('base', 'exist(''B_sw'', ''var'')')
+    A_sw_final = evalin('base', 'A_sw');
+    B_sw_final = evalin('base', 'B_sw');
+    return;
+end
+
+M_c_added = get_optional_field(ctrl, 'M_c_added', 0);
+M_c_use = evalin('base', 'M_c') + M_c_added;
+M_e_use = get_base_or('M_e', M_c_use);
+M_total_use = get_base_or('M_total', M_c_use);
+D_T_use = evalin('base', 'D_T');
+J_pivot_use = evalin('base', 'J_pivot');
+B_total_use = B_eq + evalin('base', 'B_emf');
+g_use = evalin('base', 'g');
+M_SW_use = evalin('base', 'M_SW');
+D_C_use = evalin('base', 'D_C');
+B_SW_use = evalin('base', 'B_SW');
+alpha_f_use = evalin('base', 'alpha_f');
+eta_m_use = evalin('base', 'eta_m');
+
+M_eff = [M_e_use, -M_total_use*D_T_use; ...
+         -M_total_use*D_T_use, J_pivot_use + M_total_use*D_T_use^2];
+state_matrix = [0, -g_use*M_total_use, -B_total_use, 0; ...
+                -g_use*M_total_use, g_use*(M_total_use*D_T_use + M_SW_use*D_C_use), 0, -B_SW_use];
+input_matrix = [alpha_f_use*eta_m_use; 0];
+state_matrix = M_eff \ state_matrix;
+input_matrix = M_eff \ input_matrix;
+A_sw_final = [zeros(2), eye(2); state_matrix];
+B_sw_final = [zeros(2, 1); input_matrix];
+end
+
+function value = get_base_or(name, fallback)
+if evalin('base', sprintf('exist(''%s'', ''var'')', name))
+    value = evalin('base', name);
+else
+    value = fallback;
+end
+end
+
+function K = final_gain_to_validation_order(K)
+if numel(K) >= 4
+    K = [K([1 3 2 4]), K(5:end)];
+end
+end
+
+function K = validation_gain_to_final_order(K)
+if numel(K) >= 4
+    K = [K([1 3 2 4]), K(5:end)];
+end
+end
+
+function value = get_optional_field(s, name, default_value)
+if isstruct(s) && isfield(s, name)
+    value = s.(name);
+else
+    value = default_value;
+end
+end
+
+function s = controller_summary(ctrl)
+if isfield(ctrl, 'sigma_th') && isfield(ctrl, 'zeta_th')
+    s = sprintf('sigma=%.1f, zeta=%.1f', ctrl.sigma_th, ctrl.zeta_th);
+elseif isfield(ctrl, 'K4d')
+    s = 'discrete LQR/pole-placement data';
+elseif isfield(ctrl, 'K4')
+    s = 'continuous LQR/pole-placement data';
+else
+    s = 'loaded controller data';
+end
+end
+
+function [freqs_Hz, t_block_s, settle_frac] = stepped_sine_metadata(d)
+if isfield(d, 'hw_stepped_sine_freqs_Hz') && ~isempty(d.hw_stepped_sine_freqs_Hz)
+    freqs_Hz = d.hw_stepped_sine_freqs_Hz(:);
+elseif isfield(d, 'stepped_sine_freqs_Hz') && ~isempty(d.stepped_sine_freqs_Hz)
+    freqs_Hz = d.stepped_sine_freqs_Hz(:);
+else
+    error('Stepped-sine response is missing hw_stepped_sine_freqs_Hz metadata. Re-import with import_hardware_validation_log.');
+end
+
+info = struct();
+if isfield(d, 'hw_stepped_sine_info')
+    info = d.hw_stepped_sine_info;
+elseif isfield(d, 'stepped_sine_info')
+    info = d.stepped_sine_info;
+end
+t_block_s = get_optional_field(info, 't_block', 5);
+settle_frac = get_optional_field(info, 'settle_frac', 0.2);
+end
+
+function y = rms_or_nan(x)
+if isempty(x)
+    y = NaN;
+else
+    y = rms(x);
+end
+end
+
+function y = mean_omitnan(x)
+x = x(isfinite(x));
+if isempty(x)
+    y = NaN;
+else
+    y = mean(x);
+end
+end
+
+function w = local_hann(n)
+if n <= 1
+    w = ones(n, 1);
+else
+    k = (0:n-1)';
+    w = 0.5 - 0.5*cos(2*pi*k/(n-1));
+end
 end
 
 function [input_nl, output_nl] = make_hw_nonlinearities()

@@ -3,6 +3,7 @@ function import_hardware_validation_log(log_file, experiment_name)
 %
 % The model logs these To Host File columns:
 %   [time | x_c | alpha | V_m | d | x_fb(1:4) | x_obs(1:4)]
+% where x_fb/x_obs use [x_c; x_c_dot; alpha; alpha_dot].
 %
 % This helper saves the named variables consumed by hardware_verification.m.
 %
@@ -10,6 +11,7 @@ function import_hardware_validation_log(log_file, experiment_name)
 %   import_hardware_validation_log('data/hw_raw_free.mat', 'free')
 %   import_hardware_validation_log('data/hw_raw_step.mat', 'step')
 %   import_hardware_validation_log('data/hw_raw_prbs.mat', 'prbs')
+%   import_hardware_validation_log('data/hw_raw_stepped_sine.mat', 'stepped_sine')
 %   import_hardware_validation_log('data/hw_raw_obs.mat', 'obs')
 
 if nargin < 2
@@ -19,7 +21,8 @@ end
 root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 valdir = fullfile(root, 'validation');
 experiment_name = validatestring(lower(experiment_name), ...
-    {'free', 'step', 'prbs', 'chirp', 'obs'}, mfilename, 'experiment_name');
+    {'free', 'step', 'prbs', 'chirp', 'stepped_sine', 'sweep_sin', ...
+     'sweep', 'sine', 'obs'}, mfilename, 'experiment_name');
 
 raw = load(log_file);
 Y = extract_log_matrix(raw);
@@ -64,6 +67,12 @@ switch experiment_name
         out_file = fullfile(valdir, 'data', 'hw_chirp_response.mat');
         save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm');
 
+    case {'stepped_sine', 'sweep_sin', 'sweep', 'sine'}
+        out_file = fullfile(valdir, 'data', 'hw_stepped_sine_response.mat');
+        [hw_stepped_sine_freqs_Hz, hw_stepped_sine_info] = load_stepped_sine_metadata(valdir);
+        save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm', ...
+            'hw_stepped_sine_freqs_Hz', 'hw_stepped_sine_info');
+
     case 'obs'
         out_file = fullfile(valdir, 'data', 'hw_obs_free.mat');
         save(out_file, 'hw_t', 'hw_xc', 'hw_alpha', 'hw_vm', ...
@@ -98,4 +107,20 @@ for k = 1:numel(fields)
 end
 
 error('Could not find a numeric log matrix in the file.');
+end
+
+function [f_vec, info] = load_stepped_sine_metadata(valdir)
+f_vec = [];
+info = struct();
+sig_file = fullfile(valdir, 'data', 'hw_test_signals.mat');
+if exist(sig_file, 'file') ~= 2
+    return;
+end
+s = load(sig_file);
+if isfield(s, 'stepped_sine_freqs_Hz')
+    f_vec = s.stepped_sine_freqs_Hz;
+end
+if isfield(s, 'stepped_sine_info')
+    info = s.stepped_sine_info;
+end
 end
