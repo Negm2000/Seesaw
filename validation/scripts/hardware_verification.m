@@ -32,7 +32,7 @@
 %  2. >> d_inj = d_free;                     % pick the experiment
 %  3. Configure and open the generic hardware validation model:
 %       >> load_hardware_validation_config('pole_placement','none')
-%       >> open_system(fullfile(SEESAW_ROOT, 'models', 'hardware_validation', 'HardwareValidation_HWTest.slx'))
+%       >> open_system(fullfile(SEESAW_ROOT, 'validation', 'models', 'HardwareValidation_HWTest.slx'))
 %     Swap in other designs without changing the model, e.g.:
 %       >> load_hardware_validation_config('lqr','leuenberger')
 %       >> load_hardware_validation_config('pid','kalman')
@@ -68,11 +68,12 @@
 close all; clc;
 
 root   = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+valdir = fullfile(root, 'validation');
 if ~exist('SEESAW_ROOT', 'var') || ~strcmp(SEESAW_ROOT, root)
     run(fullfile(root, 'startup.m'));
 end
 
-figdir = fullfile(root, 'docs', 'figures');
+figdir = fullfile(valdir, 'docs', 'figures');
 if ~exist(figdir, 'dir'), mkdir(figdir); end
 
 tuned  = load(fullfile(root, 'data', 'tuned_params.mat'));
@@ -144,7 +145,7 @@ d_prbs = [t_vec, prbs_amp_V * prbs_unit];
 d_chirp = [t_vec, prbs_amp_V * chirp(t_vec, chirp_f0_Hz, ...
                                      exp_duration_s, chirp_f1_Hz)];
 
-sig_path = fullfile(root, 'data', 'hw_test_signals.mat');
+sig_path = fullfile(valdir, 'data', 'hw_test_signals.mat');
 save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp');
 fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp)\n');
 fprintf('  Validation band: 0.1-%.2f Hz (0.63-%.1f rad/s)\n', ...
@@ -162,10 +163,10 @@ fprintf('   QUARC External -> Build -> Connect -> Start.\n');
 fprintf('----------------------------------------\n');
 
 % ---- Scanners for what data files exist ----
-has_free_run  = exist(fullfile(root, 'data', 'hw_free_run.mat'), 'file') == 2;
-has_step      = exist(fullfile(root, 'data', 'hw_step_response.mat'), 'file') == 2;
-freq_file_prbs  = fullfile(root, 'data', 'hw_prbs_response.mat');
-freq_file_chirp = fullfile(root, 'data', 'hw_chirp_response.mat');
+has_free_run  = exist(fullfile(valdir, 'data', 'hw_free_run.mat'), 'file') == 2;
+has_step      = exist(fullfile(valdir, 'data', 'hw_step_response.mat'), 'file') == 2;
+freq_file_prbs  = fullfile(valdir, 'data', 'hw_prbs_response.mat');
+freq_file_chirp = fullfile(valdir, 'data', 'hw_chirp_response.mat');
 if exist(freq_file_prbs, 'file') == 2
     freq_file = freq_file_prbs;
     freq_label = 'PRBS';
@@ -177,7 +178,7 @@ else
     freq_label = 'missing';
 end
 has_chirp     = exist(freq_file, 'file') == 2;
-has_obs       = exist(fullfile(root, 'data', 'hw_obs_free.mat'), 'file') == 2;
+has_obs       = exist(fullfile(valdir, 'data', 'hw_obs_free.mat'), 'file') == 2;
 has_hammerstein_wiener = false;
 
 if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
@@ -211,7 +212,7 @@ else
     fprintf(' SECTION A: Free-Run Bounded Oscillation\n');
     fprintf('========================================\n');
 
-    d = load(fullfile(root, 'data', 'hw_free_run.mat'));
+    d = load(fullfile(valdir, 'data', 'hw_free_run.mat'));
 
     % ---- Convert to time-series friendly arrays ----
     t     = d.hw_t(:);
@@ -414,7 +415,7 @@ else
     fprintf(' SECTION B: Disturbance Rejection Step\n');
     fprintf('========================================\n');
 
-    d = load(fullfile(root, 'data', 'hw_step_response.mat'));
+    d = load(fullfile(valdir, 'data', 'hw_step_response.mat'));
 
     t      = d.hw_t(:);
     d_inj  = d.hw_d(:);
@@ -985,7 +986,7 @@ else
                     'split_fraction', id_split_frac, ...
                     'fit_xc_pct', hw_fit_xc_pct, ...
                     'fit_alpha_pct', hw_fit_alpha_pct);
-                save(fullfile(root, 'data', 'hammerstein_wiener_hw.mat'), ...
+                save(fullfile(valdir, 'data', 'hammerstein_wiener_hw.mat'), ...
                     'hw_xc_model', 'hw_alpha_model', 'hw_id_info');
                 fprintf('  Saved: data/hammerstein_wiener_hw.mat\n');
             catch ME
@@ -1010,7 +1011,7 @@ figure('Name', 'Verification: Composite Dashboard', ...
 % --- Tile 1: Angle time trace + bound markers ---
 if has_free_run
     subplot(3,3,1);
-    d = load(fullfile(root, 'data', 'hw_free_run.mat'));
+    d = load(fullfile(valdir, 'data', 'hw_free_run.mat'));
     t_t = d.hw_t(:); t_t = t_t(t_t > 3) - 3;
     a_t = rad2deg(d.hw_alpha(d.hw_t > 3));
     plot(t_t, a_t, 'r-', 'LineWidth', 0.8); grid on; hold on;
@@ -1048,7 +1049,7 @@ end
 % --- Tile 4: Disturbance rejection step ---
 if has_step
     subplot(3,3,4);
-    d = load(fullfile(root, 'data', 'hw_step_response.mat'));
+    d = load(fullfile(valdir, 'data', 'hw_step_response.mat'));
     t_s = d.hw_t(:); xc_s = d.hw_xc(:)*100; d_s = d.hw_d(:);
     [~, si] = max(abs(diff(d_s)));
     t_s = t_s - d.hw_t(si);
@@ -1067,7 +1068,7 @@ end
 % --- Tile 5: Voltage histogram ---
 if has_free_run
     subplot(3,3,5);
-    d = load(fullfile(root, 'data', 'hw_free_run.mat'));
+    d = load(fullfile(valdir, 'data', 'hw_free_run.mat'));
     vm_t = d.hw_vm(d.hw_t > 3);
     histogram(vm_t, 'BinWidth', 0.2, 'FaceColor', [0 0.6 0], 'EdgeColor', 'none');
     grid on; xline( V_sat, 'r--'); xline(-V_sat, 'r--');
@@ -1198,7 +1199,7 @@ else
     fprintf(' SECTION F: Observer Verification\n');
     fprintf('========================================\n');
 
-    obs = load(fullfile(root, 'data', 'hw_obs_free.mat'));
+    obs = load(fullfile(valdir, 'data', 'hw_obs_free.mat'));
 
     t       = obs.hw_t(:);
     xc      = obs.hw_xc(:);
@@ -1519,7 +1520,7 @@ results.controller = struct(...
     'zeta_th',  ctrl.zeta_th, ...
     'K_fb',     K_fb);
 
-save(fullfile(root, 'data', 'verification_results.mat'), 'results');
+save(fullfile(valdir, 'data', 'verification_results.mat'), 'results');
 fprintf('  Saved: data/verification_results.mat\n');
 
 fprintf('\n========================================\n');

@@ -35,7 +35,7 @@ if exist(simulink_toolkit_dir, 'dir')
 end
 
 % Define subdirectories
-subfolders = {'data', 'docs', 'models', 'scripts', 'src'};
+subfolders = {'data', 'docs', 'models', 'scripts', 'src', 'validation'};
 
 % Add all subdirectories to the MATLAB path
 for i = 1:length(subfolders)

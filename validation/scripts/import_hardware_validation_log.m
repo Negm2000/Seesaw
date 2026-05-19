@@ -17,6 +17,7 @@ if nargin < 2
 end
 
 root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+valdir = fullfile(root, 'validation');
 experiment_name = validatestring(lower(experiment_name), ...
     {'free', 'step', 'prbs', 'chirp', 'obs'}, mfilename, 'experiment_name');
 
@@ -48,23 +49,23 @@ hw_alphadot_hat = Y(:, 13);
 
 switch experiment_name
     case 'free'
-        out_file = fullfile(root, 'data', 'hw_free_run.mat');
+        out_file = fullfile(valdir, 'data', 'hw_free_run.mat');
         save(out_file, 'hw_t', 'hw_xc', 'hw_alpha', 'hw_vm');
 
     case 'step'
-        out_file = fullfile(root, 'data', 'hw_step_response.mat');
+        out_file = fullfile(valdir, 'data', 'hw_step_response.mat');
         save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm');
 
     case 'prbs'
-        out_file = fullfile(root, 'data', 'hw_prbs_response.mat');
+        out_file = fullfile(valdir, 'data', 'hw_prbs_response.mat');
         save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm');
 
     case 'chirp'
-        out_file = fullfile(root, 'data', 'hw_chirp_response.mat');
+        out_file = fullfile(valdir, 'data', 'hw_chirp_response.mat');
         save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm');
 
     case 'obs'
-        out_file = fullfile(root, 'data', 'hw_obs_free.mat');
+        out_file = fullfile(valdir, 'data', 'hw_obs_free.mat');
         save(out_file, 'hw_t', 'hw_xc', 'hw_alpha', 'hw_vm', ...
             'hw_xc_hat', 'hw_xcdot_hat', 'hw_alpha_hat', 'hw_alphadot_hat', ...
             'hw_xc_fb', 'hw_xcdot_fb', 'hw_alpha_fb', 'hw_alphadot_fb');
