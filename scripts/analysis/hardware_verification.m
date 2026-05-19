@@ -3,8 +3,10 @@
 %  ONE script, two phases.  Run it before AND after each experiment.
 %
 %  Phase 1 (BEFORE testing) — Section 0.5 runs unconditionally:
-%    - Builds models/PolePlacement{,Observer}2024_HWTest.slx if missing
-%      (disturbance injection + logging spliced into the PP model)
+%    - Builds models/HardwareValidation_HWTest.slx from the organized
+%      PolePlacement_Liftoff_HW_2024 hardware layout, without catch/latch
+%    - Controller slot is plug-and-play: pole_placement, LQR, PID
+%    - Observer slot is plug-and-play: raw derivatives, Leuenberger, Kalman
 %    - Saves data/hw_test_signals.mat with d_inj presets:
 %        d_free   (Exp A: zero perturbation)
 %        d_step   (Exp B: 0.5 V step at t=2 s)
@@ -30,16 +32,25 @@
 %
 %  1. >> load data/hw_test_signals.mat       % loads d_free/d_step/d_prbs/d_chirp
 %  2. >> d_inj = d_free;                     % pick the experiment
-%  3. Open the appropriate model:
-%       - Exp A, B, C:  models/PolePlacement2024_HWTest.slx
-%       - Exp D (obs):  models/PolePlacementObserver2024_HWTest.slx
+%  3. Configure and open the generic hardware validation model:
+%       >> load_hardware_validation_config('pole_placement','none')
+%       >> open_system('models/HardwareValidation_HWTest.slx')
+%     Swap in other designs without changing the model, e.g.:
+%       >> load_hardware_validation_config('lqr','leuenberger')
+%       >> load_hardware_validation_config('pid','kalman')
 %  4. QUARC External -> Build (Ctrl+B) -> Connect (Ctrl+T) -> Start.
 %     Hold seesaw level; release gently after Start.
 %  5. After the run, To Host File output columns are:
-%       PP2024_HWTest:    [time | x_c | alpha | V_m | d]
-%       PPObs2024_HWTest: [time | x_c | alpha | V_m | d | x_hat(4)]
-%     where x_hat = [x_c_hat ; x_c_dot_hat ; alpha_hat ; alpha_dot_hat].
-%  6. Split into named vars and save to data/ as:
+%       [time | x_c | alpha | V_m | d | x_fb(4) | x_obs(4)]
+%     where x_fb is the selected feedback vector and x_obs is the observer
+%     slot output [x_c_hat ; x_c_dot_hat ; alpha_hat ; alpha_dot_hat].
+%  6. Import the raw To Host File matrix into the named vars expected here:
+%       >> import_hardware_validation_log('data/hw_raw_free.mat', 'free')
+%       >> import_hardware_validation_log('data/hw_raw_step.mat', 'step')
+%       >> import_hardware_validation_log('data/hw_raw_prbs.mat', 'prbs')
+%       >> import_hardware_validation_log('data/hw_raw_obs.mat',  'obs')
+%     This saves data/ files with the variables listed below.
+%  7. Named analysis files consumed by this script:
 %       Exp A: hw_free_run.mat      with hw_t,hw_xc,hw_alpha,hw_vm
 %       Exp B: hw_step_response.mat with hw_t,hw_d,hw_xc,hw_alpha,hw_vm
 %       Exp C: hw_prbs_response.mat or hw_chirp_response.mat (same vars as B)
@@ -50,7 +61,7 @@
 %  =====================================================================
 %  Requires:  startup.m  (paths + seesaw_params)
 %             data/tuned_params.mat, data/controller_freq.mat
-%  Outputs:   models/PolePlacement{,Observer}2024_HWTest.slx (Phase 1)
+%  Outputs:   models/HardwareValidation_HWTest.slx (Phase 1)
 %             data/hw_test_signals.mat                       (Phase 1)
 %             docs/figures/Verification-*.png                (Phase 2)
 %             data/verification_results.mat                  (Phase 2)
@@ -99,7 +110,7 @@ fprintf('\n');
 % call to this script.  Cheap and idempotent.
 
 fprintf('Pre-test setup: building HW test models...\n');
-run(fullfile(root, 'scripts', 'control', 'build_pp_hwtest_models.m'));
+run(fullfile(root, 'scripts', 'control', 'build_hardware_validation_model.m'));
 
 % --- d_inj presets ---
 exp_duration_s = 90;        % B/C run length
@@ -144,8 +155,9 @@ fprintf(' Pre-test ready. On the QUARC PC:\n');
 fprintf('----------------------------------------\n');
 fprintf('   >> load data/hw_test_signals.mat\n');
 fprintf('   >> d_inj = d_free;       %% or d_step / d_prbs / d_chirp\n');
-fprintf('   Open models/PolePlacement2024_HWTest.slx\n');
-fprintf('       (or *Observer*_HWTest for Experiment D)\n');
+fprintf('   >> load_hardware_validation_config(''pole_placement'', ''none'')\n');
+fprintf('      %% swap in ''lqr''/''pid'' and ''leuenberger''/''kalman'' as needed\n');
+fprintf('   Open models/HardwareValidation_HWTest.slx\n');
 fprintf('   QUARC External -> Build -> Connect -> Start.\n');
 fprintf('----------------------------------------\n');
 
