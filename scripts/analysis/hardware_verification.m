@@ -8,8 +8,8 @@
 %    - Saves data/hw_test_signals.mat with d_inj presets:
 %        d_free   (Exp A: zero perturbation)
 %        d_step   (Exp B: 0.5 V step at t=2 s)
-%        d_prbs   (Exp C: PRBS 0..0.4*fNyq, +-0.5 V, 90 s)  <- preferred
-%        d_chirp  (Exp C fallback: linear chirp 0.1-10 Hz)
+%        d_prbs   (Exp C: PRBS up to 18 rad/s, +-0.5 V, 90 s)  <- preferred
+%        d_chirp  (Exp C fallback: linear chirp 0.1 Hz to 18 rad/s)
 %
 %  Phase 2 (AFTER each experiment) — re-run this script:
 %    - Detects whichever hw_*.mat files are in data/
@@ -112,11 +112,13 @@ fprintf('Pre-test setup: preparing hardware excitation signals...\n');
 exp_duration_s = 90;        % B/C run length
 exp_fs_Hz      = 500;       % QUARC sample rate (Ts = 2 ms)
 prbs_amp_V     = 0.5;       % stays well under V_sat = 6 V
-prbs_bw_frac   = 0.4;       % PRBS upper band edge, fraction of Nyquist
+validation_w_hi_rad_s = 18; % highest frequency of interest
+validation_f_hi_Hz = validation_w_hi_rad_s / (2*pi);
+prbs_bw_frac   = validation_f_hi_Hz / (exp_fs_Hz/2);
 step_amp_V     = 0.5;
 step_t_s       = 2.0;
 chirp_f0_Hz    = 0.1;
-chirp_f1_Hz    = 10.0;
+chirp_f1_Hz    = validation_f_hi_Hz;
 
 t_vec = (0:1/exp_fs_Hz:exp_duration_s)';
 N_pts = numel(t_vec);
@@ -127,7 +129,7 @@ d_free = [0 0; 1e6 0];
 % B: disturbance step at t = step_t_s
 d_step = [0 0; step_t_s 0; step_t_s step_amp_V; 1e6 step_amp_V];
 
-% C: PRBS (preferred broadband perturbation)
+% C: PRBS (preferred broadband perturbation, capped at 18 rad/s)
 if license('test', 'Identification_Toolbox')
     prbs_unit = idinput(N_pts, 'prbs', [0 prbs_bw_frac], [-1 1]);
 else
@@ -145,6 +147,8 @@ d_chirp = [t_vec, prbs_amp_V * chirp(t_vec, chirp_f0_Hz, ...
 sig_path = fullfile(root, 'data', 'hw_test_signals.mat');
 save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp');
 fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp)\n');
+fprintf('  Validation band: 0.1-%.2f Hz (0.63-%.1f rad/s)\n', ...
+    validation_f_hi_Hz, validation_w_hi_rad_s);
 
 fprintf('\n----------------------------------------\n');
 fprintf(' Pre-test ready. On the QUARC PC:\n');
@@ -622,7 +626,8 @@ else
     mask_xc_iv    = (C_vm > coh_thresh) & (C_xc    > coh_thresh);
     mask_alpha_iv = (C_vm > coh_thresh) & (C_alpha > coh_thresh);
 
-    f_lo = 0.1; f_hi = 10.0;
+    f_lo = 0.1;
+    f_hi = validation_f_hi_Hz;
     f_mask = f_tfe >= f_lo & f_tfe <= f_hi;
     f_use = f_tfe(f_mask);
 
@@ -632,7 +637,7 @@ else
     idx_bw = find(mag_xc_db < dc_gain_db - 3, 1, 'first');
     if isempty(idx_bw)
         bw_hz = f_use(end);
-        bw_warning = ' (not found — beyond chirp range)';
+        bw_warning = ' (not found — beyond validation band)';
     else
         bw_hz = f_use(idx_bw);
         bw_warning = '';
@@ -772,7 +777,7 @@ else
 
     mag_err_rms = rms(mag_xc_db(f_mask) - mag_model_db(:));
     fprintf('\n  --- Model-Hardware Agreement ---\n');
-    fprintf('    RMS magnitude error:  %.2f dB  (in chirp band)\n', mag_err_rms);
+    fprintf('    RMS magnitude error:  %.2f dB  (in validation band)\n', mag_err_rms);
 
     saveas(gcf, fullfile(figdir, 'Verification-CLBode-ModelVsHW.png'));
     fprintf('  Saved: docs/figures/Verification-CLBode-ModelVsHW.png\n');
