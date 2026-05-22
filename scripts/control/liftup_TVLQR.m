@@ -7,7 +7,7 @@ import casadi.*
 %% ─── 0. Initialization ─────────────────────────────────
 theta_max = deg2rad(11.66);
 xc_max    = 0.407;
-u_start   = 4;
+u_start   = 3;
 u_max     = 6;
 slew_max  = 30;
 max_T1    = 5;
@@ -216,16 +216,10 @@ fprintf('Optimization complete! T1 = %.2f s, T2 = %.2f s\n', T1_val, T2_val);
 t_p1 = linspace(0,          T1_val,           N1+1);
 x_p1  = [s1_opt(1,:); theta_max*ones(1,N1+1); s1_opt(2,:); zeros(1,N1+1)]';
 u_p1  = [u1_opt, u1_opt(end)]'; % Padded for length
-K_p1  = repmat(K_phase1_pd, length(t_p1), 1); % Constant LQR gains
 
 t_p2 = linspace(T1_val,     T1_val + T2_val,  N2+1);
 x_p2  = [x2_opt(1,:); x2_opt(2,:); x2_opt(3,:); x2_opt(4,:)]';
 u_p2  = [u2_opt, u2_opt(end)]'; % Padded for length
-K_p2 = zeros(length(t_p2), 4);
-for i = 1:4
-    % t_K2 starts at T1, so we shift it to 0 for interpolation
-    K_p2(:,i) = interp1(t_K2 - T1_val, K_tv2(i,:), t_p2, 'linear', 'extrap');
-end
 
 t_total      = [t_p1,       t_p2(2:end)      ];
 xc_total     = [s1_opt(1,:),  x2_opt(1,2:end)    ];
@@ -295,6 +289,8 @@ B_carti = [0; alpha_f/M_e; 0];
 K_phase1_pd = [K_phase1(1), 0, K_phase1(2), 0]; 
 K_phase1_int = K_phase1(3); 
 
+K_p1  = repmat(K_phase1_pd, length(t_p1), 1); % Constant LQR gains
+
 fprintf('4. Formatting variables for Simulink lookup tables...\n');
 t_simulink = (0 : Ts : t_total(end))';
 
@@ -313,6 +309,13 @@ for i = 1:length(t_simulink)
     end
 end
 
+K_p2 = zeros(length(t_p2), 4);
+for i = 1:4
+    % t_K2 starts at T1, so we shift it to 0 for interpolation
+    K_p2(:,i) = interp1(t_K2 - T1_val, K_tv2(i,:), t_p2, 'linear', 'extrap');
+end
+
+
 %% ─── PLOTS ───────────────────────────────────────────────────────────────
 figure('Name', 'Joint Optimised Trajectory & Gains', 'NumberTitle', 'off', 'Position', [100, 100, 1200, 800]);
 
@@ -330,7 +333,7 @@ plot(t_simulink, K_phase2, 'LineWidth', 1.5); hold on;
 xline(T1_val, 'k--', 'Lift-Off', 'LabelVerticalAlignment','bottom');
 title('Hybrid TV-LQR Gain Schedule');
 xlabel('Time [s]'); ylabel('Gain Magnitude');
-legend('K_{xc}', 'K_{th}', 'K_{vc}', 'K_{th\_rate}', 'Location', 'best');
+legend('$K_{x_c}$', '$K_{\theta}$', '$K_{\dot{x}_c}$', '$K_{\dot{\theta}}$', 'Location', 'best');
 grid on;
 
 %% ─── FINAL OUTPUT INSTRUCTIONS ───────────────────────────────────────────

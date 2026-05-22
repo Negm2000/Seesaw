@@ -14,7 +14,7 @@ set(groot, 'defaultTextInterpreter', 'latex');
 root_dir = fileparts(mfilename('fullpath'));
 
 % Define subdirectories
-subfolders = {'data', 'docs', 'models', 'scripts', 'src', 'validation'};
+subfolders = {'data', 'docs', 'models', 'scripts', 'src', 'validation', 'casadi-3.7.2-windows64-matlab2018b'};
 
 % Add all subdirectories to the MATLAB path
 for i = 1:length(subfolders)
