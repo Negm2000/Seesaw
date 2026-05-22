@@ -6,17 +6,17 @@ import casadi.*
 
 %% ─── 0. Initialization ─────────────────────────────────
 theta_max = deg2rad(11.66);
-xc_max    = 0.407;
+xc_max    = 0.432;
 u_start   = 3;
 u_max     = 6;
 slew_max  = 30;
 max_T1    = 5;
 max_T2    = 2;
 
-weight_T1 = 100; 
-weight_T2 = 50;
-weight_U1 = 2;
-weight_U2 = 0.2;
+weight_T1 = 10; 
+weight_T2 = 10;
+weight_U1 = 5;
+weight_U2 = 0.1;
 weight_smooth = 50; 
 
 % Tuning for the backward gain computation:
