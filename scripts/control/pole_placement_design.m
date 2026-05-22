@@ -225,7 +225,7 @@ save(fullfile(SEESAW_ROOT, 'data', 'pole_placement.mat'), ...
 fprintf('Saved data/pole_placement.mat\n')
 
 %% DISCRETE TIME FOR THE HARDWARE
-sys4d = c2d(sys4, Ts, 'tustin');
+sys4d = c2d(sys4, Ts, 'zoh');
 
 Ad = sys4d.A;
 Bd = sys4d.B;

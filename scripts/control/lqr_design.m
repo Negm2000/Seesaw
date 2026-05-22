@@ -118,7 +118,7 @@ init_cond4 = [0, deg2rad(1), 0, 0];
 
 %% 5. PERFORM THE LQR/LQI IN DISCRETE TIME FOR THE HARDWARE
 
-sys4d = c2d(sys4, Ts, 'tustin');
+sys4d = c2d(sys4, Ts, 'zoh');
 
 Ad = sys4d.A;
 Bd = sys4d.B;
