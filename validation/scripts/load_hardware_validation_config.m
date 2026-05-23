@@ -34,21 +34,21 @@ cfg.observer_name = char(observer_name);
 
 switch char(controller_name)
     case {'pole_placement', 'pp'}
-        ctrl = load(fullfile(root, 'data', 'controller_freq.mat'));
+        ctrl = load(fullfile(root, 'data', 'controllers', 'controller_freq.mat'));
         K_hw = ctrl.Kf;
         K_aug_hw = [ctrl.Kf, 0];
         hw_use_augmented_controller = 0;
         cfg.controller_display_name = 'Pole placement state feedback';
 
     case 'lqr'
-        ctrl = load(fullfile(root, 'data', 'controller_lqr.mat'));
+        ctrl = load(fullfile(root, 'data', 'controllers', 'controller_lqr.mat'));
         K_aug_hw = ctrl.K_lqr;
         K_hw = ctrl.K_lqr(1:4);
         hw_use_augmented_controller = 1;
         cfg.controller_display_name = 'LQR augmented state feedback';
 
     case 'pid'
-        ctrl = load(fullfile(root, 'data', 'controller_pid.mat'));
+        ctrl = load(fullfile(root, 'data', 'controllers', 'controller_pid.mat'));
         K_aug_hw = ctrl.K_aug;
         K_hw = ctrl.K_aug(1:4);
         hw_use_augmented_controller = 1;
@@ -65,7 +65,7 @@ switch char(observer_name)
         cfg.observer_display_name = 'Raw encoder derivatives';
 
     case 'leuenberger'
-        obs = load(fullfile(root, 'data', 'observer.mat'));
+        obs = load(fullfile(root, 'data', 'params', 'observer.mat'));
         A_obs_hw = obs.A_obs;
         B_obs_hw = obs.B_obs;
         C_obs_hw = obs.C_obs;
@@ -75,7 +75,7 @@ switch char(observer_name)
 
     case 'kalman'
         candidates = { ...
-            fullfile(root, 'data', 'observer_kalman.mat'), ...
+            fullfile(root, 'data', 'params', 'observer_kalman.mat'), ...
             fullfile(root, 'data', 'kalman_observer.mat')};
         kalman_file = '';
         for k = 1:numel(candidates)
