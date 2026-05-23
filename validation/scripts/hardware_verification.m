@@ -70,14 +70,14 @@ close all; clc;
 root   = SEESAW_ROOT;
 valdir = fullfile(root, 'validation');
 if ~exist('SEESAW_ROOT', 'var') || ~strcmp(SEESAW_ROOT, root)
-    run(fullfile(root, 'seesawstartup.m'));
+    run(fullfile(root, 'startup.m'));
 end
 
 figdir = fullfile(valdir, 'docs', 'figures');
 if ~exist(figdir, 'dir'), mkdir(figdir); end
 
-tuned  = load(fullfile(root, 'data', 'tuned_params.mat'));
-ctrl   = load(fullfile(root, 'data', 'controller_freq.mat'));
+tuned  = load(fullfile(root, 'data', 'tuned', 'tuned_params.mat'));
+ctrl   = load(fullfile(root, 'data', 'controllers', 'controller_freq.mat'));
 
 B_eq  = tuned.B_eq;
 K_fb  = ctrl.Kf;
@@ -309,7 +309,7 @@ else
     % FFT to identify the dominant rocking frequency and harmonics
     % (harmonics = signature of dead-zone nonlinearity).
     n_fft     = 2^nextpow2(length(alpha_demean));
-    win       = hanning(length(alpha_demean));
+    win       = my_hanning(length(alpha_demean));
     alpha_fft = fft(alpha_demean .* win, n_fft);
     alpha_psd = abs(alpha_fft(1:n_fft/2+1)).^2 / (Fs * sum(win.^2));
     f_psd     = Fs * (0:n_fft/2)' / n_fft;
@@ -1554,4 +1554,70 @@ function s = skewness(x)
     n = length(x);
     x = x(:) - mean(x);
     s = (sqrt(n*(n-1))/(n-2)) * (mean(x.^3) / (mean(x.^2))^(3/2));
+end
+
+function w = my_hanning(N)
+    w = 0.5 * (1 - cos(2*pi*(0:N-1)' / (N-1)));
+end
+
+function [P, f] = my_pwelch(x, win, noverlap, nfft, Fs)
+    if exist('pwelch', 'file') == 2 || exist('pwelch', 'builtin') == 5
+        [P, f] = pwelch(x, win, noverlap, nfft, Fs);
+    else
+        N = length(win);
+        n_shift = N - noverlap;
+        n_segments = floor((length(x) - noverlap) / n_shift);
+        if n_segments < 1
+            x_win = x(1:min(length(x), N)) .* win(1:min(length(x), N));
+            X = fft(x_win, nfft);
+            P = abs(X(1:nfft/2+1)).^2 / (Fs * sum(win.^2));
+            f = Fs * (0:nfft/2)' / nfft;
+        else
+            P_accum = zeros(nfft/2+1, 1);
+            for idx = 1:n_segments
+                start_idx = (idx-1)*n_shift + 1;
+                x_seg = x(start_idx : start_idx + N - 1) .* win;
+                X = fft(x_seg, nfft);
+                P_accum = P_accum + abs(X(1:nfft/2+1)).^2;
+            end
+            P = P_accum / (n_segments * Fs * sum(win.^2));
+            f = Fs * (0:nfft/2)' / nfft;
+        end
+    end
+end
+
+function [b, a] = my_butter(n, Wn)
+    if exist('butter', 'file') == 2 || exist('butter', 'builtin') == 5
+        [b, a] = butter(n, Wn);
+    else
+        T = 0.5;
+        w = 4 * tan(pi * Wn / 4);
+        c1 = 16;
+        c2 = 4 * sqrt(2) * w;
+        c3 = w^2;
+        
+        a0 = c1 + c2 + c3;
+        a1 = -2*c1 + 2*c3;
+        a2 = c1 - c2 + c3;
+        
+        b0 = c3;
+        b1 = 2*c3;
+        b2 = c3;
+        
+        b = [b0, b1, b2] / a0;
+        a = [a0, a1, a2] / a0;
+    end
+end
+
+function y = my_filtfilt(b, a, x)
+    if exist('filtfilt', 'file') == 2 || exist('filtfilt', 'builtin') == 5
+        y = filtfilt(b, a, x);
+    else
+        mx = mean(x);
+        x_demean = x - mx;
+        y1 = filter(b, a, x_demean);
+        y1_flip = flipud(y1);
+        y2 = filter(b, a, y1_flip);
+        y = flipud(y2) + mx;
+    end
 end

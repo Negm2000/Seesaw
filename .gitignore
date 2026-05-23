@@ -37,3 +37,9 @@ indent.log
 *_quarc_win64/
 *.rt-win64
 *.win64
+
+# Third-party vendor libraries (do not commit binary distributions)
+casadi-*/
+
+# Auto-dated QUARC hardware run files saved to root (use data/hw/ instead)
+data_*.mat

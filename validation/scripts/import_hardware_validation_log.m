@@ -23,6 +23,9 @@ experiment_name = validatestring(lower(experiment_name), ...
 
 raw = load(log_file);
 Y = extract_log_matrix(raw);
+if size(Y, 1) < size(Y, 2)
+    Y = Y';
+end
 if size(Y, 2) < 5
     error('Expected at least 5 columns: [time x_c alpha V_m d]. Got %d.', size(Y, 2));
 end
