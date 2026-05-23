@@ -949,8 +949,152 @@ The low-slew test changes the preferred controller. If the hardware can tolerate
 
 Based on these results, the most promising next hand-designed controller is the fuzzy scheduled state-feedback law. It does not give the absolute smallest nominal peak-to-peak angle, but it offers the best compromise between strong rocking suppression and low voltage slew-rate requirements. The next design step is therefore to replace the automatically swept fuzzy scheduler by an explicitly engineered rule base, using the robust-comparison results as the target envelope.
 
-\section{Experience 3: Periodic trajectory tracking for the body and lift-up}
+\section{Experience 3: Lift-off supervisor and catch from rest}
+\label{sec:liftoff}
 
+\subsection{Motivation}
+
+The pole-placement controller of Section~\ref{sec:pole_placement} is designed for the locally linearised plant about the upright equilibrium $\theta=0$. In normal hardware operation the seesaw rests against one of the mechanical stops at $\theta = \pm \alpha_{\max} \approx \pm 11.5^\circ$, which lies just outside the validity envelope of the linear model. Engaging the pole-placement gain $\mathbf{K}_{pp}$ directly from the resting stop is unreliable: the cart-position contribution $-K_{pp,1}\,x_c$ alone demands tens of volts because the encoder-zero is not the cart's resting position, the requested voltage immediately saturates, the pinion gear slips against the rack, and the closed-loop guarantees of the linear design no longer apply.
+
+To bridge from the resting stop to the linear-regime equilibrium, a two-mode supervisor is introduced: a \emph{lift-off} mode that gently brings the state inside the basin of attraction of the linear controller, and a \emph{balance} mode that takes over once that basin is reached. The handoff between the two is governed by a Lyapunov sublevel set of the closed-loop pole-placement design.
+
+\subsection{Supervisor architecture}
+\label{ssec:liftoff_supervisor}
+
+The supervisor switches between two state-feedback laws applied to the same plant:
+\begin{equation}
+    u(t) = \begin{cases}
+        -\mathbf{K}_{lift}\,\mathbf{x}(t), & \text{if } c(t) = 0,\\
+        -\mathbf{K}_{pp}\,\mathbf{x}(t),  & \text{if } c(t) = 1,
+    \end{cases}
+    \qquad
+    \mathbf{K}_{lift} = \beta\,\mathbf{K}_{pp}, \quad \beta \in (0,1).
+\end{equation}
+The Boolean $c(t)$ is a one-way catch latch driven by a Lyapunov gating test described below. The reduced gain $\beta\,\mathbf{K}_{pp}$ provides the same direction of control action as the balance controller but at a fraction of the magnitude, so the initial voltage demand at $\theta=\theta_{\max}$ stays below $V_{sat}$ and avoids the saturation slam that produces pinion slip on the hardware.
+
+\paragraph{Lyapunov catch criterion.}
+Let $A_{cl} = A_{sw} - B_{sw}\mathbf{K}_{pp}$ denote the closed-loop dynamics matrix of the balance controller. Because $\mathbf{K}_{pp}$ is stabilising on the linear model, $A_{cl}$ is Hurwitz, and for any $Q \succ 0$ the Lyapunov equation
+\begin{equation}
+    A_{cl}^{\top} P + P A_{cl} = -Q
+    \label{eq:lyap_eq}
+\end{equation}
+admits a unique positive-definite solution $P \succ 0$. The quadratic form
+\begin{equation}
+    V(\mathbf{x}) = \mathbf{x}^{\top} P \,\mathbf{x}
+    \label{eq:lyap_V}
+\end{equation}
+is then a Lyapunov function for the balance closed-loop near the origin: along trajectories of $\dot{\mathbf{x}}=A_{cl}\mathbf{x}$, $\dot V = -\mathbf{x}^{\top}Q\mathbf{x} \leq 0$, with equality only at $\mathbf{x}=\mathbf{0}$. Sublevel sets $\{\mathbf{x}:V(\mathbf{x})\le c\}$ are therefore positively invariant on the linear model, and small enough sublevel sets are also invariant on the saturated nonlinear closed loop.
+
+The catch latch fires once $V(\mathbf{x})$ drops below a design threshold $c_{catch}$ and remains set thereafter:
+\begin{equation}
+    c(t) = c(t^-) \;\lor\; \big[\,V(\mathbf{x}(t)) < c_{catch}\,\big], \qquad c(0)=0.
+    \label{eq:catch_latch}
+\end{equation}
+The one-way latch prevents chattering between modes if $V(\mathbf{x})$ briefly recrosses the threshold during the post-handoff transient. The threshold is sized relative to the Lyapunov value at the resting state $\mathbf{x}_{rest} = [0,0,\alpha_{\max},0]^\top$:
+\begin{equation}
+    V_{rest} = \mathbf{x}_{rest}^{\top} P \,\mathbf{x}_{rest},
+    \qquad
+    c_{catch} = V_{rest}/3.
+    \label{eq:c_catch}
+\end{equation}
+Choosing $c_{catch}$ as a fraction of $V_{rest}$ guarantees that the lift-off must drive the state at least three times closer to the origin (in the Lyapunov metric) before the linear controller is allowed to take over.
+
+\paragraph{Design constants.}
+With $Q = \operatorname{diag}(1,\,0.1,\,10,\,1)$ and the identified plant from \S\ref{sec:pole_placement}, the supervisor constants are
+\begin{align}
+    \mathbf{K}_{pp}   &= \begin{bmatrix} +226.5 & +18.9 & -197.9 & -63.2 \end{bmatrix}, \\
+    \beta             &= 0.30, \qquad
+    \mathbf{K}_{lift} = \begin{bmatrix} +67.9 & +5.68 & -59.4 & -18.9 \end{bmatrix}, \\
+    V_{rest}          &= 0.726,\qquad
+    c_{catch}         = 0.242.
+\end{align}
+
+\subsection{Manual calibration procedure}
+\label{ssec:liftoff_calibration}
+
+In the test reported below the encoder zero of $\theta$ was set with the seesaw held manually at the upright equilibrium and the motor command at zero. The sequence was:
+\begin{enumerate}
+    \item start the QUARC model with $V_m = 0$;
+    \item hold the seesaw at $\theta \approx 0$ by hand for a few seconds while the encoder logs an offset-free zero reference;
+    \item with $V_m$ still at zero, release the seesaw so it settles against one of the mechanical stops at $\theta = -\alpha_{\max}$;
+    \item engage the supervisor: the lift-off mode begins driving the cart, the Lyapunov test gates the handoff to the balance controller, and the closed-loop response is logged through the standard \texttt{To Host File} block.
+\end{enumerate}
+This procedure removes the cart's encoder-zero ambiguity but does not remove the cart's physical offset from the rail centre at the moment the seesaw drops onto its stop. The data shows the consequence: at controller engage the cart has slid downhill under gravity to the low end of the rail.
+
+\subsection{Hardware results}
+\label{ssec:liftoff_results}
+
+Figure~\ref{fig:liftoff_timeline} shows the entire $295.9$ s session. The supervisor was started at $t = 27.32$ s with the seesaw on the negative stop, and the run includes several caught windows (green-shaded). Their durations are not a performance metric -- they reflect when the operator chose to manually return the seesaw to the stop and restart, not when the controller would have failed on its own. Only the \emph{first} catch is reported in detail below, because the catch latch (\ref{eq:catch_latch}) is one-way: once it trips, the lift-off gain $\mathbf{K}_{lift}$ is no longer active. Subsequent catches in the same session correspond to the balance controller re-entering its basin from a new initial condition, not to the lift-off design itself.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{../figures/HW-Liftoff-File2-Timeline.png}
+    \caption{Hardware lift-off run, $295.9$ s. The red vertical line marks the first controller engage at $t = 27.32$ s; this is the only event in the session at which the lift-off gain $\mathbf{K}_{lift}$ acted. Subsequent green-shaded windows are the balance controller re-entering its basin after a manual re-release of the seesaw and do not exercise the lift-off design. The voltage trace shows the characteristic ``hammering'' limit cycle of the pole-placement controller in steady state.}
+    \label{fig:liftoff_timeline}
+\end{figure}
+
+Figure~\ref{fig:liftoff_catch_zoom} zooms on the first lift-off and catch event. The controller engages at $t = 27.32$ s with the seesaw on the negative stop ($\theta = -11.66^\circ$) and the cart at the high end of the rail ($x_c = +0.43$ m, slid downhill from the encoder-zero position). The lift-off mode commands a saturated negative voltage; the cart accelerates downhill of the rail's reference frame, crosses the pivot near $x_c \approx 0$, and the seesaw rotates through upright. At $t \approx 28.2$ s the Lyapunov score $V(\mathbf{x})$ falls below $c_{catch} = 0.242$, the latch trips, and the balance controller engages with a brief overshoot, then settles into the standard rocking limit cycle. The bottom panel shows $V(\mathbf{x})$ on a logarithmic scale: it decreases by more than two decades during the lift-off and stabilises around $V \sim 10^{-2}$ in the balance regime.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\linewidth]{../figures/HW-Liftoff-File2-Catch.png}
+    \caption{Catch zoom on the first lift-off episode. The red dashed line is the controller-engage instant. The green dashed line marks the moment when $V(\mathbf{x})$ crosses below the catch threshold $c_{catch} = V_{rest}/3$ and the supervisor switches from $\mathbf{K}_{lift}$ to $\mathbf{K}_{pp}$. The cart sweeps from $+43$ cm to a slight overshoot at $-13$ cm during the lift-off, then settles near zero.}
+    \label{fig:liftoff_catch_zoom}
+\end{figure}
+
+The steady-state behaviour following the first catch is characterised in Figure~\ref{fig:liftoff_steady} over the window $t = 31.5\text{--}59.5$ s -- the first catch window with $3$ s trimmed at the start (catch transient) and $0.5$ s trimmed at the end (operator-initiated release back to the stop). The angle histogram shows the bimodal signature of the limit cycle, with peaks near $0^\circ$ and $-1.5^\circ$ and a mean offset of $-0.71^\circ$ caused by the deadzone--Coulomb asymmetry of the actuator (no integral action is used in this supervisor variant). The cart position oscillates within roughly $\pm 2$ cm of its mean and the voltage command stays comfortably inside $\pm 6$ V throughout the window, with no sustained saturation.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{../figures/HW-Liftoff-File2-SteadyState.png}
+    \caption{Steady-state limit cycle following the first catch ($t = 31.5\text{--}59.5$ s; the catch transient and the operator's terminal release are trimmed). Left column: time traces of $\theta$, $x_c$, and $V_m$; right column: the corresponding distributions. The bimodal $\theta$ histogram is the expected signature of the deadzone--Coulomb limit cycle.}
+    \label{fig:liftoff_steady}
+\end{figure}
+
+Figure~\ref{fig:liftoff_phase} aggregates the full run in two views. The phase plane $(\theta, \dot\theta)$ is colour-coded by time: the early lift-off episodes (cool colours) trace large loops that reach the stops, while the later balance episodes (warm colours) concentrate near the origin. The Lyapunov trace on the right separates the same data into bands: $V(\mathbf{x}) > V_{rest}$ when the seesaw is on a stop, an intermediate region during each lift-off, and $V(\mathbf{x}) \in [10^{-4}, 10^{-1.5}]$ in the caught regime, comfortably below $c_{catch}$.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\linewidth]{../figures/HW-Liftoff-File2-PhaseLyap.png}
+    \caption{Left: phase plane $(\theta, \dot\theta)$ for the full run, coloured by time. Early lift-off attempts (cool colours) explore the full angle range; the caught regime (warm colours) concentrates near the origin. Right: Lyapunov score $V(\mathbf{x}) = \mathbf{x}^{\top}P\mathbf{x}$ over the run; the red and green dashed lines are $V_{rest}$ and $c_{catch}$ respectively.}
+    \label{fig:liftoff_phase}
+\end{figure}
+
+Table~\ref{table:liftoff_metrics} summarises the limit-cycle metrics over the trimmed post-catch window. Peak and peak-to-peak values are reported as the $5\text{--}95$ percentile range so a single end-of-window outlier (the operator-initiated release back to the stop) does not dominate the figure.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lc}
+        \hline
+        \rowcolor{bluePoli!40}
+        Metric & Value \T\B \\
+        \hline\hline
+        $\theta$ peak-to-peak ($5\text{--}95$ pct)   & $1.52^\circ$ \T\\
+        $\theta$ peak-to-peak ($1\text{--}99$ pct)   & $1.58^\circ$ \\
+        $|\theta|$ ($95$ pct)                          & $1.43^\circ$ \\
+        $\theta$ mean (bias)                           & $-0.71^\circ$ \\
+        $\theta$ RMS (about mean)                      & $0.60^\circ$ \\
+        $x_c$ mean                                     & $-1.20$ cm \\
+        $x_c$ peak-to-peak ($5\text{--}95$ pct)        & $3.74$ cm \\
+        $V_m$ RMS                                      & $2.09$ V \\
+        $|V_m|$ ($95$ pct)                             & $4.39$ V \B\\
+        \hline
+    \end{tabular}
+    \caption{Limit-cycle metrics in the trimmed steady-state window after the first catch ($t = 31.5\text{--}59.5$ s, $28$ s). Percentile-based statistics are used to keep one-sample end-of-window outliers from dominating the peak-to-peak figures.}
+    \label{table:liftoff_metrics}
+\end{table}
+
+\subsection{Discussion}
+
+The hardware run validates two properties of the supervisor design and exposes a limitation.
+
+First, the Lyapunov-gated handoff (\ref{eq:catch_latch}) is a workable catch criterion on the physical system. During the first lift-off the score $V(\mathbf{x})$ decreased monotonically from $V_{rest} \approx 0.73$ to below $c_{catch} = 0.24$ over roughly $0.9$ s, the latch tripped, and the balance controller engaged with only the small overshoot visible in Figure~\ref{fig:liftoff_catch_zoom}.
+
+Second, the reduced-gain lift-off mode bridged from the resting stop without producing pinion slip on the rack. With $\beta = 0.30$ the cart-position term still saturates briefly at the start of the lift-off, but the saturation episode is short and the resulting peak current did not unseat the gear on the cart drive in this run.
+
+The principal limitation is that only the first catch in the session is informative for the lift-off design. The latch is one-way, so once it trips, $\mathbf{K}_{lift}$ is no longer in the loop. The subsequent caught windows in Figure~\ref{fig:liftoff_timeline} are therefore not lift-off events: they are the balance controller recovering from intermediate initial conditions after a manual re-release. A fair characterisation of $\mathbf{K}_{lift}$ requires either a sequence of independent runs each starting from the rest stop, or a supervisor extension that resets the latch when $V(\mathbf{x})$ exceeds a hysteretic upper threshold so a new lift-off can begin automatically. The second option is also a prerequisite for robustness to large external disturbances and is left as a topic for future work.
+
+The residual steady-state bias of $-0.71^\circ$ in the angle (Table~\ref{table:liftoff_metrics}) is not a supervisor defect: it is the same deadzone--Coulomb asymmetry that drives the limit cycle of the pole-placement controller itself, and would be removed by the integral-action variant of $\mathbf{K}_{pp}$ described in \S\ref{sec:pole_placement} at the cost of a slightly more elaborate handoff condition involving the integral state.
 
 \begin{comment}
 	%-----------------------------------------------------------------------------
