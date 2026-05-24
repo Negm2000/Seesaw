@@ -5,6 +5,11 @@
 
 fprintf('Initializing Seesaw Project...\n');
 
+% setting default parameter with LaTeX interpreter
+set(groot, 'defaultAxesTickLabelInterpreter', 'latex');
+set(groot, 'defaultLegendInterpreter', 'latex');
+set(groot, 'defaultTextInterpreter', 'latex');
+
 % Get the directory where startup.m is located
 root_dir = fileparts(mfilename('fullpath'));
 

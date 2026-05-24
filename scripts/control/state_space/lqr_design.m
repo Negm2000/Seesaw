@@ -6,28 +6,21 @@ set(groot, 'defaultLegendInterpreter', 'latex');
 set(groot, 'defaultTextInterpreter', 'latex');
 
 %% 1. LOAD SYSTEM PARAMETERS
-if ~exist('SEESAW_ROOT', 'var')
-    SEESAW_ROOT = fileparts(fileparts(fileparts(mfilename('fullpath'))));
-end 
+if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end 
 
 % Load physical parameters (g, Me, DT, Jsw, Bsw, Msw, DC, etc.)
 seesaw_params; 
-s = tf('s');
-Ts = 0.002;
-M_w = 0.37;
-M_total = M_c + M_w;
-M_e = M_total + J_rotor * K_g^2 / r_mp^2;
 
 % Load the voltage non-linearities
-nonlinear_file = fullfile(SEESAW_ROOT, 'data', 'params', 'param_nonlinear.mat');
-if exist(nonlinear_file, 'file')
-    load(nonlinear_file, 'ud_pos', 'ud_neg', 'ud_sym');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
+if exist(cart_file, 'file')
+    load(cart_file, 'ud_pos', 'ud_neg', 'ud_sym');
 else
     error('Non-linearities not found. Run seesaw nonlinear first.');
 end
 
 % Load the tuned state-space representation
-cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned', 'tuned_cart.mat');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat');
 if exist(cart_file, 'file')
     load(cart_file);
 else
@@ -35,9 +28,9 @@ else
 end
 
 % Load the tuned state-space representation
-seesaw_file = fullfile(SEESAW_ROOT, 'data', 'tuned', 'tuned_seesaw.mat');
-if exist(seesaw_file, 'file')
-    load(seesaw_file);
+cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned_seesaw.mat');
+if exist(cart_file, 'file')
+    load(cart_file);
 else
     error('Tuned seesaw model not found. Run seesaw modeling first.');
 end
@@ -95,11 +88,11 @@ else
 end
 %% 4. DETERMINE THE GAINS OF CONTROLLER
 
-[K4, P4, ~] = lqr(A_sw, B_sw, Q4, R4);
+K4 = lqr(A_sw, B_sw, Q4, R4);
 eig_open_4  = eig(A_sw);
 eig_close_4 = eig(A_sw - B_sw*K4);
 
-[K5, P5, ~] = lqr(A5,B5,Q5,R5);
+K5 = lqr(A5,B5,Q5,R5);
 eig_open_5  = eig(A5);
 eig_close_5 = eig(A5 - B5*K5);
 
@@ -114,6 +107,7 @@ end
 
 % derivative filter to get velocities
 dom_pole4 = real(min(eig_close_4));
+dom_pole5 = real(min(eig_close_5));
 
 N4 = 25*abs(dom_pole4);
 
@@ -121,11 +115,11 @@ H4 = N4*s / (s + N4);
 H4d = c2d(H4, Ts, 'tustin');
 
 % initial conditions
-init_cond4 = [0, deg2rad(1), 0, 0];
+init_cond4 = [0, 0, deg2rad(1), 0];
 
 %% 5. PERFORM THE LQR/LQI IN DISCRETE TIME FOR THE HARDWARE
 
-sys4d = c2d(sys4, Ts, 'zoh');
+sys4d = c2d(sys4, Ts, 'tustin');
 
 Ad = sys4d.A;
 Bd = sys4d.B;
@@ -168,8 +162,8 @@ eig_close_5d = eig(A5d - B5d*K5d);
 % In practice, Rn is usually estimated from sensor data first,
 % while Qn is then tuned to reflect the confidence in the model.
 Gn = eye(4);
-Qn = diag([1e-7, 1e-7, 1e-5, 1e-5]);
-Rn = diag([1.3638e-7, 6.5881e-5]);
+Qn = diag([1e-6, 7.6154e-7, 1e-3, 1.2185e-3]);
+Rn = diag([2.5e-7, 7.6154e-7]);
 
 L = lqe(A_sw, Gn, C_sw, Qn, Rn);
 
@@ -178,23 +172,12 @@ Bobs = [B_sw, L];
 Cobs = eye(4);
 Dobs = zeros(4, 3);
 
-% Continuous observer matrices with underscores for hardware validation
-A_obs = Aobs;
-B_obs = Bobs;
-C_obs = Cobs;
-D_obs = Dobs;
-
 Ld = dlqe(Ad, Gn, Cd, Qn, Rn);
 
 Aobs_d = Ad - Ld*Cd;
 Bobs_d = [Bd, Ld];
 Cobs_d = eye(4);
 Dobs_d = zeros(4, 3);
-
-% Save Kalman observer matrices
-save(fullfile(SEESAW_ROOT, 'data', 'params', 'observer_kalman.mat'), 'A_obs', 'B_obs', 'C_obs', 'D_obs', 'L', 'Qn', 'Rn');
-save(fullfile(SEESAW_ROOT, 'data', 'params', 'kalman_observer.mat'), 'A_obs', 'B_obs', 'C_obs', 'D_obs', 'L', 'Qn', 'Rn');
-fprintf('Saved Kalman observer matrices to data/observer_kalman.mat and data/kalman_observer.mat\n');
 
 %% 6. TRAJECTORY TRACKING (tension feedforward)
 
@@ -327,17 +310,12 @@ residual_rms = sqrt(mean(residual_check.^2, 2));
 % the first time it crosses 5°.
 
 % Load the voltage non-linearities
-inner_pid_file = fullfile(SEESAW_ROOT, 'data', 'controllers', 'controller_inner_pid.mat');
-if exist(inner_pid_file, 'file')
-    load(inner_pid_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
+if exist(cart_file, 'file')
+    load(cart_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
 else
     error('Inner-loop PID not found. Run pid_cart first.');
 end
 
 init_cond_lift = [-0.407, deg2rad(11.66), 0, 0];
 init_cond_switch = [0.057, deg2rad(5), 0, -0.1];
-
-% Save LQR controller parameters
-K_lqr = K5;
-save(fullfile(SEESAW_ROOT, 'data', 'controllers', 'controller_lqr.mat'), 'K_lqr', 'Q5', 'R5', 'A5', 'B5');
-fprintf('Saved LQR controller parameters to data/controller_lqr.mat\n');
