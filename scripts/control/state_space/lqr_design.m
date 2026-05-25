@@ -6,13 +6,20 @@ set(groot, 'defaultLegendInterpreter', 'latex');
 set(groot, 'defaultTextInterpreter', 'latex');
 
 %% 1. LOAD SYSTEM PARAMETERS
-if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end 
+if ~exist('SEESAW_ROOT', 'var')
+    curr = pwd;
+    while ~exist(fullfile(curr, 'startup.m'), 'file') && ~strcmp(curr, fileparts(curr))
+        curr = fileparts(curr);
+    end
+    SEESAW_ROOT = curr;
+end
+disp(['SEESAW_ROOT inside script is: ', SEESAW_ROOT]);
 
 % Load physical parameters (g, Me, DT, Jsw, Bsw, Msw, DC, etc.)
 seesaw_params; 
 
 % Load the voltage non-linearities
-cart_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'params', 'param_nonlinear.mat');
 if exist(cart_file, 'file')
     load(cart_file, 'ud_pos', 'ud_neg', 'ud_sym');
 else
@@ -20,7 +27,7 @@ else
 end
 
 % Load the tuned state-space representation
-cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned', 'tuned_cart.mat');
 if exist(cart_file, 'file')
     load(cart_file);
 else
@@ -28,7 +35,7 @@ else
 end
 
 % Load the tuned state-space representation
-cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned_seesaw.mat');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned', 'tuned_seesaw.mat');
 if exist(cart_file, 'file')
     load(cart_file);
 else
@@ -157,28 +164,47 @@ eig_close_5d = eig(A5d - B5d*K5d);
 
 %% 5. Kalman Observer - GAIN DEFINITION
 
-% Qn: process noise covariance
-% Rn: measurement noise covariance
-% In practice, Rn is usually estimated from sensor data first,
-% while Qn is then tuned to reflect the confidence in the model.
+% 4-state linear Kalman observer.
+% Asymmetric tuning by purpose, not by sign:
+%   Q[3,3] = 3e-3 (large): the cart's stick-slip / Coulomb / asymmetric
+%     deadband are not in the linear model, so we down-weight the velocity
+%     prediction and let xc measurements carry xcd. KF effectively reduces
+%     to a smoothed differentiator on the cart channel — fine, the cart
+%     encoder is clean (K_ec = 23 um/count).
+%   Q[4,4] = 2e-5 (small): the seesaw dynamics (gravity + bearing drag)
+%     are clean, so we trust the model to smooth the coarser angle encoder
+%     (K_E_SW = 1.5 mrad/count). This is where the KF actually beats a
+%     causal DD — ~32% lower ald RMSE during balancing.
+% R sits at the encoder quantization floors (K^2/12, plus small headroom on
+% the cart side for track vibration).
+%
+% If finer modeling is wanted (asymmetric deadband rectification, DC track
+% tilt, etc.), the right move is a proper Extended State Observer rather
+% than bolting nonlinearities onto the linear KF predictor.
 Gn = eye(4);
-Qn = diag([1e-7, 1e-7, 1e-5, 1e-5]);
-Rn = diag([1.3638e-7, 6.5881e-5]);
-
+Qn = diag([1e-10, 1e-9, 3e-3, 2e-5]);
+Rn = diag([5e-8, 1.5e-7]);
 
 L = lqe(A_sw, Gn, C_sw, Qn, Rn);
-
 Aobs = A_sw - L*C_sw;
 Bobs = [B_sw, L];
 Cobs = eye(4);
 Dobs = zeros(4, 3);
+A_obs = Aobs;  B_obs = Bobs;  C_obs = Cobs;  D_obs = Dobs;
 
 Ld = dlqe(Ad, Gn, Cd, Qn, Rn);
-
 Aobs_d = Ad - Ld*Cd;
 Bobs_d = [Bd, Ld];
 Cobs_d = eye(4);
 Dobs_d = zeros(4, 3);
+
+save(fullfile(SEESAW_ROOT, 'data', 'params', 'observer_kalman.mat'), ...
+    'A_obs', 'B_obs', 'C_obs', 'D_obs', 'L', 'Qn', 'Rn', ...
+    'Aobs_d', 'Bobs_d', 'Ld');
+save(fullfile(SEESAW_ROOT, 'data', 'params', 'kalman_observer.mat'), ...
+    'A_obs', 'B_obs', 'C_obs', 'D_obs', 'L', 'Qn', 'Rn', ...
+    'Aobs_d', 'Bobs_d', 'Ld');
+fprintf('Saved 4-state Kalman observer to data/params/observer_kalman.mat and kalman_observer.mat\n');
 
 %% 6. TRAJECTORY TRACKING (tension feedforward)
 
@@ -311,7 +337,7 @@ residual_rms = sqrt(mean(residual_check.^2, 2));
 % the first time it crosses 5°.
 
 % Load the voltage non-linearities
-cart_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'controllers', 'controller_inner_pid.mat');
 if exist(cart_file, 'file')
     load(cart_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
 else
@@ -320,3 +346,93 @@ end
 
 init_cond_lift = [-0.407, deg2rad(11.66), 0, 0];
 init_cond_switch = [0.057, deg2rad(5), 0, -0.1];
+
+% Save LQR controller parameters
+K_lqr = K5;
+save(fullfile(SEESAW_ROOT, 'data', 'controllers', 'controller_lqr.mat'), 'K_lqr', 'Q5', 'R5', 'A5', 'B5');
+fprintf('Saved LQR controller parameters to data/controllers/controller_lqr.mat\n');
+
+%% 8. OBSERVER HW DATA VALIDATION & PLOTTING
+% Run the 4-state KF on the hardware log and compare against a causal 1-pole
+% dirty derivative (tau=10ms) — the straw-man baseline. Useful to confirm
+% the KF still beats DD on alpha_dot (~32% in balance) after any retune.
+kf_file = fullfile(SEESAW_ROOT, 'data', 'analysis', 'kf.mat');
+if exist(kf_file, 'file')
+    fprintf('Running Kalman Filter validation on hardware log data (kf.mat)...\n');
+    load(kf_file);
+
+    t_hw     = data(1,:)';
+    xc_hw    = data(5,:)';
+    alpha_hw = data(3,:)';
+    vm_hw    = data(6,:)';
+    dt_hw    = mean(diff(t_hw));
+
+    % Zero-phase 15 Hz LPF + central gradient reference
+    fc_ref = 15; tau_ref = 1/(2*pi*fc_ref); a_ref = tau_ref/(tau_ref+dt_hw);
+    bf = [1-a_ref, 0]; af_ = [1, -a_ref];
+    zphase = @(x) flipud(filter(bf, af_, flipud(filter(bf, af_, x))));
+    xcd_ref_hw = zphase(gradient(zphase(xc_hw),    dt_hw));
+    ald_ref_hw = zphase(gradient(zphase(alpha_hw), dt_hw));
+
+    % Causal 1-pole DD baseline (tau = 10ms)
+    tau_dd = 0.01;
+    xcd_dd = zeros(size(xc_hw)); ald_dd = zeros(size(alpha_hw));
+    for k = 2:length(xc_hw)
+        xcd_dd(k) = (tau_dd/(tau_dd+dt_hw))*xcd_dd(k-1) + (1/(tau_dd+dt_hw))*(xc_hw(k) - xc_hw(k-1));
+        ald_dd(k) = (tau_dd/(tau_dd+dt_hw))*ald_dd(k-1) + (1/(tau_dd+dt_hw))*(alpha_hw(k) - alpha_hw(k-1));
+    end
+
+    % 4-state Kalman observer
+    xhat = zeros(4, length(t_hw));
+    xhat(:,1) = [xc_hw(1); alpha_hw(1); 0; 0];
+    for k = 2:length(t_hw)
+        xhat(:, k) = Aobs_d * xhat(:, k-1) + Bobs_d * [vm_hw(k); xc_hw(k); alpha_hw(k)];
+    end
+    xcd_hat = xhat(3, :)'; ald_hat = xhat(4, :)';
+
+    % Report
+    m_lift = (t_hw > 3.5) & (t_hw < 5.0);
+    m_bal  = (t_hw > 6.0) & (t_hw < 52.0);
+    rmse_  = @(a,b,m) sqrt(mean((a(m)-b(m)).^2));
+    fprintf('  RMSE vs zero-phase reference:\n');
+    fprintf('  filter               | xcd lift | xcd bal | ald lift | ald bal\n');
+    fprintf('  Causal DD (tau=10ms) | %.4f   | %.4f  | %.4f   | %.4f\n', ...
+        rmse_(xcd_dd, xcd_ref_hw, m_lift), rmse_(xcd_dd, xcd_ref_hw, m_bal), ...
+        rmse_(ald_dd, ald_ref_hw, m_lift), rmse_(ald_dd, ald_ref_hw, m_bal));
+    fprintf('  4-state Kalman       | %.4f   | %.4f  | %.4f   | %.4f\n', ...
+        rmse_(xcd_hat, xcd_ref_hw, m_lift), rmse_(xcd_hat, xcd_ref_hw, m_bal), ...
+        rmse_(ald_hat, ald_ref_hw, m_lift), rmse_(ald_hat, ald_ref_hw, m_bal));
+
+    % Comparison figure
+    fig = figure('Position', [80, 80, 1300, 900], 'Visible', 'off');
+
+    subplot(3,1,1);
+    plot(t_hw, xcd_ref_hw, 'k', 'LineWidth', 1.6); hold on;
+    plot(t_hw, xcd_dd,     'g--','LineWidth', 1.0);
+    plot(t_hw, xcd_hat,    'b',  'LineWidth', 1.1);
+    grid on; xlim([3.5, 52]); ylabel('Cart Velocity [m/s]');
+    legend('Zero-phase ref (LPF+grad)','Causal DD (tau=10ms)','4-state Kalman', ...
+           'Location','best');
+    title('Velocity estimators on hardware log');
+
+    subplot(3,1,2);
+    plot(t_hw, ald_ref_hw, 'k', 'LineWidth', 1.6); hold on;
+    plot(t_hw, ald_dd,     'g--','LineWidth', 1.0);
+    plot(t_hw, ald_hat,    'b',  'LineWidth', 1.1);
+    grid on; xlim([3.5, 52]); ylabel('Angular Velocity [rad/s]');
+
+    subplot(3,1,3);
+    plot(t_hw, ald_ref_hw, 'k', 'LineWidth', 2.0); hold on;
+    plot(t_hw, ald_dd,     'g--','LineWidth', 1.4);
+    plot(t_hw, ald_hat,    'b',  'LineWidth', 1.6);
+    grid on; xlim([14, 16]); xlabel('Time [s]'); ylabel('Angular Velocity [rad/s]');
+    title('Balance zoom — KF smooths alpha-encoder quantization that DD steps through');
+
+    save_dir = fullfile(SEESAW_ROOT, 'data', 'analysis');
+    if ~exist(save_dir, 'dir'), mkdir(save_dir); end
+    save_path = fullfile(save_dir, 'kf_validation.png');
+    saveas(fig, save_path);
+    fprintf('  Saved validation plot to: data/analysis/kf_validation.png\n');
+else
+    warning('kf.mat not found. Skipping plotting validation.');
+end

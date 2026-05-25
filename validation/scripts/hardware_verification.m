@@ -82,6 +82,7 @@ ctrl   = load(fullfile(root, 'data', 'controllers', 'controller_freq.mat'));
 B_eq  = tuned.B_eq;
 K_fb  = ctrl.Kf;
 p_cl  = ctrl.p_final;
+alpha_max = theta_max;
 
 fprintf('\n========================================\n');
 fprintf(' Hardware Verification Pipeline\n');
@@ -1005,6 +1006,29 @@ end
 %  Suitable for reports and quick pass/fail assessment.
 %  =====================================================================
 
+if has_obs
+    % Pre-compute observer metrics for dashboard
+    obs_temp = load(fullfile(valdir, 'data', 'hw_obs_free.mat'));
+    t_temp = obs_temp.hw_t(:);
+    xc_temp = obs_temp.hw_xc(:);
+    alpha_temp = obs_temp.hw_alpha(:);
+    xc_hat_temp = obs_temp.hw_xc_hat(:);
+    al_hat_temp = obs_temp.hw_alpha_hat(:);
+    
+    e_xc_rms = rms(xc_hat_temp - xc_temp);
+    e_alpha_rms = rms(al_hat_temp - alpha_temp);
+    
+    q_xc = K_ec;
+    q_theta = K_E_SW / K_gs;
+    e_combined = abs(xc_hat_temp - xc_temp) / q_xc + abs(al_hat_temp - alpha_temp) / q_theta;
+    idx_conv = find(e_combined < 3, 1, 'first');
+    if ~isempty(idx_conv)
+        t_conv = t_temp(idx_conv);
+    else
+        t_conv = t_temp(end);
+    end
+end
+
 figure('Name', 'Verification: Composite Dashboard', ...
     'Position', [30 30 1200 850]);
 
@@ -1285,23 +1309,23 @@ else
 
     % Observer velocity PSD
     win_len = min(length(t), 4096);
-    win = hanning(win_len);
+    win = my_hanning(win_len);
     n_seg_psd = max(win_len/2, 256);
-    [P_xcd_obs, f_psd] = pwelch(xcd_hat, win, n_seg_psd, n_fft, Fs);
-    [P_ald_obs, ~]     = pwelch(ald_hat, win, n_seg_psd, n_fft, Fs);
+    [P_xcd_obs, f_psd] = my_pwelch(xcd_hat, win, n_seg_psd, n_fft, Fs);
+    [P_ald_obs, ~]     = my_pwelch(ald_hat, win, n_seg_psd, n_fft, Fs);
 
     % Filtered numerical derivative for comparison
     fc_diff = 30;  % Hz — same as dirty-derivative LPF cutoff
-    [b_diff, a_diff] = butter(2, fc_diff/(Fs/2));
-    xc_filt  = filtfilt(b_diff, a_diff, xc);
-    al_filt  = filtfilt(b_diff, a_diff, alpha);
+    [b_diff, a_diff] = my_butter(2, fc_diff/(Fs/2));
+    xc_filt  = my_filtfilt(b_diff, a_diff, xc);
+    al_filt  = my_filtfilt(b_diff, a_diff, alpha);
     xcd_num  = [diff(xc_filt); 0] / dt;
     ald_num  = [diff(al_filt); 0] / dt;
-    xcd_num  = filtfilt(b_diff, a_diff, xcd_num);
-    ald_num  = filtfilt(b_diff, a_diff, ald_num);
+    xcd_num  = my_filtfilt(b_diff, a_diff, xcd_num);
+    ald_num  = my_filtfilt(b_diff, a_diff, ald_num);
 
-    [P_xcd_num, ~] = pwelch(xcd_num, win, n_seg_psd, n_fft, Fs);
-    [P_ald_num, ~] = pwelch(ald_num, win, n_seg_psd, n_fft, Fs);
+    [P_xcd_num, ~] = my_pwelch(xcd_num, win, n_seg_psd, n_fft, Fs);
+    [P_ald_num, ~] = my_pwelch(ald_num, win, n_seg_psd, n_fft, Fs);
 
     % RMS velocity (power in the motion band 0.1-10 Hz)
     band_mask = f_psd >= 0.05 & f_psd <= 15;

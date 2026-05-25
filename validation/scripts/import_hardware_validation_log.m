@@ -29,26 +29,47 @@ end
 if size(Y, 2) < 5
     error('Expected at least 5 columns: [time x_c alpha V_m d]. Got %d.', size(Y, 2));
 end
-if size(Y, 2) < 13
-    warning('Expected 13 columns from HardwareValidation_HWTest; missing feedback/observer columns will be NaN.');
-    Y(:, end+1:13) = NaN;
+
+if size(Y, 2) == 10
+    % Legacy LQR observer log format:
+    % [time, x_c_ref, alpha, alpha_ref, x_c, V_m, x_c_hat, alpha_hat, x_c_dot_hat, alpha_dot_hat]
+    hw_t = Y(:, 1);
+    hw_xc = Y(:, 5);
+    hw_alpha = Y(:, 3);
+    hw_vm = Y(:, 6);
+    hw_d = zeros(size(hw_t));
+    
+    hw_xc_fb = Y(:, 5);
+    hw_xcdot_fb = NaN(size(hw_t));
+    hw_alpha_fb = Y(:, 3);
+    hw_alphadot_fb = NaN(size(hw_t));
+    
+    hw_xc_hat = Y(:, 7);
+    hw_xcdot_hat = Y(:, 9);
+    hw_alpha_hat = Y(:, 8);
+    hw_alphadot_hat = Y(:, 10);
+else
+    if size(Y, 2) < 13
+        warning('Expected 13 columns from HardwareValidation_HWTest; missing feedback/observer columns will be NaN.');
+        Y(:, end+1:13) = NaN;
+    end
+    
+    hw_t = Y(:, 1);
+    hw_xc = Y(:, 2);
+    hw_alpha = Y(:, 3);
+    hw_vm = Y(:, 4);
+    hw_d = Y(:, 5);
+    
+    hw_xc_fb = Y(:, 6);
+    hw_xcdot_fb = Y(:, 7);
+    hw_alpha_fb = Y(:, 8);
+    hw_alphadot_fb = Y(:, 9);
+    
+    hw_xc_hat = Y(:, 10);
+    hw_xcdot_hat = Y(:, 11);
+    hw_alpha_hat = Y(:, 12);
+    hw_alphadot_hat = Y(:, 13);
 end
-
-hw_t = Y(:, 1);
-hw_xc = Y(:, 2);
-hw_alpha = Y(:, 3);
-hw_vm = Y(:, 4);
-hw_d = Y(:, 5);
-
-hw_xc_fb = Y(:, 6);
-hw_xcdot_fb = Y(:, 7);
-hw_alpha_fb = Y(:, 8);
-hw_alphadot_fb = Y(:, 9);
-
-hw_xc_hat = Y(:, 10);
-hw_xcdot_hat = Y(:, 11);
-hw_alpha_hat = Y(:, 12);
-hw_alphadot_hat = Y(:, 13);
 
 switch experiment_name
     case 'free'
