@@ -2,9 +2,8 @@ function results = analyze_single_run(valdir, figdir)
 %ANALYZE_SINGLE_RUN  Phase 2 analysis for the single-run validation protocol.
 %
 % Expects validation/data/hw_single_run.mat containing:
-%   hw_t, hw_seg_id, hw_xc, hw_alpha, hw_u_ctrl, hw_u_presat, hw_vm,
-%   hw_d, hw_xc_dot_raw, hw_alpha_dot_raw, hw_x_fb(4),
-%   hw_x_obs_active(4), hw_x_obs_luenb(4), hw_x_obs_kalm(4)
+%   hw_t, hw_seg_id, hw_xc, hw_alpha, hw_xc_dot, hw_alpha_dot,
+%   hw_u_ctrl, hw_u_presat, hw_vm, hw_d
 %
 % Also expects validation/data/hw_test_signals.mat containing protocol
 % parameters: sine_freqs_Hz, d_amp_V, n_cycles, seg_table, exp_fs_Hz
@@ -26,11 +25,6 @@ u_ctrl  = run_data.hw_u_ctrl(:);
 u_presat = run_data.hw_u_presat(:);
 vm      = run_data.hw_vm(:);
 d_hw    = run_data.hw_d(:);
-
-% Observer states (if available)
-has_obs_luenb = isfield(run_data, 'hw_x_obs_luenb');
-has_obs_kalm  = isfield(run_data, 'hw_x_obs_kalm');
-has_obs_active = isfield(run_data, 'hw_x_obs_active');
 
 dt = median(diff(t));
 Fs = 1/dt;
@@ -340,50 +334,9 @@ end
 results.bode = bode_results;
 
 %% =====================================================================
-%  SECTION E — OBSERVER VALIDATION (all segments)
+%  SECTION E — FIGURES
 %  =====================================================================
-fprintf('\n--- Section E: Observer Validation ---\n');
-
-% Compare all observer estimates against measured encoder signals
-% Use all non-prep segments for comparison
-mask_valid = seg_id >= 1;
-
-if has_obs_luenb
-    obs_luenb = [run_data.hw_x_obs_luenb];
-    xc_hat_l = obs_luenb(mask_valid, 1);
-    alpha_hat_l = obs_luenb(mask_valid, 3);
-    
-    e_xc_l = xc_hat_l - xc(mask_valid);
-    e_alpha_l = alpha_hat_l - alpha(mask_valid);
-    
-    fprintf('  Luenberger:\n');
-    fprintf('    x_c RMS err:   %.4f cm\n', rms(e_xc_l)*100);
-    fprintf('    alpha RMS err: %.4f deg\n', rad2deg(rms(e_alpha_l)));
-    
-    results.obs_luenb.e_xc_rms_cm = rms(e_xc_l)*100;
-    results.obs_luenb.e_alpha_rms_deg = rad2deg(rms(e_alpha_l));
-end
-
-if has_obs_kalm
-    obs_kalm = [run_data.hw_x_obs_kalm];
-    xc_hat_k = obs_kalm(mask_valid, 1);
-    alpha_hat_k = obs_kalm(mask_valid, 3);
-    
-    e_xc_k = xc_hat_k - xc(mask_valid);
-    e_alpha_k = alpha_hat_k - alpha(mask_valid);
-    
-    fprintf('  Kalman:\n');
-    fprintf('    x_c RMS err:   %.4f cm\n', rms(e_xc_k)*100);
-    fprintf('    alpha RMS err: %.4f deg\n', rad2deg(rms(e_alpha_k)));
-    
-    results.obs_kalm.e_xc_rms_cm = rms(e_xc_k)*100;
-    results.obs_kalm.e_alpha_rms_deg = rad2deg(rms(e_alpha_k));
-end
-
-%% =====================================================================
-%  SECTION F — FIGURES
-%  =====================================================================
-fprintf('\n--- Section F: Generating Figures ---\n');
+fprintf('\n--- Section E: Generating Figures ---\n');
 
 % F1. Full-run overview
 figure('Name', 'Single-Run Overview', 'Position', [50 50 1200 800]);

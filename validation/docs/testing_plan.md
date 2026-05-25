@@ -4,8 +4,8 @@
 - [ ] Run `startup.m` on QUARC PC
 - [ ] Run `validation/scripts/hardware_verification.m` (Phase 1) to generate `validation/data/hw_test_signals.mat`
 - [ ] Load signals: `load validation/data/hw_test_signals.mat`
-- [ ] Configure controller/observer: `load_hardware_validation_config('pole_placement','none')`
-- [ ] Open `validation/models/HardwareValidation_HWTest.slx`
+- [ ] Configure controller: `load_hardware_validation_config('pole_placement')`
+- [ ] Open `models/Seesaw_Validation.slx`
 - [ ] Verify VoltPAQ-X1 gain switch is at **1x**
 - [ ] Set QUARC stop time to match `total_duration_s` (displayed by Phase 1)
 
@@ -13,13 +13,12 @@
 
 ### Signal Chain
 ```
-d_inj (FromWorkspace) → Add Disturbance (after controller) → Final Saturation (±6V) → Motor
+d_inj (FromWorkspace) → Add Disturbance (after controller) → Voltage Saturation (±V_sat) → ON/OFF Switch → Motor
 ```
 
-### Logged Columns (new format)
+### Logged Columns (simplified format)
 ```
-[time | seg_id | x_c | alpha | u_ctrl | u_presat | V_m | d |
- x_fb(4) | x_obs_active(4) | x_obs_luenb(4) | x_obs_kalm(4)]
+[time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj]
 ```
 
 ### Protocol Segments (~5 min total)
@@ -75,19 +74,11 @@ This creates `validation/data/hw_single_run.mat` with all named variables.
 ## Report Deliverables
 - [ ] Time validation: measured vs ideal model for +1V and -1V step (baseline-subtracted)
 - [ ] Impulse surrogate: measured vs model for +1V pulse
-- [ ] Bode plot: measured sine-fit points over ideal model curve for d → alpha
-- [ ] Supporting Bode: d → x_c
-- [ ] Observer validation: all observers vs measured states
+- [ ] Bode plot: measured sine-fit points over ideal model curve for d -> alpha
+- [ ] Supporting Bode: d -> x_c
 - [ ] Full-run overview plot with segment labels
 - [ ] Data validity diagnostic plot
 
-## Safety Checks (Throughout)
-- [ ] Monitor voltage scopes — if rail-to-rail (±22 V), **STOP immediately**
-- [ ] Motor nominal limit is **6 V** — never exceed
-- [ ] Always hold seesaw level before starting
-- [ ] If cart approaches rail, abort immediately
-
 ## Optional: Repeat with Alternate Controllers
-- [ ] LQR: `load_hardware_validation_config('lqr','none')`
-- [ ] PID: `load_hardware_validation_config('pid','none')`
+- [ ] LQR: `load_hardware_validation_config('lqr')`
 - [ ] Re-run single-run protocol for each controller

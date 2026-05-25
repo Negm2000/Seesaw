@@ -28,25 +28,18 @@
 %  HARDWARE PROCEDURE (on the QUARC PC, per experiment)
 %  =====================================================================
 %
-%  1. >> load data/hw_test_signals.mat       % loads d_free/d_step/d_prbs/d_chirp
-%  2. >> d_inj = d_free;                     % pick the experiment
-%  3. Configure and open the generic hardware validation model:
-%       >> load_hardware_validation_config('pole_placement','none')
-%       >> open_system(fullfile(SEESAW_ROOT, 'validation', 'models', 'HardwareValidation_HWTest.slx'))
+%  1. >> load data/hw_test_signals.mat       % loads d_inj_ts, segment_id_ts
+%  2. Configure the model:
+%       >> load_hardware_validation_config('pole_placement')
+%       >> open_system(fullfile(SEESAW_ROOT, 'models', 'Seesaw_Validation.slx'))
 %     Swap in other designs without changing the model, e.g.:
-%       >> load_hardware_validation_config('lqr','leuenberger')
-%       >> load_hardware_validation_config('pid','kalman')
+%       >> load_hardware_validation_config('lqr')
 %  4. QUARC External -> Build (Ctrl+B) -> Connect (Ctrl+T) -> Start.
 %     Hold seesaw level; release gently after Start.
 %  5. After the run, To Host File output columns are:
-%       [time | x_c | alpha | V_m | d | x_fb(4) | x_obs(4)]
-%     where x_fb is the selected feedback vector and x_obs is the observer
-%     slot output [x_c_hat ; x_c_dot_hat ; alpha_hat ; alpha_dot_hat].
-%  6. Import the raw To Host File matrix into the named vars expected here:
-%       >> import_hardware_validation_log('data/hw_raw_free.mat', 'free')
-%       >> import_hardware_validation_log('data/hw_raw_step.mat', 'step')
-%       >> import_hardware_validation_log('data/hw_raw_prbs.mat', 'prbs')
-%       >> import_hardware_validation_log('data/hw_raw_obs.mat',  'obs')
+%       [time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj]
+%  6. Import the raw To Host File matrix:
+%       >> import_hardware_validation_log('data/hw_raw_single.mat', 'single')
 %     This saves data/ files with the variables listed below.
 %  7. Named analysis files consumed by this script:
 %       Exp A: hw_free_run.mat      with hw_t,hw_xc,hw_alpha,hw_vm
@@ -318,8 +311,8 @@ fprintf('\n----------------------------------------\n');
 fprintf(' Pre-test ready. On the QUARC PC:\n');
 fprintf('----------------------------------------\n');
 fprintf('   >> load validation/data/hw_test_signals.mat\n');
-fprintf('   >> load_hardware_validation_config(''pole_placement'', ''none'')\n');
-fprintf('   Open validation/models/HardwareValidation_HWTest.slx\n');
+fprintf('   >> load_hardware_validation_config(''pole_placement'')\n');
+fprintf('   Open models/Seesaw_Validation.slx\n');
 fprintf('   QUARC External -> Build -> Connect -> Start.\n');
 fprintf('   Hold seesaw level, release gently after Start.\n');
 fprintf('   Single run collects ALL validation data (~%.0f s).\n', total_duration_s);

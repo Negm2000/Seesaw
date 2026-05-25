@@ -1,9 +1,8 @@
 function import_hardware_validation_log(log_file, experiment_name)
-%IMPORT_HARDWARE_VALIDATION_LOG Convert HardwareValidation_HWTest logs.
+%IMPORT_HARDWARE_VALIDATION_LOG Convert Seesaw_Validation logs.
 %
-% NEW SINGLE-RUN FORMAT (22 data columns + time):
-%   [time | seg_id | x_c | alpha | u_ctrl | u_presat | V_m | d |
-%    x_fb(1:4) | x_obs_active(1:4) | x_obs_luenb(1:4) | x_obs_kalm(1:4)]
+% SINGLE-RUN FORMAT (9 data columns + time = 10 total):
+%   [time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj]
 %
 % LEGACY FORMAT (13 columns):
 %   [time | x_c | alpha | V_m | d | x_fb(1:4) | x_obs(1:4)]
@@ -11,9 +10,6 @@ function import_hardware_validation_log(log_file, experiment_name)
 % Examples:
 %   import_hardware_validation_log('data/hw_raw_single.mat', 'single')
 %   import_hardware_validation_log('data/hw_raw_free.mat', 'free')
-%   import_hardware_validation_log('data/hw_raw_step.mat', 'step')
-%   import_hardware_validation_log('data/hw_raw_prbs.mat', 'prbs')
-%   import_hardware_validation_log('data/hw_raw_obs.mat', 'obs')
 
 if nargin < 2
     error('Usage: import_hardware_validation_log(log_file, experiment_name)');
@@ -30,62 +26,34 @@ if size(Y, 1) < size(Y, 2)
     Y = Y';
 end
 
-%% SINGLE-RUN PROTOCOL (new format)
+%% SINGLE-RUN PROTOCOL (new simplified format)
 if strcmp(experiment_name, 'single')
-    % Expected columns:
-    % [time | seg_id | x_c | alpha | u_ctrl | u_presat | V_m | d |
-    %  x_fb(4) | x_obs_active(4) | x_obs_luenb(4) | x_obs_kalm(4)]
-    % = 24 columns total (or fewer if some observers are disabled)
+    % Expected columns from Seesaw_Validation.slx:
+    % [time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj]
+    % = 10 columns total
     
     n_cols = size(Y, 2);
     fprintf('  Single-run log: %d samples x %d columns\n', size(Y, 1), n_cols);
     
-    hw_t        = Y(:, 1);
-    hw_seg_id   = Y(:, 2);
-    hw_xc       = Y(:, 3);
-    hw_alpha    = Y(:, 4);
-    hw_u_ctrl   = Y(:, 5);
-    hw_u_presat = Y(:, 6);
-    hw_vm       = Y(:, 7);
-    hw_d        = Y(:, 8);
-    
-    % Feedback state (4 columns)
-    if n_cols >= 12
-        hw_x_fb = Y(:, 9:12);
-    else
-        hw_x_fb = NaN(size(Y,1), 4);
+    if n_cols < 10
+        error('Expected 10 columns [time + 9 signals]. Got %d.', n_cols);
     end
     
-    % Raw derivative state vector (from x_fb when feedback = dirty derivative)
-    hw_xc_dot_raw   = hw_x_fb(:, 2);
-    hw_alpha_dot_raw = hw_x_fb(:, 4);
-    
-    % Active observer state (4 columns)
-    if n_cols >= 16
-        hw_x_obs_active = Y(:, 13:16);
-    else
-        hw_x_obs_active = NaN(size(Y,1), 4);
-    end
-    
-    % Luenberger observer state (4 columns)
-    if n_cols >= 20
-        hw_x_obs_luenb = Y(:, 17:20);
-    else
-        hw_x_obs_luenb = NaN(size(Y,1), 4);
-    end
-    
-    % Kalman observer state (4 columns)
-    if n_cols >= 24
-        hw_x_obs_kalm = Y(:, 21:24);
-    else
-        hw_x_obs_kalm = NaN(size(Y,1), 4);
-    end
+    hw_t         = Y(:, 1);
+    hw_seg_id    = Y(:, 2);
+    hw_xc        = Y(:, 3);
+    hw_alpha     = Y(:, 4);
+    hw_xc_dot    = Y(:, 5);
+    hw_alpha_dot = Y(:, 6);
+    hw_u_ctrl    = Y(:, 7);
+    hw_u_presat  = Y(:, 8);
+    hw_vm        = Y(:, 9);
+    hw_d         = Y(:, 10);
     
     out_file = fullfile(valdir, 'data', 'hw_single_run.mat');
     save(out_file, 'hw_t', 'hw_seg_id', 'hw_xc', 'hw_alpha', ...
-        'hw_u_ctrl', 'hw_u_presat', 'hw_vm', 'hw_d', ...
-        'hw_xc_dot_raw', 'hw_alpha_dot_raw', ...
-        'hw_x_fb', 'hw_x_obs_active', 'hw_x_obs_luenb', 'hw_x_obs_kalm');
+        'hw_xc_dot', 'hw_alpha_dot', ...
+        'hw_u_ctrl', 'hw_u_presat', 'hw_vm', 'hw_d');
     fprintf('  Saved: %s\n', out_file);
     return;
 end
