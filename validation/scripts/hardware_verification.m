@@ -18,9 +18,9 @@
 %    - Saves data/verification_results.mat
 %
 %  KEY INSIGHT:  The seesaw does NOT achieve asymptotic stability at
-%  theta = 0.  Nonlinearities (Coulomb friction, encoder quantization,
+%  alpha = 0.  Nonlinearities (Coulomb friction, encoder quantization,
 %  backlash, static friction) produce a bounded limit cycle.  The
-%  controller constrains rocking between +-theta_bound — the better the
+%  controller constrains rocking between +-alpha_bound — the better the
 %  controller, the tighter the bound.  This script quantifies that bound
 %  rather than chasing an unachievable zero steady-state error.
 %
@@ -39,9 +39,9 @@
 %  4. QUARC External -> Build (Ctrl+B) -> Connect (Ctrl+T) -> Start.
 %     Hold seesaw level; release gently after Start.
 %  5. After the run, To Host File output columns are:
-%       [time | x_c | theta | V_m | d | x_fb(4) | x_obs(4)]
+%       [time | x_c | alpha | V_m | d | x_fb(4) | x_obs(4)]
 %     where x_fb is the selected feedback vector and x_obs is the observer
-%     slot output [x_c_hat ; x_c_dot_hat ; theta_hat ; theta_dot_hat].
+%     slot output [x_c_hat ; x_c_dot_hat ; alpha_hat ; alpha_dot_hat].
 %  6. Import the raw To Host File matrix into the named vars expected here:
 %       >> import_hardware_validation_log('data/hw_raw_free.mat', 'free')
 %       >> import_hardware_validation_log('data/hw_raw_step.mat', 'step')
@@ -49,11 +49,11 @@
 %       >> import_hardware_validation_log('data/hw_raw_obs.mat',  'obs')
 %     This saves data/ files with the variables listed below.
 %  7. Named analysis files consumed by this script:
-%       Exp A: hw_free_run.mat      with hw_t,hw_xc,hw_theta,hw_vm
-%       Exp B: hw_step_response.mat with hw_t,hw_d,hw_xc,hw_theta,hw_vm
+%       Exp A: hw_free_run.mat      with hw_t,hw_xc,hw_alpha,hw_vm
+%       Exp B: hw_step_response.mat with hw_t,hw_d,hw_xc,hw_alpha,hw_vm
 %       Exp C: hw_prbs_response.mat or hw_chirp_response.mat (same vars as B)
-%       Exp D: hw_obs_free.mat      with hw_t,hw_xc,hw_theta,hw_vm,
-%              hw_xc_hat,hw_xcdot_hat,hw_theta_hat,hw_thetadot_hat
+%       Exp D: hw_obs_free.mat      with hw_t,hw_xc,hw_alpha,hw_vm,
+%              hw_xc_hat,hw_xcdot_hat,hw_alpha_hat,hw_alphadot_hat
 %  8. Re-run this script to get the analysis.
 %
 %  =====================================================================
@@ -82,6 +82,7 @@ ctrl   = load(fullfile(root, 'data', 'controllers', 'controller_freq.mat'));
 B_eq  = tuned.B_eq;
 K_fb  = ctrl.Kf;
 p_cl  = ctrl.p_final;
+alpha_max = theta_max;
 
 fprintf('\n========================================\n');
 fprintf(' Hardware Verification Pipeline\n');
@@ -145,55 +146,21 @@ d_prbs = [t_vec, prbs_amp_V * prbs_unit];
 d_chirp = [t_vec, prbs_amp_V * chirp(t_vec, chirp_f0_Hz, ...
                                      exp_duration_s, chirp_f1_Hz)];
 
-% D: stepped sine for high-SNR per-frequency FRF
-ss_freqs_Hz   = logspace(log10(0.1), log10(validation_f_hi_Hz), 8);
-ss_cycles     = 6;
-ss_dwell      = ss_cycles ./ ss_freqs_Hz;
-if sum(ss_dwell) > exp_duration_s
-    ss_dwell = ss_dwell * (exp_duration_s / sum(ss_dwell));
-end
-d_step_sine = zeros(N_pts, 1);
-ss_edges = [0; min(round(cumsum(ss_dwell(:)) * exp_fs_Hz), N_pts)];
-for k_ss = 1:numel(ss_freqs_Hz)
-    seg = (ss_edges(k_ss)+1):ss_edges(k_ss+1);
-    if isempty(seg), continue; end
-    ts_seg = t_vec(seg) - t_vec(seg(1));
-    fade = 0.5 - 0.5 * cos(pi * min(ts_seg / 0.2, 1));    % 0.2 s raised-cosine fade-in
-    d_step_sine(seg) = prbs_amp_V * fade .* sin(2*pi * ss_freqs_Hz(k_ss) * ts_seg);
-end
-d_stepped_sine = [t_vec, d_step_sine];
-
 sig_path = fullfile(valdir, 'data', 'hw_test_signals.mat');
-save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp', 'd_stepped_sine');
-fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp, d_stepped_sine)\n');
-
-% Also emit per-signal row-pair .mat files for the new HW_* models'
-% DisturbanceBank, whose From File blocks point at _signals/*.mat.
-sigdir = fullfile(valdir, 'data', '_signals');
-if ~exist(sigdir, 'dir'), mkdir(sigdir); end
-write_fromfile_pair(fullfile(sigdir, 'step.mat'),         d_step);
-write_fromfile_pair(fullfile(sigdir, 'prbs.mat'),         d_prbs);
-write_fromfile_pair(fullfile(sigdir, 'chirp.mat'),        d_chirp);
-write_fromfile_pair(fullfile(sigdir, 'stepped_sine.mat'), d_stepped_sine);
-fprintf('  Saved: data/_signals/{step,prbs,chirp,stepped_sine}.mat (From File format)\n');
+save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp');
+fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp)\n');
 fprintf('  Validation band: 0.1-%.2f Hz (0.63-%.1f rad/s)\n', ...
     validation_f_hi_Hz, validation_w_hi_rad_s);
 
 fprintf('\n----------------------------------------\n');
 fprintf(' Pre-test ready. On the QUARC PC:\n');
 fprintf('----------------------------------------\n');
-fprintf('   Open ONE of:\n');
-fprintf('     validation/models/HW_PID.slx\n');
-fprintf('     validation/models/HW_StateFeedback.slx\n');
-fprintf('     validation/models/HW_StateFeedback_Observer.slx\n');
-fprintf('     validation/models/HW_SMC.slx\n');
-fprintf('   Load gains: assign the K_aug_hw / Kp_in / etc. base vars as\n');
-fprintf('     needed (each model''s controller blocks reference these names).\n');
-fprintf('   Pick the disturbance source by setting the d_select Constant:\n');
-fprintf('     1 = Zero, 2 = Step, 3 = PRBS, 4 = Chirp, 5 = Stepped sine\n');
+fprintf('   >> load data/hw_test_signals.mat\n');
+fprintf('   >> d_inj = d_free;       %% or d_step / d_prbs / d_chirp\n');
+fprintf('   >> load_hardware_validation_config(''pole_placement'', ''none'')\n');
+fprintf('      %% swap in ''lqr''/''pid'' and ''leuenberger''/''kalman'' as needed\n');
+fprintf('   Open models/hardware_validation/HardwareValidation_HWTest.slx\n');
 fprintf('   QUARC External -> Build -> Connect -> Start.\n');
-fprintf('   After the run, save To Host File data and import via\n');
-fprintf('     import_hardware_validation_log(''data/hw_raw_<exp>.mat'', ''<exp>'')\n');
 fprintf('----------------------------------------\n');
 
 % ---- Scanners for what data files exist ----
@@ -251,7 +218,7 @@ else
     % ---- Convert to time-series friendly arrays ----
     t     = d.hw_t(:);
     xc    = d.hw_xc(:);
-    theta = d.hw_theta(:);
+    alpha = d.hw_alpha(:);
     vm    = d.hw_vm(:);
 
     dt = mean(diff(t));
@@ -262,7 +229,7 @@ else
     trim = t > 3.0;
     t_t     = t(trim) - t(find(trim, 1, 'first'));
     xc_t    = xc(trim);
-    theta_t = theta(trim);
+    alpha_t = alpha(trim);
     vm_t    = vm(trim);
 
     %% A1. Bounded oscillation statistics
@@ -270,13 +237,13 @@ else
     % asymptotic convergence.  The system is bounded, not convergent.
 
     % Angle envelope metrics
-    theta_rms    = rms(theta_t);
-    theta_std    = std(theta_t);
-    theta_pp     = max(theta_t) - min(theta_t);
-    theta_p95    = prctile(abs(theta_t), 95);
-    theta_p99    = prctile(abs(theta_t), 99);
-    theta_mean   = mean(theta_t);
-    theta_max_abs = max(abs(theta_t));
+    alpha_rms    = rms(alpha_t);
+    alpha_std    = std(alpha_t);
+    alpha_pp     = max(alpha_t) - min(alpha_t);
+    alpha_p95    = prctile(abs(alpha_t), 95);
+    alpha_p99    = prctile(abs(alpha_t), 99);
+    alpha_mean   = mean(alpha_t);
+    alpha_max_abs = max(abs(alpha_t));
 
     % Cart envelope metrics
     xc_rms   = rms(xc_t);
@@ -290,22 +257,22 @@ else
     vm_frac  = vm_max / V_sat * 100;
 
     fprintf('\n  --- Angle Envelope (bounded, not asymptotic) ---\n');
-    fprintf('    RMS:        %.4f rad  (%.2f deg)\n', theta_rms, rad2deg(theta_rms));
-    fprintf('    Std:        %.4f rad  (%.2f deg)\n', theta_std, rad2deg(theta_std));
-    fprintf('    Peak-peak:  %.4f rad  (%.2f deg)\n', theta_pp, rad2deg(theta_pp));
-    fprintf('    95%% bound:  %.4f rad  (%.2f deg)\n', theta_p95, rad2deg(theta_p95));
-    fprintf('    99%% bound:  %.4f rad  (%.2f deg)\n', theta_p99, rad2deg(theta_p99));
-    fprintf('    Max |angle|:%.4f rad  (%.2f deg)\n', theta_max_abs, rad2deg(theta_max_abs));
+    fprintf('    RMS:        %.4f rad  (%.2f deg)\n', alpha_rms, rad2deg(alpha_rms));
+    fprintf('    Std:        %.4f rad  (%.2f deg)\n', alpha_std, rad2deg(alpha_std));
+    fprintf('    Peak-peak:  %.4f rad  (%.2f deg)\n', alpha_pp, rad2deg(alpha_pp));
+    fprintf('    95%% bound:  %.4f rad  (%.2f deg)\n', alpha_p95, rad2deg(alpha_p95));
+    fprintf('    99%% bound:  %.4f rad  (%.2f deg)\n', alpha_p99, rad2deg(alpha_p99));
+    fprintf('    Max |angle|:%.4f rad  (%.2f deg)\n', alpha_max_abs, rad2deg(alpha_max_abs));
     fprintf('    Mean bias:  %+.4f rad (%+.2f deg)  <-- should be near 0\n', ...
-        theta_mean, rad2deg(theta_mean));
+        alpha_mean, rad2deg(alpha_mean));
 
     % Compare against physical stops (±11.5 deg) and RHP pole timescale
-    fprintf('\n    Physical stop:   ±%.1f deg\n', rad2deg(theta_max));
+    fprintf('\n    Physical stop:   ±%.1f deg\n', rad2deg(alpha_max));
     fprintf('    RHP pole:        +%.2f rad/s  (%.1f ms time constant)\n', ...
         p_unstable_hint, 1000/p_unstable_hint);
     fprintf('    Safety margin:   %.1f deg  (%.0f%%%% of physical limit)\n', ...
-        rad2deg(theta_max) - rad2deg(theta_max_abs), ...
-        (1 - theta_max_abs/theta_max)*100);
+        rad2deg(alpha_max) - rad2deg(alpha_max_abs), ...
+        (1 - alpha_max_abs/alpha_max)*100);
 
     fprintf('\n  --- Cart Envelope ---\n');
     fprintf('    RMS:        %.3f cm\n', xc_rms*100);
@@ -324,8 +291,8 @@ else
     %% A2. Oscillation frequency from zero-crossing
     % The rocking occurs at a well-defined frequency set by the closed-loop
     % dominant pole pair and the dead-zone width.
-    theta_demean = theta_t - mean(theta_t);
-    zc = find(diff(sign(theta_demean)) ~= 0);
+    alpha_demean = alpha_t - mean(alpha_t);
+    zc = find(diff(sign(alpha_demean)) ~= 0);
     if length(zc) >= 4
         % Half-periods between successive zero crossings
         half_periods = diff(t_t(zc));
@@ -342,17 +309,17 @@ else
     %% A3. Spectral analysis of the oscillation
     % FFT to identify the dominant rocking frequency and harmonics
     % (harmonics = signature of dead-zone nonlinearity).
-    n_fft     = 2^nextpow2(length(theta_demean));
-    win       = my_hanning(length(theta_demean));
-    theta_fft = fft(theta_demean .* win, n_fft);
-    theta_psd = abs(theta_fft(1:n_fft/2+1)).^2 / (Fs * sum(win.^2));
+    n_fft     = 2^nextpow2(length(alpha_demean));
+    win       = my_hanning(length(alpha_demean));
+    alpha_fft = fft(alpha_demean .* win, n_fft);
+    alpha_psd = abs(alpha_fft(1:n_fft/2+1)).^2 / (Fs * sum(win.^2));
     f_psd     = Fs * (0:n_fft/2)' / n_fft;
 
     % Find dominant peak (excluding DC)
     f_range = f_psd >= 0.2 & f_psd <= 15;
-    [~, idx_dom] = max(theta_psd(f_range));
+    [~, idx_dom] = max(alpha_psd(f_range));
     f_dom_psd = f_psd(find(f_range, 1, 'first') + idx_dom - 1);
-    psd_ratio = theta_psd(f_range);
+    psd_ratio = alpha_psd(f_range);
     psd_ratio = max(psd_ratio) / mean(psd_ratio);
 
     fprintf('\n  --- Spectral Analysis ---\n');
@@ -360,14 +327,14 @@ else
     fprintf('    PSD peak/mean:  %.1f  (>10 = clean oscillation)\n', psd_ratio);
 
     %% A4. Bound quality: fraction of time within tight/medium/wide bounds
-    tight_pct  = mean(abs(theta_t) < rad2deg(0.5)  * pi/180) * 100;
-    medium_pct = mean(abs(theta_t) < rad2deg(2.0)  * pi/180) * 100;
-    wide_pct   = mean(abs(theta_t) < rad2deg(5.0)  * pi/180) * 100;
+    tight_pct  = mean(abs(alpha_t) < rad2deg(0.5)  * pi/180) * 100;
+    medium_pct = mean(abs(alpha_t) < rad2deg(2.0)  * pi/180) * 100;
+    wide_pct   = mean(abs(alpha_t) < rad2deg(5.0)  * pi/180) * 100;
 
     fprintf('\n  --- Bound Quality (time within envelope) ---\n');
-    fprintf('    |θ| < 0.5 deg:  %.1f%%%%\n', tight_pct);
-    fprintf('    |θ| < 2.0 deg:  %.1f%%%%\n', medium_pct);
-    fprintf('    |θ| < 5.0 deg:  %.1f%%%%\n', wide_pct);
+    fprintf('    |α| < 0.5 deg:  %.1f%%%%\n', tight_pct);
+    fprintf('    |α| < 2.0 deg:  %.1f%%%%\n', medium_pct);
+    fprintf('    |α| < 5.0 deg:  %.1f%%%%\n', wide_pct);
 
     bound_score = tight_pct * 0.5 + medium_pct * 0.3 + wide_pct * 0.2;
     fprintf('    Bound score:    %.1f/100  (weighted, higher=better)\n', bound_score);
@@ -382,15 +349,15 @@ else
     yline(-xc_p95*100, 'k--');
     ylabel('x_c [cm]');
     title(sprintf('Free-Run: Bounded Oscillation (RMS angle = %.2f deg, 95%% bound = %.2f deg)', ...
-        rad2deg(theta_rms), rad2deg(theta_p95)));
+        rad2deg(alpha_rms), rad2deg(alpha_p95)));
 
     subplot(4,1,2);
-    plot(t, rad2deg(theta), 'r-', 'LineWidth', 1.0); grid on; hold on;
-    yline( rad2deg(theta_p95), 'k--');
-    yline(-rad2deg(theta_p95), 'k--');
-    yline( rad2deg(theta_max), 'm:', 'Physical stop');
-    yline(-rad2deg(theta_max), 'm:');
-    ylabel('\theta [deg]');
+    plot(t, rad2deg(alpha), 'r-', 'LineWidth', 1.0); grid on; hold on;
+    yline( rad2deg(alpha_p95), 'k--');
+    yline(-rad2deg(alpha_p95), 'k--');
+    yline( rad2deg(alpha_max), 'm:', 'Physical stop');
+    yline(-rad2deg(alpha_max), 'm:');
+    ylabel('\alpha [deg]');
 
     subplot(4,1,3);
     plot(t, vm, 'Color', [0 0.6 0], 'LineWidth', 0.8); grid on; hold on;
@@ -400,7 +367,7 @@ else
     title(sprintf('Voltage: peak=%.2f V (%.0f%%%% of ±%.1f V)', vm_max, vm_frac, V_sat));
 
     subplot(4,1,4);
-    semilogy(f_psd, theta_psd, 'r-', 'LineWidth', 1.2); grid on;
+    semilogy(f_psd, alpha_psd, 'r-', 'LineWidth', 1.2); grid on;
     xlim([0.01 20]); ylabel('PSD [rad^2/Hz]'); xlabel('Frequency [Hz]');
     hold on; xline(f_dom_psd, 'k--', sprintf('%.2f Hz', f_dom_psd));
     if exist('osc_freq', 'var'), xline(osc_freq, 'b--', sprintf('ZC: %.2f Hz', osc_freq)); end
@@ -413,15 +380,15 @@ else
     %% A6. Bound-score histogram
     figure('Name', 'Verification: Bound Quality', ...
         'Position', [100 100 800 400]);
-    h = histogram(rad2deg(theta_t), 'BinWidth', 0.25, 'FaceColor', 'r', ...
+    h = histogram(rad2deg(alpha_t), 'BinWidth', 0.25, 'FaceColor', 'r', ...
         'EdgeColor', 'none', 'Normalization', 'count');
     hold on; grid on;
     xline(0, 'k-', 'LineWidth', 1.5);
-    xline( rad2deg(theta_rms), 'k--', sprintf('±RMS = ±%.2f°', rad2deg(theta_rms)));
-    xline(-rad2deg(theta_rms), 'k--');
-    xline( rad2deg(theta_p95), 'm--', sprintf('±95%% = ±%.2f°', rad2deg(theta_p95)));
-    xline(-rad2deg(theta_p95), 'm--');
-    xlabel('\theta [deg]'); ylabel('Count');
+    xline( rad2deg(alpha_rms), 'k--', sprintf('±RMS = ±%.2f°', rad2deg(alpha_rms)));
+    xline(-rad2deg(alpha_rms), 'k--');
+    xline( rad2deg(alpha_p95), 'm--', sprintf('±95%% = ±%.2f°', rad2deg(alpha_p95)));
+    xline(-rad2deg(alpha_p95), 'm--');
+    xlabel('\alpha [deg]'); ylabel('Count');
     title(sprintf('Angle Distribution — %.1f%%%% within ±0.5°, %.1f%%%% within ±2°', ...
         tight_pct, medium_pct));
     saveas(gcf, fullfile(figdir, 'Verification-BoundQuality.png'));
@@ -454,7 +421,7 @@ else
     t      = d.hw_t(:);
     d_inj  = d.hw_d(:);
     xc     = d.hw_xc(:);
-    theta  = d.hw_theta(:);
+    alpha  = d.hw_alpha(:);
     vm     = d.hw_vm(:);
 
     dt = mean(diff(t));
@@ -473,19 +440,19 @@ else
     pre_mask  = t >= 1.0 & t < t_step - 0.2;
     post_mask = t > t_step + 1.0;
 
-    theta_pre_pp   = max(theta(pre_mask))  - min(theta(pre_mask));
-    theta_post_pp  = max(theta(post_mask)) - min(theta(post_mask));
-    theta_pre_rms  = rms(theta(pre_mask));
-    theta_post_rms = rms(theta(post_mask));
+    alpha_pre_pp   = max(alpha(pre_mask))  - min(alpha(pre_mask));
+    alpha_post_pp  = max(alpha(post_mask)) - min(alpha(post_mask));
+    alpha_pre_rms  = rms(alpha(pre_mask));
+    alpha_post_rms = rms(alpha(post_mask));
 
     fprintf('\n  --- Oscillation Envelope Change ---\n');
     fprintf('    Pre-step  P-P:  %.2f deg  |  RMS: %.2f deg\n', ...
-        rad2deg(theta_pre_pp), rad2deg(theta_pre_rms));
+        rad2deg(alpha_pre_pp), rad2deg(alpha_pre_rms));
     fprintf('    Post-step P-P:  %.2f deg  |  RMS: %.2f deg\n', ...
-        rad2deg(theta_post_pp), rad2deg(theta_post_rms));
+        rad2deg(alpha_post_pp), rad2deg(alpha_post_rms));
     fprintf('    Change:         P-P %+.2f deg,  RMS %+.2f deg\n', ...
-        rad2deg(theta_post_pp - theta_pre_pp), ...
-        rad2deg(theta_post_rms - theta_pre_rms));
+        rad2deg(alpha_post_pp - alpha_pre_pp), ...
+        rad2deg(alpha_post_rms - alpha_pre_rms));
 
     %% B3. Disturbance rejection metrics on cart and angle
     step_window = t >= t_step - 0.5 & t <= t_step + 5.0;
@@ -496,8 +463,8 @@ else
     xc_deviation = max(abs(xc(step_window) - xc_pre));
 
     % Peak angle excursion during transient
-    theta_peak_transient = max(abs(theta(step_window)));
-    theta_peak_transient_deg = rad2deg(theta_peak_transient);
+    alpha_peak_transient = max(abs(alpha(step_window)));
+    alpha_peak_transient_deg = rad2deg(alpha_peak_transient);
 
     % Voltage effort after step (how hard the controller fights back)
     vm_rms_pre  = rms(vm(pre_mask));
@@ -510,7 +477,7 @@ else
     fprintf('\n  --- Disturbance Rejection Metrics ---\n');
     fprintf('    Disturbance step:     %+.3f V\n', d_amp);
     fprintf('    Cart deviation:       %.2f cm\n', xc_deviation*100);
-    fprintf('    Peak |theta| during:  %.2f deg\n', theta_peak_transient_deg);
+    fprintf('    Peak |alpha| during:  %.2f deg\n', alpha_peak_transient_deg);
     fprintf('    V_m RMS: pre=%.2f V → post=%.2f V\n', vm_rms_pre, vm_rms_post);
     fprintf('    Post-step x_c bound:  ±%.2f cm\n', xc_p95_post*100);
 
@@ -531,14 +498,14 @@ else
     legend('x_c', 'd (perturbation)', 'Location', 'best');
 
     subplot(4,1,2);
-    plot(t, rad2deg(theta), 'r-', 'LineWidth', 1.2); grid on; hold on;
+    plot(t, rad2deg(alpha), 'r-', 'LineWidth', 1.2); grid on; hold on;
     yline(0, 'k-');
-    yline( rad2deg(theta_max), 'm:', 'Physical stop');
-    yline(-rad2deg(theta_max), 'm:');
+    yline( rad2deg(alpha_max), 'm:', 'Physical stop');
+    yline(-rad2deg(alpha_max), 'm:');
     xline(t_step, 'g--');
-    ylabel('\theta [deg]');
+    ylabel('\alpha [deg]');
     title(sprintf('Angle: pre-step PP=%.2f°, post-step PP=%.2f°', ...
-        rad2deg(theta_pre_pp), rad2deg(theta_post_pp)));
+        rad2deg(alpha_pre_pp), rad2deg(alpha_post_pp)));
 
     subplot(4,1,3);
     plot(t, vm, 'Color', [0 0.6 0], 'LineWidth', 0.8); grid on; hold on;
@@ -550,13 +517,13 @@ else
         vm_rms_pre, vm_rms_post));
 
     subplot(4,1,4);
-    h_pre = histogram(rad2deg(theta(pre_mask)), 'BinWidth', 0.25, ...
+    h_pre = histogram(rad2deg(alpha(pre_mask)), 'BinWidth', 0.25, ...
         'FaceColor', 'b', 'EdgeColor', 'none', 'Normalization', 'pdf');
     hold on;
-    h_post = histogram(rad2deg(theta(post_mask)), 'BinWidth', 0.25, ...
+    h_post = histogram(rad2deg(alpha(post_mask)), 'BinWidth', 0.25, ...
         'FaceColor', 'r', 'EdgeColor', 'none', 'Normalization', 'pdf');
     grid on;
-    xlabel('\theta [deg]'); ylabel('PDF');
+    xlabel('\alpha [deg]'); ylabel('PDF');
     legend('Pre-step', 'Post-step');
     title('Angle Distribution: Before vs After Disturbance');
 
@@ -576,11 +543,11 @@ else
     legend('x_c [cm]', 'd [V]');
 
     subplot(2,1,2);
-    plot(tw, rad2deg(theta(step_window)), 'r-', 'LineWidth', 1.2); hold on;
+    plot(tw, rad2deg(alpha(step_window)), 'r-', 'LineWidth', 1.2); hold on;
     grid on; xlim([-0.2 2.0]);
     yline(0, 'k-');
-    ylabel('\theta [deg]'); xlabel('Time from disturbance [s]');
-    title(sprintf('Angle Transient (peak = %.2f deg)', theta_peak_transient_deg));
+    ylabel('\alpha [deg]'); xlabel('Time from disturbance [s]');
+    title(sprintf('Angle Transient (peak = %.2f deg)', alpha_peak_transient_deg));
 
     saveas(gcf, fullfile(figdir, 'Verification-StepZoom.png'));
     fprintf('  Saved: docs/figures/Verification-StepZoom.png\n');
@@ -593,17 +560,17 @@ end
 %  A small-amplitude broadband disturbance d (PRBS preferred, chirp OK)
 %  is injected into the control signal:  u = sat(-K*x + d).
 %
-%  From logged d, V_m, x_c, theta we estimate two families of FRFs:
+%  From logged d, V_m, x_c, alpha we estimate two families of FRFs:
 %
 %  (1) Closed-loop disturbance sensitivity (what the script originally did):
 %        X_c(s)/d(s)   = G_xc * S      <- cart disturbance rejection
-%        theta(s)/d(s) = G_theta * S   <- angle disturbance rejection
+%        alpha(s)/d(s) = G_alpha * S   <- angle disturbance rejection
 %        V_m(s)/d(s)   = S             <- input sensitivity
 %      Compared to (sI - A + BK)^-1 B from the model -> CL-rejection check.
 %
 %  (2) Open-loop PLANT FRF via the indirect / IV method:
 %        G_xc(jw)    = (X_c/d) / (V_m/d) = H_xc(jw) / H_vm(jw)
-%        G_theta(jw) = (theta/d) / (V_m/d)
+%        G_alpha(jw) = (alpha/d) / (V_m/d)
 %      Compared to (sI - A)^-1 B from the model -> plant-model check.
 %      d acts as an instrumental variable, so this is asymptotically
 %      unbiased despite the unstable plant being in closed loop.
@@ -624,7 +591,7 @@ else
     t      = d.hw_t(:);
     d_inj  = d.hw_d(:);
     xc     = d.hw_xc(:);
-    theta  = d.hw_theta(:);
+    alpha  = d.hw_alpha(:);
     vm     = d.hw_vm(:);
 
     dt = mean(diff(t));
@@ -641,11 +608,11 @@ else
 
     % H1 estimator from disturbance d to each output
     [H_xc, f_tfe]    = tfestimate(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [H_theta, ~]     = tfestimate(d_inj, theta, hanning(n_seg), n_overlap, n_seg, Fs);
+    [H_alpha, ~]     = tfestimate(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
     [H_vm, ~]        = tfestimate(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
 
     [C_xc, ~]    = mscohere(d_inj, xc,    hanning(n_seg), n_overlap, n_seg, Fs);
-    [C_theta, ~] = mscohere(d_inj, theta, hanning(n_seg), n_overlap, n_seg, Fs);
+    [C_alpha, ~] = mscohere(d_inj, alpha, hanning(n_seg), n_overlap, n_seg, Fs);
     [C_vm, ~]    = mscohere(d_inj, vm,    hanning(n_seg), n_overlap, n_seg, Fs);
 
     % --- Indirect / IV plant FRF (closed-loop ID) -----------------------
@@ -655,11 +622,11 @@ else
     % opening the (unstable) loop. d is the instrumental variable, so
     % the estimate is unbiased even though u is correlated with noise.
     G_xc_plant    = H_xc    ./ H_vm;
-    G_theta_plant = H_theta ./ H_vm;
+    G_alpha_plant = H_alpha ./ H_vm;
 
     coh_thresh    = 0.5;
     mask_xc_iv    = (C_vm > coh_thresh) & (C_xc    > coh_thresh);
-    mask_theta_iv = (C_vm > coh_thresh) & (C_theta > coh_thresh);
+    mask_alpha_iv = (C_vm > coh_thresh) & (C_alpha > coh_thresh);
 
     f_lo = 0.1;
     f_hi = validation_f_hi_Hz;
@@ -693,26 +660,26 @@ else
 
     % Coherence quality
     coh_xc_avg    = mean(C_xc(f_mask));
-    coh_theta_avg = mean(C_theta(f_mask));
+    coh_alpha_avg = mean(C_alpha(f_mask));
     coh_vm_avg    = mean(C_vm(f_mask));
     fprintf('\n  --- Coherence ---\n');
     fprintf('    Mean coh (x_c):     %.2f  (>0.7 = good CL FRF)\n', coh_xc_avg);
-    fprintf('    Mean coh (theta):   %.2f  (lower = rocking dominates)\n', coh_theta_avg);
+    fprintf('    Mean coh (alpha):   %.2f  (lower = rocking dominates)\n', coh_alpha_avg);
     fprintf('    Mean coh (V_m):     %.2f  (>0.7 = good IV plant FRF)\n', coh_vm_avg);
-    if coh_theta_avg < 0.5
-        fprintf('    Note: theta coherence may be low because the unmeasured\n');
+    if coh_alpha_avg < 0.5
+        fprintf('    Note: alpha coherence may be low because the unmeasured\n');
         fprintf('          rocking disturbance is uncorrelated with injected d(t).\n');
         fprintf('          This is expected.\n');
     end
 
     %% C2b. Open-loop plant FRF coverage (indirect estimate)
     iv_coverage_xc    = sum(mask_xc_iv(f_mask))    / sum(f_mask) * 100;
-    iv_coverage_theta = sum(mask_theta_iv(f_mask)) / sum(f_mask) * 100;
+    iv_coverage_alpha = sum(mask_alpha_iv(f_mask)) / sum(f_mask) * 100;
     fprintf('\n  --- Indirect Plant FRF Coverage (coh > %.1f) ---\n', coh_thresh);
     fprintf('    X_c/V_m reliable:    %.0f%%%% of [%.2f, %.2f] Hz\n', ...
         iv_coverage_xc, f_lo, f_hi);
-    fprintf('    theta/V_m reliable:  %.0f%%%% of [%.2f, %.2f] Hz\n', ...
-        iv_coverage_theta, f_lo, f_hi);
+    fprintf('    alpha/V_m reliable:  %.0f%%%% of [%.2f, %.2f] Hz\n', ...
+        iv_coverage_alpha, f_lo, f_hi);
     if iv_coverage_xc < 30
         fprintf('    Warning: indirect estimate has poor coverage. Use PRBS\n');
         fprintf('             and/or a longer record (>= 90 s).\n');
@@ -751,21 +718,21 @@ else
     title('Phase V_m / d');
 
     subplot(3,2,5);
-    mag_theta_db = 20*log10(abs(H_theta(f_mask)));
-    semilogx(f_use, mag_theta_db, 'r-', 'LineWidth', 1.5); grid on;
+    mag_alpha_db = 20*log10(abs(H_alpha(f_mask)));
+    semilogx(f_use, mag_alpha_db, 'r-', 'LineWidth', 1.5); grid on;
     xlim([f_lo f_hi]);
     ylabel('Magnitude [dB rad/V]');
     xlabel('Frequency [Hz]');
-    title('Angle Sensitivity: \theta / d');
+    title('Angle Sensitivity: α / d');
 
     subplot(3,2,6);
     semilogx(f_use, C_xc(f_mask), 'b-', 'LineWidth', 1.2); hold on;
-    semilogx(f_use, C_theta(f_mask), 'r-', 'LineWidth', 1.2); grid on;
+    semilogx(f_use, C_alpha(f_mask), 'r-', 'LineWidth', 1.2); grid on;
     yline(0.7, 'k--');
     xlim([f_lo f_hi]); ylim([0 1]);
     ylabel('Coherence');
     xlabel('Frequency [Hz]');
-    legend('x_c', '\theta', 'Location', 'best');
+    legend('x_c', '\alpha', 'Location', 'best');
     title('Coherence (H1 estimator quality)');
 
     sgtitle('Hardware Verification — Disturbance-to-Output Frequency Response', ...
@@ -821,25 +788,25 @@ else
     % This is the plant-model check. (sI-A)^-1 B is the OPEN-LOOP plant,
     % recovered from closed-loop data via G(jw) = H_xc(jw) / H_vm(jw).
     G_xc_plant_model    = tf(ss(A_sw, B_sw, [1 0 0 0], 0));
-    G_theta_plant_model = tf(ss(A_sw, B_sw, [0 0 1 0], 0));
+    G_alpha_plant_model = tf(ss(A_sw, B_sw, [0 0 1 0], 0));
 
     [mag_p_xc,    phase_p_xc]    = bode(G_xc_plant_model,    2*pi*f_use);
-    [mag_p_theta, phase_p_theta] = bode(G_theta_plant_model, 2*pi*f_use);
+    [mag_p_alpha, phase_p_alpha] = bode(G_alpha_plant_model, 2*pi*f_use);
     mag_p_xc_db       = 20*log10(squeeze(mag_p_xc));
-    mag_p_theta_db    = 20*log10(squeeze(mag_p_theta));
+    mag_p_alpha_db    = 20*log10(squeeze(mag_p_alpha));
     phase_p_xc_deg    = squeeze(phase_p_xc);
-    phase_p_theta_deg = squeeze(phase_p_theta);
+    phase_p_alpha_deg = squeeze(phase_p_alpha);
 
     % NaN-mask the indirect estimate where coherence is too low to trust
     G_xc_iv_plot    = G_xc_plant(f_mask);
-    G_theta_iv_plot = G_theta_plant(f_mask);
+    G_alpha_iv_plot = G_alpha_plant(f_mask);
     G_xc_iv_plot(~mask_xc_iv(f_mask))       = NaN;
-    G_theta_iv_plot(~mask_theta_iv(f_mask)) = NaN;
+    G_alpha_iv_plot(~mask_alpha_iv(f_mask)) = NaN;
 
     mag_xc_iv_db       = 20*log10(abs(G_xc_iv_plot));
-    mag_theta_iv_db    = 20*log10(abs(G_theta_iv_plot));
+    mag_alpha_iv_db    = 20*log10(abs(G_alpha_iv_plot));
     phase_xc_iv_deg    = unwrap(angle(G_xc_iv_plot)) * 180/pi;
-    phase_theta_iv_deg = unwrap(angle(G_theta_iv_plot)) * 180/pi;
+    phase_alpha_iv_deg = unwrap(angle(G_alpha_iv_plot)) * 180/pi;
 
     figure('Name', 'Verification: OL Plant Bode (Indirect) vs Model', ...
         'Position', [100 100 1100 700]);
@@ -860,31 +827,31 @@ else
     title('Phase X_c / V_m');
 
     subplot(2,2,3);
-    semilogx(f_use, mag_theta_iv_db, 'r-', 'LineWidth', 1.5); hold on;
-    semilogx(f_use, mag_p_theta_db,  'k--', 'LineWidth', 2);
+    semilogx(f_use, mag_alpha_iv_db, 'r-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, mag_p_alpha_db,  'k--', 'LineWidth', 2);
     grid on; xlim([f_lo f_hi]);
-    ylabel('|G_{\theta}| [dB rad/V]'); xlabel('Frequency [Hz]');
+    ylabel('|G_{\alpha}| [dB rad/V]'); xlabel('Frequency [Hz]');
     legend('Hardware (IV indirect)', 'Model (sI-A)^{-1}B', 'Location', 'best');
-    title('Plant: \theta / V_m');
+    title('Plant: \alpha / V_m');
 
     subplot(2,2,4);
-    semilogx(f_use, phase_theta_iv_deg, 'r-', 'LineWidth', 1.5); hold on;
-    semilogx(f_use, phase_p_theta_deg,  'k--', 'LineWidth', 2);
+    semilogx(f_use, phase_alpha_iv_deg, 'r-', 'LineWidth', 1.5); hold on;
+    semilogx(f_use, phase_p_alpha_deg,  'k--', 'LineWidth', 2);
     grid on; xlim([f_lo f_hi]);
     ylabel('Phase [deg]'); xlabel('Frequency [Hz]');
-    title('Phase \theta / V_m');
+    title('Phase \alpha / V_m');
 
     % Mag-error metrics (in the coherent band only)
     err_xc    = mag_xc_iv_db    - mag_p_xc_db;
-    err_theta = mag_theta_iv_db - mag_p_theta_db;
+    err_alpha = mag_alpha_iv_db - mag_p_alpha_db;
     plant_err_xc_rms    = rms(err_xc(~isnan(err_xc)));
-    plant_err_theta_rms = rms(err_theta(~isnan(err_theta)));
+    plant_err_alpha_rms = rms(err_alpha(~isnan(err_alpha)));
 
     fprintf('\n  --- Plant Model vs Indirect Estimate ---\n');
     fprintf('    RMS mag error (X_c/V_m):    %.2f dB  (coherent band)\n', ...
         plant_err_xc_rms);
-    fprintf('    RMS mag error (theta/V_m):  %.2f dB  (coherent band)\n', ...
-        plant_err_theta_rms);
+    fprintf('    RMS mag error (alpha/V_m):  %.2f dB  (coherent band)\n', ...
+        plant_err_alpha_rms);
 
     sgtitle('Hardware Verification — Open-Loop PLANT Bode (Indirect)', ...
         'FontWeight', 'bold');
@@ -908,7 +875,7 @@ else
         id_split_frac = 0.70;
         id_orders     = [4 4 1];  % nb, nf, nk for the voltage-to-output dynamics
 
-        finite_mask = isfinite(t) & isfinite(vm) & isfinite(xc) & isfinite(theta);
+        finite_mask = isfinite(t) & isfinite(vm) & isfinite(xc) & isfinite(alpha);
         id_mask = finite_mask & t >= id_trim_s;
         id_idx = find(id_mask);
         id_decim = max(1, round(Fs / id_target_fs));
@@ -920,14 +887,14 @@ else
             t_id = t(id_idx) - t(id_idx(1));
             u_id = vm(id_idx);
             y_xc_id = xc(id_idx);
-            y_theta_id = theta(id_idx);
+            y_alpha_id = alpha(id_idx);
             Ts_id = median(diff(t_id));
 
             % Demean the closed-loop record so nlhw fits the perturbed
             % voltage-to-motion dynamics rather than static encoder offsets.
             u_id = u_id - mean(u_id);
             y_xc_id = y_xc_id - mean(y_xc_id);
-            y_theta_id = y_theta_id - mean(y_theta_id);
+            y_alpha_id = y_alpha_id - mean(y_alpha_id);
 
             split_idx = floor(id_split_frac * numel(t_id));
             est_idx = 1:split_idx;
@@ -935,16 +902,16 @@ else
 
             ze_xc = iddata(y_xc_id(est_idx), u_id(est_idx), Ts_id);
             zv_xc = iddata(y_xc_id(val_idx), u_id(val_idx), Ts_id);
-            ze_theta = iddata(y_theta_id(est_idx), u_id(est_idx), Ts_id);
-            zv_theta = iddata(y_theta_id(val_idx), u_id(val_idx), Ts_id);
+            ze_alpha = iddata(y_alpha_id(est_idx), u_id(est_idx), Ts_id);
+            zv_alpha = iddata(y_alpha_id(val_idx), u_id(val_idx), Ts_id);
 
             ze_xc.InputName = {'V_m_total'}; ze_xc.OutputName = {'x_c'};
             zv_xc.InputName = {'V_m_total'}; zv_xc.OutputName = {'x_c'};
-            ze_theta.InputName = {'V_m_total'}; ze_theta.OutputName = {'theta'};
-            zv_theta.InputName = {'V_m_total'}; zv_theta.OutputName = {'theta'};
+            ze_alpha.InputName = {'V_m_total'}; ze_alpha.OutputName = {'alpha'};
+            zv_alpha.InputName = {'V_m_total'}; zv_alpha.OutputName = {'alpha'};
 
             [in_nl_xc, out_nl_xc] = make_hw_nonlinearities();
-            [in_nl_theta, out_nl_theta] = make_hw_nonlinearities();
+            [in_nl_alpha, out_nl_alpha] = make_hw_nonlinearities();
 
             fprintf('  Input: logged total V_m, not injected d.\n');
             fprintf('  Fit data: %.1f s to %.1f s | Validation: %.1f s to %.1f s | Fs ~= %.0f Hz\n', ...
@@ -956,30 +923,30 @@ else
                     opt = nlhwOptions;
                     opt.Display = 'off';
                     hw_xc_model = nlhw(ze_xc, id_orders, in_nl_xc, out_nl_xc, opt);
-                    hw_theta_model = nlhw(ze_theta, id_orders, in_nl_theta, out_nl_theta, opt);
+                    hw_alpha_model = nlhw(ze_alpha, id_orders, in_nl_alpha, out_nl_alpha, opt);
                 else
                     hw_xc_model = nlhw(ze_xc, id_orders, in_nl_xc, out_nl_xc);
-                    hw_theta_model = nlhw(ze_theta, id_orders, in_nl_theta, out_nl_theta);
+                    hw_alpha_model = nlhw(ze_alpha, id_orders, in_nl_alpha, out_nl_alpha);
                 end
 
                 [y_xc_hat, fit_xc] = compare(zv_xc, hw_xc_model);
-                [y_theta_hat, fit_theta] = compare(zv_theta, hw_theta_model);
+                [y_alpha_hat, fit_alpha] = compare(zv_alpha, hw_alpha_model);
                 if iscell(y_xc_hat), y_xc_hat = y_xc_hat{1}; end
-                if iscell(y_theta_hat), y_theta_hat = y_theta_hat{1}; end
+                if iscell(y_alpha_hat), y_alpha_hat = y_alpha_hat{1}; end
 
                 hw_fit_xc_pct = fit_xc(1);
-                hw_fit_theta_pct = fit_theta(1);
+                hw_fit_alpha_pct = fit_alpha(1);
                 has_hammerstein_wiener = true;
 
                 fprintf('\n  --- Validation Fit ---\n');
                 fprintf('    x_c:    %.1f%%%%\n', hw_fit_xc_pct);
-                fprintf('    theta:  %.1f%%%%\n', hw_fit_theta_pct);
+                fprintf('    alpha:  %.1f%%%%\n', hw_fit_alpha_pct);
 
                 t_val = t_id(val_idx);
                 xc_val = iddata_output_vector(zv_xc);
-                theta_val = iddata_output_vector(zv_theta);
+                alpha_val = iddata_output_vector(zv_alpha);
                 xc_hat = iddata_output_vector(y_xc_hat);
-                theta_hat = iddata_output_vector(y_theta_hat);
+                alpha_hat = iddata_output_vector(y_alpha_hat);
 
                 figure('Name', 'Verification: Hammerstein-Wiener ID', ...
                     'Position', [80 80 1100 750]);
@@ -997,11 +964,11 @@ else
                 title(sprintf('Hammerstein-Wiener Validation: x_c fit = %.1f%%%%', hw_fit_xc_pct));
 
                 subplot(3,1,3);
-                plot(t_val, rad2deg(theta_val), 'r-', 'LineWidth', 1.0); hold on;
-                plot(t_val, rad2deg(theta_hat), 'k--', 'LineWidth', 1.1);
-                grid on; ylabel('\theta [deg]'); xlabel('Time [s]');
+                plot(t_val, rad2deg(alpha_val), 'r-', 'LineWidth', 1.0); hold on;
+                plot(t_val, rad2deg(alpha_hat), 'k--', 'LineWidth', 1.1);
+                grid on; ylabel('\alpha [deg]'); xlabel('Time [s]');
                 legend('Hardware', 'HW model', 'Location', 'best');
-                title(sprintf('Hammerstein-Wiener Validation: theta fit = %.1f%%%%', hw_fit_theta_pct));
+                title(sprintf('Hammerstein-Wiener Validation: alpha fit = %.1f%%%%', hw_fit_alpha_pct));
 
                 sgtitle('Hardware Verification — Hammerstein-Wiener Model ID', ...
                     'FontWeight', 'bold');
@@ -1012,16 +979,16 @@ else
                     'source_file', freq_file, ...
                     'source_label', freq_label, ...
                     'input', 'logged total motor voltage hw_vm', ...
-                    'outputs', {{'x_c', 'theta'}}, ...
+                    'outputs', {{'x_c', 'alpha'}}, ...
                     'trim_s', id_trim_s, ...
                     'sample_time_s', Ts_id, ...
                     'decimation', id_decim, ...
                     'orders_nb_nf_nk', id_orders, ...
                     'split_fraction', id_split_frac, ...
                     'fit_xc_pct', hw_fit_xc_pct, ...
-                    'fit_theta_pct', hw_fit_theta_pct);
+                    'fit_alpha_pct', hw_fit_alpha_pct);
                 save(fullfile(valdir, 'data', 'hammerstein_wiener_hw.mat'), ...
-                    'hw_xc_model', 'hw_theta_model', 'hw_id_info');
+                    'hw_xc_model', 'hw_alpha_model', 'hw_id_info');
                 fprintf('  Saved: data/hammerstein_wiener_hw.mat\n');
             catch ME
                 fprintf('  Hammerstein-Wiener identification failed: %s\n', ME.message);
@@ -1044,16 +1011,16 @@ if has_obs
     obs_temp = load(fullfile(valdir, 'data', 'hw_obs_free.mat'));
     t_temp = obs_temp.hw_t(:);
     xc_temp = obs_temp.hw_xc(:);
-    theta_temp = obs_temp.hw_theta(:);
+    alpha_temp = obs_temp.hw_alpha(:);
     xc_hat_temp = obs_temp.hw_xc_hat(:);
-    al_hat_temp = obs_temp.hw_theta_hat(:);
+    al_hat_temp = obs_temp.hw_alpha_hat(:);
     
     e_xc_rms = rms(xc_hat_temp - xc_temp);
-    e_theta_rms = rms(al_hat_temp - theta_temp);
+    e_alpha_rms = rms(al_hat_temp - alpha_temp);
     
     q_xc = K_ec;
     q_theta = K_E_SW / K_gs;
-    e_combined = abs(xc_hat_temp - xc_temp) / q_xc + abs(al_hat_temp - theta_temp) / q_theta;
+    e_combined = abs(xc_hat_temp - xc_temp) / q_xc + abs(al_hat_temp - alpha_temp) / q_theta;
     idx_conv = find(e_combined < 3, 1, 'first');
     if ~isempty(idx_conv)
         t_conv = t_temp(idx_conv);
@@ -1070,13 +1037,13 @@ if has_free_run
     subplot(3,3,1);
     d = load(fullfile(valdir, 'data', 'hw_free_run.mat'));
     t_t = d.hw_t(:); t_t = t_t(t_t > 3) - 3;
-    a_t = rad2deg(d.hw_theta(d.hw_t > 3));
+    a_t = rad2deg(d.hw_alpha(d.hw_t > 3));
     plot(t_t, a_t, 'r-', 'LineWidth', 0.8); grid on; hold on;
     yline(0, 'k-');
     a_rms = rms(a_t);
     a_pp = max(a_t) - min(a_t);
     yline( a_rms, 'b--'); yline(-a_rms, 'b--');
-    ylabel('\theta [deg]');
+    ylabel('\alpha [deg]');
     title(sprintf('Angle: RMS=%.2f°, P-P=%.2f°', a_rms, a_pp));
 end
 
@@ -1085,7 +1052,7 @@ if has_free_run
     subplot(3,3,2);
     histogram(a_t, 'BinWidth', 0.3, 'FaceColor', 'r', 'EdgeColor', 'none');
     grid on; xline(0, 'k-', 'LineWidth', 2);
-    xlabel('\theta [deg]'); ylabel('Count');
+    xlabel('\alpha [deg]'); ylabel('Count');
     title(sprintf('Distribution (skew: %.2f)', skewness(a_t)));
 end
 
@@ -1137,7 +1104,7 @@ end
 % --- Tile 6: Oscillation PSD ---
 if has_free_run
     subplot(3,3,6);
-    semilogy(f_psd, theta_psd, 'r-', 'LineWidth', 1.2); grid on;
+    semilogy(f_psd, alpha_psd, 'r-', 'LineWidth', 1.2); grid on;
     xlim([0.1 15]);
     ylabel('PSD [rad^2/Hz]'); xlabel('Freq [Hz]');
     title(sprintf('Angle PSD (peak at %.2f Hz)', f_dom_psd));
@@ -1158,10 +1125,10 @@ end
 if has_chirp
     subplot(3,3,8);
     semilogx(f_use, C_xc(f_mask), 'b-', 'LineWidth', 1.2); hold on;
-    semilogx(f_use, C_theta(f_mask), 'r-', 'LineWidth', 1.2); grid on;
+    semilogx(f_use, C_alpha(f_mask), 'r-', 'LineWidth', 1.2); grid on;
     xlim([f_lo f_hi]); ylim([0 1]);
     ylabel('Coherence'); xlabel('Freq [Hz]');
-    legend('x_c', '\theta', 'Location', 'best');
+    legend('x_c', '\alpha', 'Location', 'best');
     title('H1 Coherence');
 end
 
@@ -1176,9 +1143,9 @@ summary_lines = {
     };
 li = length(summary_lines);
 if has_free_run
-    li = li + 1; summary_lines{li} = sprintf('  Angle RMS:     %.2f deg', rad2deg(theta_rms));
-    li = li + 1; summary_lines{li} = sprintf('  Angle P-P:     %.2f deg', rad2deg(theta_pp));
-    li = li + 1; summary_lines{li} = sprintf('  95%% bound:     %.2f deg', rad2deg(theta_p95));
+    li = li + 1; summary_lines{li} = sprintf('  Angle RMS:     %.2f deg', rad2deg(alpha_rms));
+    li = li + 1; summary_lines{li} = sprintf('  Angle P-P:     %.2f deg', rad2deg(alpha_pp));
+    li = li + 1; summary_lines{li} = sprintf('  95%% bound:     %.2f deg', rad2deg(alpha_p95));
     li = li + 1; summary_lines{li} = sprintf('  Bound score:   %.1f/100', bound_score);
 else
     li = li + 1; summary_lines{li} = '  (no data)';
@@ -1188,7 +1155,7 @@ li = li + 1; summary_lines{li} = '';
 li = li + 1; summary_lines{li} = 'DISTURBANCE STEP:';
 if has_step
     li = li + 1; summary_lines{li} = sprintf('  Cart deviation: %.2f cm', xc_deviation*100);
-    li = li + 1; summary_lines{li} = sprintf('  Peak |theta|:   %.2f deg', theta_peak_transient_deg);
+    li = li + 1; summary_lines{li} = sprintf('  Peak |alpha|:   %.2f deg', alpha_peak_transient_deg);
 else
     li = li + 1; summary_lines{li} = '  (no data)';
 end
@@ -1197,7 +1164,7 @@ if has_obs
     li = li + 1; summary_lines{li} = '';
     li = li + 1; summary_lines{li} = 'OBSERVER:';
     li = li + 1; summary_lines{li} = sprintf('  RMS err xc:    %.3f cm', e_xc_rms*100);
-    li = li + 1; summary_lines{li} = sprintf('  RMS err theta: %.3f deg', rad2deg(e_theta_rms));
+    li = li + 1; summary_lines{li} = sprintf('  RMS err alpha: %.3f deg', rad2deg(e_alpha_rms));
     li = li + 1; summary_lines{li} = sprintf('  Conv time:     %.2f s', t_conv);
 end
 
@@ -1213,7 +1180,7 @@ end
 li = li + 1; summary_lines{li} = '';
 li = li + 1; summary_lines{li} = 'PASS CRITERIA:';
 if has_free_run
-    li = li + 1; summary_lines{li} = sprintf('  RMS < 2 deg?   %s', cond_str(rad2deg(theta_rms) < 2));
+    li = li + 1; summary_lines{li} = sprintf('  RMS < 2 deg?   %s', cond_str(rad2deg(alpha_rms) < 2));
     li = li + 1; summary_lines{li} = sprintf('  Peak V < 5 V?  %s', cond_str(vm_max < 5));
 else
     li = li + 1; summary_lines{li} = '  (no free-run data)';
@@ -1260,33 +1227,33 @@ else
 
     t       = obs.hw_t(:);
     xc      = obs.hw_xc(:);
-    theta   = obs.hw_theta(:);
+    alpha   = obs.hw_alpha(:);
     vm      = obs.hw_vm(:);
     xc_hat  = obs.hw_xc_hat(:);
     xcd_hat = obs.hw_xcdot_hat(:);
-    al_hat  = obs.hw_theta_hat(:);
-    ald_hat = obs.hw_thetadot_hat(:);
+    al_hat  = obs.hw_alpha_hat(:);
+    ald_hat = obs.hw_alphadot_hat(:);
 
     dt = mean(diff(t));
     Fs = 1/dt;
     fprintf('  Duration: %.1f s  |  Fs: %.0f Hz  |  N: %d\n', t(end), Fs, length(t));
 
     %% F1. Tracking error: observer estimate vs encoder measurement
-    % The observer should converge to x_c_meas and theta_meas within its
+    % The observer should converge to x_c_meas and alpha_meas within its
     % time constant (≈ 20/k_obs/σ_th ~ 0.8 s for k_obs=5).
     e_xc    = xc_hat - xc;
-    e_theta = al_hat - theta;
+    e_alpha = al_hat - alpha;
 
     e_xc_rms    = rms(e_xc);
-    e_theta_rms = rms(e_theta);
+    e_alpha_rms = rms(e_alpha);
     e_xc_max    = max(abs(e_xc));
-    e_theta_max = max(abs(e_theta));
+    e_alpha_max = max(abs(e_alpha));
 
     % Convergence time: time until both errors drop below encoder resolution
-    % (K_ec = 2.54e-4 m/count for cart, K_E_SW / K_gs for theta)
+    % (K_ec = 2.54e-4 m/count for cart, K_E_SW / K_gs for alpha)
     q_xc    = K_ec;
     q_theta = K_E_SW / K_gs;
-    e_combined = abs(e_xc) / q_xc + abs(e_theta) / q_theta;
+    e_combined = abs(e_xc) / q_xc + abs(e_alpha) / q_theta;
     idx_conv = find(e_combined < 3, 1, 'first');
     if ~isempty(idx_conv)
         t_conv = t(idx_conv);
@@ -1298,9 +1265,9 @@ else
     fprintf('    Cart RMS error:   %.4f cm  (encoder res = %.4f cm)\n', ...
         e_xc_rms*100, q_xc*100);
     fprintf('    Cart max |error|: %.4f cm\n', e_xc_max*100);
-    fprintf('    Theta RMS error:  %.4f deg  (encoder res = %.4f deg)\n', ...
-        rad2deg(e_theta_rms), rad2deg(q_theta));
-    fprintf('    Theta max |err|:  %.4f deg\n', rad2deg(e_theta_max));
+    fprintf('    Alpha RMS error:  %.4f deg  (encoder res = %.4f deg)\n', ...
+        rad2deg(e_alpha_rms), rad2deg(q_theta));
+    fprintf('    Alpha max |err|:  %.4f deg\n', rad2deg(e_alpha_max));
     fprintf('    Convergence time: %.2f s  (error < 3× encoder res)\n', t_conv);
 
     %% F2. Innovation analysis (y - C_meas * xhat)
@@ -1310,26 +1277,26 @@ else
     % noise. Systematic patterns = model mismatch (wrong B_eq, inertia,
     % or unmodeled friction).
     innov_xc    = xc - xc_hat;
-    innov_theta = theta - al_hat;
+    innov_alpha = alpha - al_hat;
 
     innov_xc_rms    = rms(innov_xc);
-    innov_theta_rms = rms(innov_theta);
+    innov_alpha_rms = rms(innov_alpha);
     innov_xc_bias   = mean(innov_xc);
-    innov_theta_bias = mean(innov_theta);
+    innov_alpha_bias = mean(innov_alpha);
 
     % Whiteness check via autocorrelation lag-1
     innov_xc_dm = innov_xc - mean(innov_xc);
-    innov_theta_dm = innov_theta - mean(innov_theta);
+    innov_alpha_dm = innov_alpha - mean(innov_alpha);
     rho_xc_lag1    = innov_xc_dm(2:end)' * innov_xc_dm(1:end-1) / (innov_xc_dm' * innov_xc_dm);
-    rho_theta_lag1 = innov_theta_dm(2:end)' * innov_theta_dm(1:end-1) / (innov_theta_dm' * innov_theta_dm);
+    rho_alpha_lag1 = innov_alpha_dm(2:end)' * innov_alpha_dm(1:end-1) / (innov_alpha_dm' * innov_alpha_dm);
 
     fprintf('\n  --- Innovation (Measurement - Prediction) ---\n');
     fprintf('    Cart innov RMS:    %.4f cm  | bias: %+.4f cm  | lag-1 ρ: %+.3f\n', ...
         innov_xc_rms*100, innov_xc_bias*100, rho_xc_lag1);
-    fprintf('    Theta innov RMS:   %.4f deg | bias: %+.4f deg | lag-1 ρ: %+.3f\n', ...
-        rad2deg(innov_theta_rms), rad2deg(innov_theta_bias), rho_theta_lag1);
+    fprintf('    Alpha innov RMS:   %.4f deg | bias: %+.4f deg | lag-1 ρ: %+.3f\n', ...
+        rad2deg(innov_alpha_rms), rad2deg(innov_alpha_bias), rho_alpha_lag1);
 
-    if abs(rho_xc_lag1) > 0.3 || abs(rho_theta_lag1) > 0.3
+    if abs(rho_xc_lag1) > 0.3 || abs(rho_alpha_lag1) > 0.3
         fprintf('    ⚠ High innovation autocorrelation — model mismatch suspected.\n');
         fprintf('      Possible causes: B_eq error, unmodeled Coulomb friction,\n');
         fprintf('      incorrect pivot inertia, or D_C error.\n');
@@ -1351,7 +1318,7 @@ else
     fc_diff = 30;  % Hz — same as dirty-derivative LPF cutoff
     [b_diff, a_diff] = my_butter(2, fc_diff/(Fs/2));
     xc_filt  = my_filtfilt(b_diff, a_diff, xc);
-    al_filt  = my_filtfilt(b_diff, a_diff, theta);
+    al_filt  = my_filtfilt(b_diff, a_diff, alpha);
     xcd_num  = [diff(xc_filt); 0] / dt;
     ald_num  = [diff(al_filt); 0] / dt;
     xcd_num  = my_filtfilt(b_diff, a_diff, xcd_num);
@@ -1370,7 +1337,7 @@ else
     fprintf('\n  --- Velocity Estimate Comparison ---\n');
     fprintf('    Cart vel RMS (observer):  %.3f m/s  |  (numerical): %.3f m/s\n', ...
         v_xc_obs_rms, v_xc_num_rms);
-    fprintf('    Theta vel RMS (observer): %.3f rad/s |  (numerical): %.3f rad/s\n', ...
+    fprintf('    Alpha vel RMS (observer): %.3f rad/s |  (numerical): %.3f rad/s\n', ...
         v_al_obs_rms, v_al_num_rms);
 
     %% F4. Figures — Observer Verification
@@ -1390,21 +1357,21 @@ else
 
     subplot(4,1,2);
     yyaxis left;
-    plot(t, rad2deg(theta), 'b-', 'LineWidth', 1.0); hold on;
+    plot(t, rad2deg(alpha), 'b-', 'LineWidth', 1.0); hold on;
     plot(t, rad2deg(al_hat), 'r--', 'LineWidth', 1.2);
-    ylabel('\theta [deg]');
+    ylabel('\alpha [deg]');
     yyaxis right;
-    plot(t, rad2deg(e_theta), 'k-', 'LineWidth', 0.5);
+    plot(t, rad2deg(e_alpha), 'k-', 'LineWidth', 0.5);
     ylabel('Error [deg]');
     grid on; legend('Measured', 'Observer', 'Error', 'Location', 'best');
-    title(sprintf('Theta Tracking (RMS err = %.3f deg)', rad2deg(e_theta_rms)));
+    title(sprintf('Alpha Tracking (RMS err = %.3f deg)', rad2deg(e_alpha_rms)));
 
     subplot(4,1,3);
     plot(t, e_xc*100, 'b-', 'LineWidth', 0.6); hold on;
-    plot(t, rad2deg(e_theta), 'r-', 'LineWidth', 0.6); grid on;
+    plot(t, rad2deg(e_alpha), 'r-', 'LineWidth', 0.6); grid on;
     yline(0, 'k-');
     ylabel('Error');
-    legend('Cart [cm]', 'Theta [deg]', 'Location', 'best');
+    legend('Cart [cm]', 'Alpha [deg]', 'Location', 'best');
     title(sprintf('Innovation: convergence in %.2f s', t_conv));
     xline(t_conv, 'g--', sprintf('%.1f s', t_conv));
 
@@ -1415,7 +1382,7 @@ else
     semilogy(f_psd, P_ald_num, 'm--', 'LineWidth', 1.0);
     grid on; xlim([0.05 30]);
     ylabel('PSD'); xlabel('Frequency [Hz]');
-    legend('x_c-dot (obs)', 'x_c-dot (num)', '\theta-dot (obs)', '\theta-dot (num)');
+    legend('x_c-dot (obs)', 'x_c-dot (num)', '\alpha-dot (obs)', '\alpha-dot (num)');
     title('Velocity Estimate PSD: Observer vs Numerical Derivative');
 
     sgtitle('Hardware Verification — Observer Performance', 'FontWeight', 'bold');
@@ -1438,15 +1405,15 @@ else
     title('Cart Velocity (observer only)');
 
     subplot(2,2,3);
-    plot(t, rad2deg(theta), 'b-', 'LineWidth', 1.0); hold on;
+    plot(t, rad2deg(alpha), 'b-', 'LineWidth', 1.0); hold on;
     plot(t, rad2deg(al_hat), 'r--', 'LineWidth', 1.2); grid on;
-    ylabel('\theta [deg]'); xlabel('Time [s]');
+    ylabel('\alpha [deg]'); xlabel('Time [s]');
     legend('Enc', 'Obs');
     title('Seesaw Angle');
 
     subplot(2,2,4);
     plot(t, rad2deg(ald_hat), 'r-', 'LineWidth', 1.2); grid on;
-    ylabel('\theta-dot [deg/s]'); xlabel('Time [s]');
+    ylabel('\alpha-dot [deg/s]'); xlabel('Time [s]');
     title('Angular Velocity (observer only)');
 
     sgtitle('Full Observer State Estimation', 'FontWeight', 'bold');
@@ -1492,11 +1459,11 @@ results = struct();
 % Free-run metrics
 if has_free_run
     results.free_run = struct(...
-        'theta_rms_deg',    rad2deg(theta_rms), ...
-        'theta_pp_deg',     rad2deg(theta_pp), ...
-        'theta_p95_deg',    rad2deg(theta_p95), ...
-        'theta_p99_deg',    rad2deg(theta_p99), ...
-        'theta_max_deg',    rad2deg(theta_max_abs), ...
+        'alpha_rms_deg',    rad2deg(alpha_rms), ...
+        'alpha_pp_deg',     rad2deg(alpha_pp), ...
+        'alpha_p95_deg',    rad2deg(alpha_p95), ...
+        'alpha_p99_deg',    rad2deg(alpha_p99), ...
+        'alpha_max_deg',    rad2deg(alpha_max_abs), ...
         'xc_rms_cm',        xc_rms*100, ...
         'xc_pp_cm',         xc_pp*100, ...
         'vm_max',           vm_max, ...
@@ -1519,14 +1486,14 @@ if has_step
         'd_amp_V',              d_amp, ...
         'step_time_s',          t_step, ...
         'xc_deviation_cm',      xc_deviation*100, ...
-        'theta_peak_deg',       theta_peak_transient_deg, ...
+        'alpha_peak_deg',       alpha_peak_transient_deg, ...
         'vm_rms_pre',           vm_rms_pre, ...
         'vm_rms_post',          vm_rms_post, ...
         'vm_peak_transient',    vm_peak_transient, ...
-        'theta_pre_pp_deg',     rad2deg(theta_pre_pp), ...
-        'theta_post_pp_deg',    rad2deg(theta_post_pp), ...
-        'theta_pre_rms_deg',    rad2deg(theta_pre_rms), ...
-        'theta_post_rms_deg',   rad2deg(theta_post_rms));
+        'alpha_pre_pp_deg',     rad2deg(alpha_pre_pp), ...
+        'alpha_post_pp_deg',    rad2deg(alpha_post_pp), ...
+        'alpha_pre_rms_deg',    rad2deg(alpha_pre_rms), ...
+        'alpha_post_rms_deg',   rad2deg(alpha_post_rms));
 end
 
 % Frequency response metrics
@@ -1537,13 +1504,13 @@ if has_chirp
         'peak_freq_hz',           f_peak, ...
         'dc_gain_db',             dc_gain_db, ...
         'coh_xc_mean',            coh_xc_avg, ...
-        'coh_theta_mean',         coh_theta_avg, ...
+        'coh_alpha_mean',         coh_alpha_avg, ...
         'coh_vm_mean',            coh_vm_avg, ...
         'cl_model_hw_rms_db',     mag_err_rms, ...
         'plant_err_xc_rms_db',    plant_err_xc_rms, ...
-        'plant_err_theta_rms_db', plant_err_theta_rms, ...
+        'plant_err_alpha_rms_db', plant_err_alpha_rms, ...
         'iv_coverage_xc_pct',     iv_coverage_xc, ...
-        'iv_coverage_theta_pct',  iv_coverage_theta);
+        'iv_coverage_alpha_pct',  iv_coverage_alpha);
 end
 
 % Hammerstein-Wiener identification metrics
@@ -1555,16 +1522,16 @@ end
 if has_obs
     results.observer = struct(...
         'e_xc_rms_cm',        e_xc_rms*100, ...
-        'e_theta_rms_deg',    rad2deg(e_theta_rms), ...
+        'e_alpha_rms_deg',    rad2deg(e_alpha_rms), ...
         'e_xc_max_cm',        e_xc_max*100, ...
-        'e_theta_max_deg',    rad2deg(e_theta_max), ...
+        'e_alpha_max_deg',    rad2deg(e_alpha_max), ...
         't_conv_s',           t_conv, ...
         'innov_xc_rms_cm',    innov_xc_rms*100, ...
-        'innov_theta_rms_deg', rad2deg(innov_theta_rms), ...
+        'innov_alpha_rms_deg', rad2deg(innov_alpha_rms), ...
         'innov_xc_bias_cm',   innov_xc_bias*100, ...
-        'innov_theta_bias_deg', rad2deg(innov_theta_bias), ...
+        'innov_alpha_bias_deg', rad2deg(innov_alpha_bias), ...
         'rho_xc_lag1',        rho_xc_lag1, ...
-        'rho_theta_lag1',     rho_theta_lag1, ...
+        'rho_alpha_lag1',     rho_alpha_lag1, ...
         'v_xc_obs_rms',       v_xc_obs_rms, ...
         'v_xc_num_rms',       v_xc_num_rms, ...
         'v_al_obs_rms',       v_al_obs_rms, ...
@@ -1591,12 +1558,6 @@ fprintf('========================================\n\n');
 
 function s = cond_str(cond)
     if cond, s = 'PASS'; else, s = 'FAIL'; end
-end
-
-function write_fromfile_pair(path, d_pair)
-    % Simulink "From File" expects row 1 = time, row 2 = signal.
-    signal = [d_pair(:,1)'; d_pair(:,2)']; %#ok<NASGU>
-    save(path, 'signal', '-v7.3');
 end
 
 function [input_nl, output_nl] = make_hw_nonlinearities()
