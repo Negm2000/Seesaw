@@ -104,93 +104,263 @@ p_unstable_hint = max(real(ev));
 fprintf('  Plant RHP pole = +%.3f rad/s\n', p_unstable_hint);
 fprintf('\n');
 
-%% 0.5 PRE-TEST SETUP — Prepare excitation signals
-% Runs unconditionally so a fresh checkout is testing-ready after one
-% call to this script.  Cheap and idempotent.
+%% 0.5 PRE-TEST SETUP — Generate Single-Run Protocol Signals
+% Generates one concatenated d_inj timeseries and segment_id_ts for the
+% single-run validation protocol.  One hardware run collects all data.
+%
+% Protocol (all times approximate):
+%   Segment 0: Prep/offset-reset + mini-liftoff (excluded from analysis)
+%   Segment 1: Baseline free-run (d = 0)
+%   Segment 2: +1 V disturbance step
+%   Segment 3: Recovery (d = 0)
+%   Segment 4: -1 V disturbance step
+%   Segment 5: Recovery (d = 0)
+%   Segment 6: +1 V pulse (impulse surrogate)
+%   Segment 7: Recovery (d = 0)
+%   Segments 10-21: Stepped sine frequencies (1 V, zero-mean)
+%   Segment 99: Final zero recovery
+%
+% Sine rule: 7 cycles per frequency
+%   cycle 1: ramp in (half-cosine taper)
+%   cycles 2-3: discard/settle
+%   cycles 4-6: analyze
+%   cycle 7: ramp out (half-cosine taper)
 
-fprintf('Pre-test setup: preparing hardware excitation signals...\n');
+fprintf('Pre-test setup: generating single-run protocol signals...\n');
 
-% --- d_inj presets ---
-exp_duration_s = 90;        % B/C run length
-exp_fs_Hz      = 500;       % QUARC sample rate (Ts = 2 ms)
-prbs_amp_V     = 0.5;       % stays well under V_sat = 6 V
-validation_w_hi_rad_s = 18; % highest frequency of interest
-validation_f_hi_Hz = validation_w_hi_rad_s / (2*pi);
-prbs_bw_frac   = validation_f_hi_Hz / (exp_fs_Hz/2);
-step_amp_V     = 0.5;
-step_t_s       = 2.0;
-chirp_f0_Hz    = 0.1;
-chirp_f1_Hz    = validation_f_hi_Hz;
+% --- Protocol parameters ---
+exp_fs_Hz       = 500;         % QUARC sample rate (Ts = 2 ms)
+Ts              = 1/exp_fs_Hz;
+d_amp_V         = 1.0;         % Validation excitation amplitude
+step_duration_s = 15;          % Finite step hold time
+recovery_s      = 15;          % Zero-recovery between segments
+pulse_width_s   = 0.3;         % Impulse-surrogate pulse width
+baseline_s      = 10;          % Free-run baseline window
+prep_s          = 5;           % Offset reset + mini-liftoff
+final_recovery_s = 10;         % Final zero window
+n_cycles        = 7;           % Total cycles per sine frequency
 
-t_vec = (0:1/exp_fs_Hz:exp_duration_s)';
-N_pts = numel(t_vec);
+% Sine frequencies (Hz) — logarithmically spaced, 0.1 to 10 Hz
+sine_freqs_Hz = [0.10, 0.16, 0.25, 0.40, 0.63, 1.00, ...
+                 1.60, 2.50, 4.00, 6.30, 8.00, 10.00];
 
-% A: free-run (zero perturbation, held forever)
-d_free = [0 0; 1e6 0];
+% --- Build the concatenated protocol ---
+d_segments = {};    % cell array of {time_local, d_values, segment_id}
+seg_table = [];     % [seg_id, t_start, t_end, description]
 
-% B: disturbance step at t = step_t_s
-d_step = [0 0; step_t_s 0; step_t_s step_amp_V; 1e6 step_amp_V];
+t_cursor = 0;      % running time
 
-% C: PRBS (preferred broadband perturbation, capped at 18 rad/s)
-if license('test', 'Identification_Toolbox')
-    prbs_unit = idinput(N_pts, 'prbs', [0 prbs_bw_frac], [-1 1]);
-else
-    rng(42, 'twister');
-    prbs_unit = sign(randn(N_pts, 1));
-    warning(['System Identification Toolbox not available; using ' ...
-             'sign(randn) instead of true PRBS.']);
+% Helper: append a constant segment
+append_const = @(dur, amp, seg_id) deal( ...
+    (0:Ts:dur-Ts)', amp*ones(ceil(dur/Ts), 1), seg_id);
+
+% Segment 0: Prep (d = 0)
+dur = prep_s;
+n = ceil(dur / Ts);
+t_local = (0:Ts:(n-1)*Ts)';
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', zeros(n,1), 'seg_id', 0);
+seg_table = [seg_table; 0, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segment 1: Baseline (d = 0)
+dur = baseline_s;
+n = ceil(dur / Ts);
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', zeros(n,1), 'seg_id', 1);
+seg_table = [seg_table; 1, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segment 2: +1 V step
+dur = step_duration_s;
+n = ceil(dur / Ts);
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', d_amp_V*ones(n,1), 'seg_id', 2);
+seg_table = [seg_table; 2, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segment 3: Recovery
+dur = recovery_s;
+n = ceil(dur / Ts);
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', zeros(n,1), 'seg_id', 3);
+seg_table = [seg_table; 3, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segment 4: -1 V step
+dur = step_duration_s;
+n = ceil(dur / Ts);
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', -d_amp_V*ones(n,1), 'seg_id', 4);
+seg_table = [seg_table; 4, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segment 5: Recovery
+dur = recovery_s;
+n = ceil(dur / Ts);
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', zeros(n,1), 'seg_id', 5);
+seg_table = [seg_table; 5, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segment 6: +1 V pulse
+dur = pulse_width_s;
+n = max(1, ceil(dur / Ts));
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', d_amp_V*ones(n,1), 'seg_id', 6);
+seg_table = [seg_table; 6, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segment 7: Recovery after pulse
+dur = 10;
+n = ceil(dur / Ts);
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', zeros(n,1), 'seg_id', 7);
+seg_table = [seg_table; 7, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
+
+% Segments 10-21: Stepped sine frequencies
+for k = 1:length(sine_freqs_Hz)
+    f_k = sine_freqs_Hz(k);
+    T_cycle = 1/f_k;
+    dur = n_cycles * T_cycle;
+    n = ceil(dur / Ts);
+    t_local = (0:Ts:(n-1)*Ts)';
+    
+    % Generate sine with half-cosine ramp in/out over first and last cycle
+    raw_sine = d_amp_V * sin(2*pi*f_k * t_local);
+    
+    % Ramp envelope: cycle 1 ramps 0->1, cycle 7 ramps 1->0
+    envelope = ones(n, 1);
+    n_ramp = ceil(T_cycle / Ts);  % samples in one cycle
+    
+    % Ramp in: first cycle
+    ramp_in = 0.5*(1 - cos(pi*(0:n_ramp-1)'/n_ramp));
+    envelope(1:min(n_ramp, n)) = ramp_in(1:min(n_ramp, n));
+    
+    % Ramp out: last cycle
+    ramp_out = 0.5*(1 + cos(pi*(0:n_ramp-1)'/n_ramp));
+    idx_start = max(1, n - n_ramp + 1);
+    envelope(idx_start:n) = ramp_out(1:(n-idx_start+1));
+    
+    d_sine = raw_sine .* envelope;
+    
+    seg_id_k = 10 + (k-1);  % segments 10, 11, 12, ..., 21
+    d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+        'd', d_sine, 'seg_id', seg_id_k);
+    seg_table = [seg_table; seg_id_k, t_cursor, t_cursor+dur];
+    t_cursor = t_cursor + dur;
 end
-d_prbs = [t_vec, prbs_amp_V * prbs_unit];
 
-% C fallback: linear chirp
-d_chirp = [t_vec, prbs_amp_V * chirp(t_vec, chirp_f0_Hz, ...
-                                     exp_duration_s, chirp_f1_Hz)];
+% Segment 99: Final zero recovery
+dur = final_recovery_s;
+n = ceil(dur / Ts);
+d_segments{end+1} = struct('t_start', t_cursor, 'n', n, ...
+    'd', zeros(n,1), 'seg_id', 99);
+seg_table = [seg_table; 99, t_cursor, t_cursor+dur];
+t_cursor = t_cursor + dur;
 
+% --- Concatenate into single timeseries ---
+total_n = sum(cellfun(@(s) s.n, d_segments));
+t_vec = zeros(total_n, 1);
+d_vec = zeros(total_n, 1);
+seg_vec = zeros(total_n, 1);
+idx = 1;
+for k = 1:length(d_segments)
+    s = d_segments{k};
+    t_local = s.t_start + (0:Ts:(s.n-1)*Ts)';
+    t_vec(idx:idx+s.n-1) = t_local;
+    d_vec(idx:idx+s.n-1) = s.d;
+    seg_vec(idx:idx+s.n-1) = s.seg_id;
+    idx = idx + s.n;
+end
+
+% Create timeseries for FromWorkspace blocks
+d_inj = [t_vec, d_vec];
+segment_id_ts = [t_vec, seg_vec];
+
+% Total duration
+total_duration_s = t_vec(end);
+
+% Save protocol signals
 sig_path = fullfile(valdir, 'data', 'hw_test_signals.mat');
-save(sig_path, 'd_free', 'd_step', 'd_prbs', 'd_chirp');
-fprintf('  Saved: data/hw_test_signals.mat (d_free, d_step, d_prbs, d_chirp)\n');
-fprintf('  Validation band: 0.1-%.2f Hz (0.63-%.1f rad/s)\n', ...
-    validation_f_hi_Hz, validation_w_hi_rad_s);
+save(sig_path, 'd_inj', 'segment_id_ts', 'seg_table', 'sine_freqs_Hz', ...
+    'd_amp_V', 'n_cycles', 'exp_fs_Hz', 'total_duration_s');
+
+% Also assign to base workspace for immediate model use
+assignin('base', 'd_inj', d_inj);
+assignin('base', 'segment_id_ts', segment_id_ts);
+
+fprintf('  Saved: validation/data/hw_test_signals.mat\n');
+fprintf('  Total run duration: %.1f s (%.1f min)\n', total_duration_s, total_duration_s/60);
+fprintf('  Sine frequencies: %s Hz\n', num2str(sine_freqs_Hz, '%.2f '));
+fprintf('  Excitation amplitude: %.1f V\n', d_amp_V);
+fprintf('  Sine rule: %d cycles (ramp-in 1, discard 2-3, analyze 4-6, ramp-out 7)\n', n_cycles);
+fprintf('\n  Segment table:\n');
+seg_names = {'Prep', 'Baseline', '+1V Step', 'Recovery', '-1V Step', ...
+    'Recovery', 'Pulse +1V', 'Recovery'};
+for k = 1:size(seg_table, 1)
+    sid = seg_table(k, 1);
+    if sid <= 7
+        sname = seg_names{sid+1};
+    elseif sid >= 10 && sid <= 21
+        sname = sprintf('Sine %.2f Hz', sine_freqs_Hz(sid-9));
+    elseif sid == 99
+        sname = 'Final Recovery';
+    else
+        sname = '?';
+    end
+    fprintf('    Seg %2d: %6.1f - %6.1f s  (%s)\n', sid, ...
+        seg_table(k,2), seg_table(k,3), sname);
+end
 
 fprintf('\n----------------------------------------\n');
 fprintf(' Pre-test ready. On the QUARC PC:\n');
 fprintf('----------------------------------------\n');
-fprintf('   >> load data/hw_test_signals.mat\n');
-fprintf('   >> d_inj = d_free;       %% or d_step / d_prbs / d_chirp\n');
+fprintf('   >> load validation/data/hw_test_signals.mat\n');
 fprintf('   >> load_hardware_validation_config(''pole_placement'', ''none'')\n');
-fprintf('      %% swap in ''lqr''/''pid'' and ''leuenberger''/''kalman'' as needed\n');
-fprintf('   Open models/hardware_validation/HardwareValidation_HWTest.slx\n');
+fprintf('   Open validation/models/HardwareValidation_HWTest.slx\n');
 fprintf('   QUARC External -> Build -> Connect -> Start.\n');
+fprintf('   Hold seesaw level, release gently after Start.\n');
+fprintf('   Single run collects ALL validation data (~%.0f s).\n', total_duration_s);
 fprintf('----------------------------------------\n');
 
-% ---- Scanners for what data files exist ----
+% ---- Check for single-run validation data ----
+single_run_file = fullfile(valdir, 'data', 'hw_single_run.mat');
+has_single_run = exist(single_run_file, 'file') == 2;
+
+% Legacy file support (from previous multi-experiment protocol)
 has_free_run  = exist(fullfile(valdir, 'data', 'hw_free_run.mat'), 'file') == 2;
 has_step      = exist(fullfile(valdir, 'data', 'hw_step_response.mat'), 'file') == 2;
+has_obs       = exist(fullfile(valdir, 'data', 'hw_obs_free.mat'), 'file') == 2;
 freq_file_prbs  = fullfile(valdir, 'data', 'hw_prbs_response.mat');
 freq_file_chirp = fullfile(valdir, 'data', 'hw_chirp_response.mat');
 if exist(freq_file_prbs, 'file') == 2
-    freq_file = freq_file_prbs;
-    freq_label = 'PRBS';
+    freq_file = freq_file_prbs; freq_label = 'PRBS';
 elseif exist(freq_file_chirp, 'file') == 2
-    freq_file = freq_file_chirp;
-    freq_label = 'chirp/PRBS legacy';
+    freq_file = freq_file_chirp; freq_label = 'chirp/PRBS legacy';
 else
-    freq_file = freq_file_chirp;
-    freq_label = 'missing';
+    freq_file = freq_file_chirp; freq_label = 'missing';
 end
-has_chirp     = exist(freq_file, 'file') == 2;
-has_obs       = exist(fullfile(valdir, 'data', 'hw_obs_free.mat'), 'file') == 2;
+has_chirp = exist(freq_file, 'file') == 2;
 has_hammerstein_wiener = false;
 
-if ~has_free_run && ~has_step && ~has_chirp && ~has_obs
+if ~has_single_run && ~has_free_run && ~has_step && ~has_obs
     fprintf('\nNo hardware data in data/ yet — Phase 1 complete.\n');
-    fprintf('Run an experiment, save the data, then re-run for Phase 2.\n\n');
+    fprintf('Run the single-run experiment, import the log, then re-run for Phase 2.\n\n');
     return;
 end
 
-fprintf('\nPhase 2: analysis.  Data available:\n');
-fprintf('  free-run=%d  step=%d  freq=%d (%s)  obs=%d\n', ...
-    has_free_run, has_step, has_chirp, freq_label, has_obs);
+if has_single_run
+    fprintf('\nPhase 2: Single-Run Protocol Analysis\n');
+    fprintf('  Loading: %s\n', single_run_file);
+    results = analyze_single_run(valdir, figdir);
+    return;  % Skip legacy sections below
+else
+    fprintf('\nPhase 2: Legacy multi-file analysis.\n');
+    fprintf('  free-run=%d  step=%d  obs=%d\n', has_free_run, has_step, has_obs);
+    fprintf('  NOTE: Consider re-running with the new single-run protocol.\n');
+end
 
 
 %% =====================================================================
