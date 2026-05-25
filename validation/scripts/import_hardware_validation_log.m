@@ -2,7 +2,7 @@ function import_hardware_validation_log(log_file, experiment_name)
 %IMPORT_HARDWARE_VALIDATION_LOG Convert HardwareValidation_HWTest logs.
 %
 % The model logs these To Host File columns:
-%   [time | x_c | alpha | V_m | d | x_fb(1:4) | x_obs(1:4)]
+%   [time | x_c | theta | V_m | d | x_fb(1:4) | x_obs(1:4)]
 %
 % This helper saves the named variables consumed by hardware_verification.m.
 %
@@ -27,27 +27,27 @@ if size(Y, 1) < size(Y, 2)
     Y = Y';
 end
 if size(Y, 2) < 5
-    error('Expected at least 5 columns: [time x_c alpha V_m d]. Got %d.', size(Y, 2));
+    error('Expected at least 5 columns: [time x_c theta V_m d]. Got %d.', size(Y, 2));
 end
 
 if size(Y, 2) == 10
     % Legacy LQR observer log format:
-    % [time, x_c_ref, alpha, alpha_ref, x_c, V_m, x_c_hat, alpha_hat, x_c_dot_hat, alpha_dot_hat]
+    % [time, x_c_ref, theta, theta_ref, x_c, V_m, x_c_hat, theta_hat, x_c_dot_hat, theta_dot_hat]
     hw_t = Y(:, 1);
     hw_xc = Y(:, 5);
-    hw_alpha = Y(:, 3);
+    hw_theta = Y(:, 3);
     hw_vm = Y(:, 6);
     hw_d = zeros(size(hw_t));
     
     hw_xc_fb = Y(:, 5);
     hw_xcdot_fb = NaN(size(hw_t));
-    hw_alpha_fb = Y(:, 3);
-    hw_alphadot_fb = NaN(size(hw_t));
+    hw_theta_fb = Y(:, 3);
+    hw_thetadot_fb = NaN(size(hw_t));
     
     hw_xc_hat = Y(:, 7);
     hw_xcdot_hat = Y(:, 9);
-    hw_alpha_hat = Y(:, 8);
-    hw_alphadot_hat = Y(:, 10);
+    hw_theta_hat = Y(:, 8);
+    hw_thetadot_hat = Y(:, 10);
 else
     if size(Y, 2) < 13
         warning('Expected 13 columns from HardwareValidation_HWTest; missing feedback/observer columns will be NaN.');
@@ -56,43 +56,43 @@ else
     
     hw_t = Y(:, 1);
     hw_xc = Y(:, 2);
-    hw_alpha = Y(:, 3);
+    hw_theta = Y(:, 3);
     hw_vm = Y(:, 4);
     hw_d = Y(:, 5);
     
     hw_xc_fb = Y(:, 6);
     hw_xcdot_fb = Y(:, 7);
-    hw_alpha_fb = Y(:, 8);
-    hw_alphadot_fb = Y(:, 9);
+    hw_theta_fb = Y(:, 8);
+    hw_thetadot_fb = Y(:, 9);
     
     hw_xc_hat = Y(:, 10);
     hw_xcdot_hat = Y(:, 11);
-    hw_alpha_hat = Y(:, 12);
-    hw_alphadot_hat = Y(:, 13);
+    hw_theta_hat = Y(:, 12);
+    hw_thetadot_hat = Y(:, 13);
 end
 
 switch experiment_name
     case 'free'
         out_file = fullfile(valdir, 'data', 'hw_free_run.mat');
-        save(out_file, 'hw_t', 'hw_xc', 'hw_alpha', 'hw_vm');
+        save(out_file, 'hw_t', 'hw_xc', 'hw_theta', 'hw_vm');
 
     case 'step'
         out_file = fullfile(valdir, 'data', 'hw_step_response.mat');
-        save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm');
+        save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_theta', 'hw_vm');
 
     case 'prbs'
         out_file = fullfile(valdir, 'data', 'hw_prbs_response.mat');
-        save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm');
+        save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_theta', 'hw_vm');
 
     case 'chirp'
         out_file = fullfile(valdir, 'data', 'hw_chirp_response.mat');
-        save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_alpha', 'hw_vm');
+        save(out_file, 'hw_t', 'hw_d', 'hw_xc', 'hw_theta', 'hw_vm');
 
     case 'obs'
         out_file = fullfile(valdir, 'data', 'hw_obs_free.mat');
-        save(out_file, 'hw_t', 'hw_xc', 'hw_alpha', 'hw_vm', ...
-            'hw_xc_hat', 'hw_xcdot_hat', 'hw_alpha_hat', 'hw_alphadot_hat', ...
-            'hw_xc_fb', 'hw_xcdot_fb', 'hw_alpha_fb', 'hw_alphadot_fb');
+        save(out_file, 'hw_t', 'hw_xc', 'hw_theta', 'hw_vm', ...
+            'hw_xc_hat', 'hw_xcdot_hat', 'hw_theta_hat', 'hw_thetadot_hat', ...
+            'hw_xc_fb', 'hw_xcdot_fb', 'hw_theta_fb', 'hw_thetadot_fb');
 end
 
 fprintf('Saved %s\n', out_file);
