@@ -21,10 +21,22 @@ t       = run_data.hw_t(:);
 seg_id  = run_data.hw_seg_id(:);
 xc      = run_data.hw_xc(:);
 alpha   = run_data.hw_alpha(:);
+xc_dot  = run_data.hw_xc_dot(:);
+alpha_dot = run_data.hw_alpha_dot(:);
 u_ctrl  = run_data.hw_u_ctrl(:);
 u_presat = run_data.hw_u_presat(:);
 vm      = run_data.hw_vm(:);
 d_hw    = run_data.hw_d(:);
+
+% Observer estimates
+xc_hat_L        = run_data.hw_xc_hat_L(:);
+alpha_hat_L     = run_data.hw_alpha_hat_L(:);
+xc_dot_hat_L    = run_data.hw_xc_dot_hat_L(:);
+alpha_dot_hat_L = run_data.hw_alpha_dot_hat_L(:);
+xc_hat_K        = run_data.hw_xc_hat_K(:);
+alpha_hat_K     = run_data.hw_alpha_hat_K(:);
+xc_dot_hat_K    = run_data.hw_xc_dot_hat_K(:);
+alpha_dot_hat_K = run_data.hw_alpha_dot_hat_K(:);
 
 dt = median(diff(t));
 Fs = 1/dt;
@@ -84,6 +96,9 @@ fprintf('\n--- Section B: Disturbance Step Validation ---\n');
 tuned = load(fullfile(root, 'data', 'tuned', 'tuned_params.mat'));
 ctrl  = load(fullfile(root, 'data', 'controllers', 'controller_freq.mat'));
 B_eq = tuned.B_eq;
+% Saved pole-placement Kf and tuned.A_sw/tuned.B_sw use design order:
+% [xc, xc_dot, alpha, alpha_dot]. The Simulink validation mux remaps this
+% separately in load_hardware_validation_config.m.
 K_fb = ctrl.Kf;
 V_sat = 6.0 * sqrt(3);  % Motor saturation limit [V] (V_nom * sqrt(3))
 
@@ -467,6 +482,125 @@ sgtitle('Data Validity Diagnostics', 'FontWeight', 'bold');
 saveas(gcf, fullfile(figdir, 'Validation-DataValidity.png'));
 fprintf('  Saved: Validation-DataValidity.png\n');
 
+%% =====================================================================
+%  SECTION F — OBSERVER COMPARISON: Luenberger vs Kalman vs Measured
+%  =====================================================================
+fprintf('\n--- Section F: Observer Comparison ---\n');
+
+% Skip observer section if data is all NaN (e.g., observers disabled)
+has_obs_data = ~all(isnan(xc_hat_L)) && ~all(isnan(xc_hat_K));
+
+if has_obs_data
+    % Compute estimation errors
+    err_xc_L      = xc - xc_hat_L;
+    err_alpha_L   = alpha - alpha_hat_L;
+    err_xc_dot_L  = xc_dot - xc_dot_hat_L;
+    err_alpha_dot_L = alpha_dot - alpha_dot_hat_L;
+    
+    err_xc_K      = xc - xc_hat_K;
+    err_alpha_K   = alpha - alpha_hat_K;
+    err_xc_dot_K  = xc_dot - xc_dot_hat_K;
+    err_alpha_dot_K = alpha_dot - alpha_dot_hat_K;
+    
+    % Skip transient (first 3 s) for RMS calculation
+    steady_mask = t > (t(1) + 3);
+    
+    rms_table = struct();
+    rms_table.xc_L_mm        = rms(err_xc_L(steady_mask)) * 1000;
+    rms_table.xc_K_mm        = rms(err_xc_K(steady_mask)) * 1000;
+    rms_table.alpha_L_mdeg   = rms(err_alpha_L(steady_mask)) * 1000 * (180/pi);
+    rms_table.alpha_K_mdeg   = rms(err_alpha_K(steady_mask)) * 1000 * (180/pi);
+    rms_table.xc_dot_L_mms   = rms(err_xc_dot_L(steady_mask)) * 1000;
+    rms_table.xc_dot_K_mms   = rms(err_xc_dot_K(steady_mask)) * 1000;
+    rms_table.alpha_dot_L_degs = rms(err_alpha_dot_L(steady_mask)) * (180/pi);
+    rms_table.alpha_dot_K_degs = rms(err_alpha_dot_K(steady_mask)) * (180/pi);
+    
+    fprintf('  Observer RMS errors (after 3 s transient):\n');
+    fprintf('    State        | Luenberger    | Kalman\n');
+    fprintf('    -------------|---------------|--------\n');
+    fprintf('    x_c          | %6.2f mm     | %6.2f mm\n', rms_table.xc_L_mm, rms_table.xc_K_mm);
+    fprintf('    alpha        | %6.2f mdeg   | %6.2f mdeg\n', rms_table.alpha_L_mdeg, rms_table.alpha_K_mdeg);
+    fprintf('    x_c_dot      | %6.2f mm/s   | %6.2f mm/s\n', rms_table.xc_dot_L_mms, rms_table.xc_dot_K_mms);
+    fprintf('    alpha_dot    | %6.3f deg/s  | %6.3f deg/s\n', rms_table.alpha_dot_L_degs, rms_table.alpha_dot_K_degs);
+    
+    results.observer.rms = rms_table;
+    
+    % F5. Observer time-domain overlay (4 states, 2 subplots per state)
+    figure('Name', 'Observer Comparison', 'Position', [250 50 1200 900]);
+    
+    state_names = {'x_c', '\alpha', 'x_c dot', '\alpha dot'};
+    meas_signals = {xc*100, rad2deg(alpha), xc_dot*100, rad2deg(alpha_dot)};
+    luenb_signals = {xc_hat_L*100, rad2deg(alpha_hat_L), xc_dot_hat_L*100, rad2deg(alpha_dot_hat_L)};
+    kalm_signals = {xc_hat_K*100, rad2deg(alpha_hat_K), xc_dot_hat_K*100, rad2deg(alpha_dot_hat_K)};
+    y_labels = {'[cm]', '[deg]', '[cm/s]', '[deg/s]'};
+    
+    for si = 1:4
+        subplot(4,1,si);
+        plot(t, meas_signals{si}, 'k-', 'LineWidth', 0.8); hold on;
+        plot(t, luenb_signals{si}, 'b-', 'LineWidth', 0.7);
+        plot(t, kalm_signals{si}, 'r-', 'LineWidth', 0.7);
+        grid on; ylabel(y_labels{si});
+        title(sprintf('%s: Measured vs Observers', state_names{si}));
+        if si == 1, legend('Measured', 'Luenberger', 'Kalman', 'Location', 'best'); end
+        if si == 4, xlabel('Time [s]'); end
+    end
+    
+    sgtitle('Observer Comparison — All States', 'FontWeight', 'bold');
+    saveas(gcf, fullfile(figdir, 'Validation-ObserverOverlay.png'));
+    fprintf('  Saved: Validation-ObserverOverlay.png\n');
+    
+    % F6. Observer estimation error
+    figure('Name', 'Observer Errors', 'Position', [300 100 1200 700]);
+    
+    err_signals_L = {err_xc_L*1000, rad2deg(err_alpha_L)*1000, err_xc_dot_L*1000, rad2deg(err_alpha_dot_L)};
+    err_signals_K = {err_xc_K*1000, rad2deg(err_alpha_K)*1000, err_xc_dot_K*1000, rad2deg(err_alpha_dot_K)};
+    err_labels = {'[mm]', '[mdeg]', '[mm/s]', '[deg/s]'};
+    
+    for si = 1:4
+        subplot(4,1,si);
+        plot(t, err_signals_L{si}, 'b-', 'LineWidth', 0.6); hold on;
+        plot(t, err_signals_K{si}, 'r-', 'LineWidth', 0.6);
+        grid on; ylabel(err_labels{si});
+        title(sprintf('%s estimation error', state_names{si}));
+        if si == 1, legend('Luenberger', 'Kalman', 'Location', 'best'); end
+        if si == 4, xlabel('Time [s]'); end
+    end
+    
+    sgtitle('Observer Estimation Error (Measured - Estimated)', 'FontWeight', 'bold');
+    saveas(gcf, fullfile(figdir, 'Validation-ObserverError.png'));
+    fprintf('  Saved: Validation-ObserverError.png\n');
+    
+    % F7. Observer error during step transients (zoomed)
+    figure('Name', 'Observer Step Zoom', 'Position', [350 150 1000 500]);
+    step_seg_start = find(seg_id == 2, 1);
+    if ~isempty(step_seg_start)
+        t_zoom_start = t(step_seg_start) - 0.5;
+        t_zoom_end = t(step_seg_start) + 5;
+        zoom_mask = t >= t_zoom_start & t <= t_zoom_end;
+        
+        subplot(2,1,1);
+        plot(t(zoom_mask), rad2deg(alpha(zoom_mask)), 'k-', 'LineWidth', 1.0); hold on;
+        plot(t(zoom_mask), rad2deg(alpha_hat_L(zoom_mask)), 'b--', 'LineWidth', 1.0);
+        plot(t(zoom_mask), rad2deg(alpha_hat_K(zoom_mask)), 'r--', 'LineWidth', 1.0);
+        grid on; ylabel('\alpha [deg]'); legend('Measured', 'Luenberger', 'Kalman');
+        title('+1V Step — Angle Tracking');
+        
+        subplot(2,1,2);
+        plot(t(zoom_mask), rad2deg(err_alpha_L(zoom_mask))*1000, 'b-', 'LineWidth', 0.8); hold on;
+        plot(t(zoom_mask), rad2deg(err_alpha_K(zoom_mask))*1000, 'r-', 'LineWidth', 0.8);
+        grid on; ylabel('Error [mdeg]'); xlabel('Time [s]');
+        legend('Luenberger', 'Kalman');
+        title('+1V Step — Angle Estimation Error');
+        
+        sgtitle('Observer Performance During Step Transient', 'FontWeight', 'bold');
+        saveas(gcf, fullfile(figdir, 'Validation-ObserverStepZoom.png'));
+        fprintf('  Saved: Validation-ObserverStepZoom.png\n');
+    end
+else
+    fprintf('  Observer data is all NaN — skipping observer comparison.\n');
+    results.observer = struct('status', 'no_data');
+end
+
 %% Save results
 results.protocol = protocol;
 results.total_duration_s = t(end) - t(1);
@@ -482,11 +616,12 @@ fprintf('========================================\n\n');
 end
 
 %% --- Nested helper: rebuild closed-loop model ---
-function [sys_d2alpha, sys_d2xc] = rebuild_cl_model(A_sw, B_sw, C_sw, D_sw, K_fb)
+function [sys_d2alpha, sys_d2xc] = rebuild_cl_model(A_sw, B_sw, ~, ~, K_fb)
     % Build closed-loop TF from disturbance voltage d to outputs.
     %
     % Signal chain: u_total = u_controller + d = -K_fb*x + d
     % Closed-loop: x_dot = (A - B*K)*x + B*d,  y = C*x
+    % State/order for tuned matrices and K_fb: [xc, xc_dot, alpha, alpha_dot].
     %
     % Outputs:
     %   sys_d2alpha — SS model from d [V] to alpha [rad]
@@ -494,10 +629,9 @@ function [sys_d2alpha, sys_d2xc] = rebuild_cl_model(A_sw, B_sw, C_sw, D_sw, K_fb
     
     A_cl = A_sw - B_sw * K_fb;
     B_cl = B_sw;  % disturbance enters at actuator input
-    C_cl = C_sw;  % outputs: [x_c; alpha]
-    D_cl = D_sw;  % zeros(2,1)
+    C_xc = [1 0 0 0];
+    C_alpha = [0 0 1 0];
     
-    sys_cl = ss(A_cl, B_cl, C_cl, D_cl);
-    sys_d2xc    = sys_cl(1,1);  % first output = x_c
-    sys_d2alpha = sys_cl(2,1);  % second output = alpha
+    sys_d2xc = ss(A_cl, B_cl, C_xc, 0);
+    sys_d2alpha = ss(A_cl, B_cl, C_alpha, 0);
 end

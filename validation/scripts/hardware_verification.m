@@ -268,8 +268,8 @@ for k = 1:length(d_segments)
     idx = idx + s.n;
 end
 
-% Create timeseries for FromWorkspace blocks
-d_inj = [t_vec, d_vec];
+% Create arrays for FromWorkspace blocks
+d_inj_ts = [t_vec, d_vec];
 segment_id_ts = [t_vec, seg_vec];
 
 % Total duration
@@ -277,11 +277,11 @@ total_duration_s = t_vec(end);
 
 % Save protocol signals
 sig_path = fullfile(valdir, 'data', 'hw_test_signals.mat');
-save(sig_path, 'd_inj', 'segment_id_ts', 'seg_table', 'sine_freqs_Hz', ...
+save(sig_path, 'd_inj_ts', 'segment_id_ts', 'seg_table', 'sine_freqs_Hz', ...
     'd_amp_V', 'n_cycles', 'exp_fs_Hz', 'total_duration_s');
 
 % Also assign to base workspace for immediate model use
-assignin('base', 'd_inj', d_inj);
+assignin('base', 'd_inj_ts', d_inj_ts);
 assignin('base', 'segment_id_ts', segment_id_ts);
 
 fprintf('  Saved: validation/data/hw_test_signals.mat\n');
