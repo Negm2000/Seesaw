@@ -41,6 +41,13 @@ V_sat = V_nom * sqrt(3);    % Motor nominal voltage limit [V] (IP02 Manual Table
                              % (up to 4A continuous). Motor current is governed
                              % entirely by the electrical dynamics (Ohm's law +
                              % back-EMF). I_max = 1A is a thermal rating only.
+
+%% ===== Deadzone Compensation =====
+% Motor stiction creates a ±~0.12 V band where cart won't move.
+% For liftoff (gravity bias), set ud_pos ≠ ud_neg to compensate asymmetry.
+ud_pos = 0.12;              % Positive direction deadzone offset [V]
+ud_neg = 0.12;              % Negative direction deadzone offset [V]
+
 %% ===== IP02 Gearbox (Faulhaber Planetary 23/1) [2] =====
 K_g    = 3.71;              % Gearbox gear ratio [-]
 eta_g  = 0.90;              % Gearbox efficiency [-] (+/- 10%)

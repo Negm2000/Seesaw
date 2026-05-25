@@ -1,8 +1,10 @@
 function import_hardware_validation_log(log_file, experiment_name)
 %IMPORT_HARDWARE_VALIDATION_LOG Convert Seesaw_Validation logs.
 %
-% SINGLE-RUN FORMAT (9 data columns + time = 10 total):
-%   [time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj]
+% SINGLE-RUN FORMAT (17 data columns + time = 18 total):
+%   [time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj |
+%    xc_hat_L | alpha_hat_L | xc_dot_hat_L | alpha_dot_hat_L |
+%    xc_hat_K | alpha_hat_K | xc_dot_hat_K | alpha_dot_hat_K]
 %
 % LEGACY FORMAT (13 columns):
 %   [time | x_c | alpha | V_m | d | x_fb(1:4) | x_obs(1:4)]
@@ -26,17 +28,20 @@ if size(Y, 1) < size(Y, 2)
     Y = Y';
 end
 
-%% SINGLE-RUN PROTOCOL (new simplified format)
+%% SINGLE-RUN PROTOCOL (new format with observer states)
 if strcmp(experiment_name, 'single')
     % Expected columns from Seesaw_Validation.slx:
-    % [time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj]
-    % = 10 columns total
+    % [time | seg_id | xc | alpha | xc_dot | alpha_dot | u_ctrl | u_presat | Vm | d_inj |
+    %  xc_hat_L | alpha_hat_L | xc_dot_hat_L | alpha_dot_hat_L |
+    %  xc_hat_K | alpha_hat_K | xc_dot_hat_K | alpha_dot_hat_K]
+    % = 18 columns total
     
     n_cols = size(Y, 2);
     fprintf('  Single-run log: %d samples x %d columns\n', size(Y, 1), n_cols);
     
-    if n_cols < 10
-        error('Expected 10 columns [time + 9 signals]. Got %d.', n_cols);
+    if n_cols < 18
+        warning('Expected 18 columns [time + 17 signals]. Got %d. Padding with NaN.', n_cols);
+        Y(:, end+1:18) = NaN;
     end
     
     hw_t         = Y(:, 1);
@@ -50,10 +55,24 @@ if strcmp(experiment_name, 'single')
     hw_vm        = Y(:, 9);
     hw_d         = Y(:, 10);
     
+    % Luenberger observer estimates
+    hw_xc_hat_L        = Y(:, 11);
+    hw_alpha_hat_L     = Y(:, 12);
+    hw_xc_dot_hat_L    = Y(:, 13);
+    hw_alpha_dot_hat_L = Y(:, 14);
+    
+    % Kalman observer estimates
+    hw_xc_hat_K        = Y(:, 15);
+    hw_alpha_hat_K     = Y(:, 16);
+    hw_xc_dot_hat_K    = Y(:, 17);
+    hw_alpha_dot_hat_K = Y(:, 18);
+    
     out_file = fullfile(valdir, 'data', 'hw_single_run.mat');
     save(out_file, 'hw_t', 'hw_seg_id', 'hw_xc', 'hw_alpha', ...
         'hw_xc_dot', 'hw_alpha_dot', ...
-        'hw_u_ctrl', 'hw_u_presat', 'hw_vm', 'hw_d');
+        'hw_u_ctrl', 'hw_u_presat', 'hw_vm', 'hw_d', ...
+        'hw_xc_hat_L', 'hw_alpha_hat_L', 'hw_xc_dot_hat_L', 'hw_alpha_dot_hat_L', ...
+        'hw_xc_hat_K', 'hw_alpha_hat_K', 'hw_xc_dot_hat_K', 'hw_alpha_dot_hat_K');
     fprintf('  Saved: %s\n', out_file);
     return;
 end
