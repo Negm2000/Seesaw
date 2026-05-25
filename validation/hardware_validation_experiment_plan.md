@@ -13,7 +13,7 @@ r_theta(t) -> theta(t)
 This corresponds to the complementary sensitivity response `T(s)`. The required report evidence is therefore:
 
 - Free-run validation: hold `r_theta = 0`, record the bounded closed-loop behavior, and quantify the natural limit-cycle envelope for each controller.
-- Time validation: command seesaw-angle reference steps and pulse/impulse-like references, record `theta(t)` and `u(t)`, and compare against the model step/pulse response.
+- Time validation: command seesaw-angle reference steps and pulse/impulse-like references, record `theta(t)` and `V_m(t)`, and compare against the model step/pulse response.
 - Frequency validation: command sinusoidal seesaw-angle references, record sinusoidal output responses, and compare measured gain/phase against the model Bode response from `r_theta` to `theta`.
 - Observer validation: compare dirty derivative, Luenberger, and Kalman estimates on the same trajectories.
 
@@ -52,7 +52,7 @@ This removes ambiguity: the report's `T(s)` channel is:
 T_theta(s) = Theta(s) / R_theta(s)
 ```
 
-Supporting plots may include `r_theta -> x_c` and `r_theta -> u_motor` to explain how much cart motion and actuator effort were required to track the seesaw angle.
+Supporting plots may include `r_theta -> x_c` and `r_theta -> V_m` to explain how much cart motion and actuator effort were required to track the seesaw angle.
 
 ## Reference Amplitudes
 
@@ -83,18 +83,16 @@ Build or maintain it from scripts so the structure stays repeatable:
 validation/scripts/build_controller_validation_harness.m
 ```
 
-The harness should have this top-level structure:
+The generated harness has this top-level structure:
 
 ```text
-ProtocolSource
-PlantInterface
-StateEstimation
-ReferenceBuilder
-ControllerBank
-ControllerSelector
-ActuatorInterface
-SafetyAndManualGate
-Logger
+Theta_Protocol
+Steady_State_Targets
+Controller
+Motor_Voltage
+Seesaw_Plant
+State_Feedback
+Validation_Log
 ```
 
 Do not create controller-specific harnesses such as:
@@ -108,7 +106,7 @@ LQI_HWTest.slx
 
 That model sprawl is the failure mode we are explicitly avoiding.
 
-## ProtocolSource
+## Theta_Protocol
 
 Replace the old `d_free`, `d_step`, `d_prbs`, and `d_chirp` workflow with one canonical reference-tracking protocol.
 
@@ -219,39 +217,34 @@ Suggested labels:
 30  final recovery
 ```
 
-## ControllerBank
+## Controller
 
-The current generic validation model is too state-feedback-specific. It can support PP/LQR/LQI gain slots, but it does not truly support PID or SMC.
+The generated model contains one active controller implementation at a time. The batch runner rebuilds this subsystem for each case instead of compiling inactive branches.
 
-The clean solution is a real controller bank.
-
-Each controller subsystem exposes the same external interface:
+Each generated controller exposes the same external interface:
 
 ```text
 inputs:
+  theta_ref
+  x_ref
+  u_ff
   x_feedback        [x_c; x_c_dot; theta; theta_dot]
-  r_theta
-  r_state
-  integral_error
-  controller_enable
 
 output:
-  u_controller
+  V_cmd
 ```
 
-Controllers in the bank:
+Controller implementations supported by the generator:
 
 ```text
-Controller_PP
-Controller_PP_Integral
-Controller_LQR
-Controller_LQI
-Controller_LQG
-Controller_PID_Cascade
-Controller_SMC_STA
+PP
+PP_integral
+LQR
+LQI
+LQG
+PID
+SMC
 ```
-
-The `ControllerSelector` selects exactly one `u_controller` for a test case.
 
 Do not force PID or SMC into a fake `K_hw` gain-slot interface.
 
@@ -262,7 +255,7 @@ Do not force PID or SMC into a fake `K_hw` gain-slot interface.
 Basic state feedback:
 
 ```text
-u = u_ss(r) - K_pp * (x_feedback - x_ss(r))
+V_cmd = u_ff(r) - K_pp * (x_feedback - x_ss(r))
 ```
 
 For tracking without integral action, compute the steady-state feedforward from the tuned linear model for the seesaw-angle output channel.
@@ -271,7 +264,7 @@ For `y = theta`, solve:
 
 ```text
 [A  B] [x_ss] = [0]
-[C  0] [u_ss]   [r]
+[C  0] [u_ff]   [r]
 ```
 
 Then apply the feedback to `x_feedback - x_ss`.
@@ -315,7 +308,7 @@ Use a real cascade PID subsystem copied or reconstructed from `models/pid/PID_se
 External interface stays common:
 
 ```text
-r_theta, theta, x_c -> u_controller
+r_theta, theta, x_c -> V_cmd
 ```
 
 The PID subsystem may internally compute a cart-position target from angle error and then motor voltage from cart-position error.
@@ -343,16 +336,16 @@ x_ref = [x_c_ref; x_c_ref_dot; theta_ref; theta_ref_dot]
 
 For step tracking, use the reference value and set unavailable derivatives to zero or use a smoothed reference step if derivative discontinuity causes unrealistic SMC spikes.
 
-## ReferenceBuilder
+## Steady_State_Targets
 
-The `ReferenceBuilder` converts `r_theta` into the reference information each controller needs.
+The `Steady_State_Targets` subsystem converts `r_theta` into the reference information each controller needs.
 
 Outputs:
 
 ```text
 y_ref
 x_ref
-u_ss
+u_ff
 x_ss
 tracking_error
 integral_error
@@ -360,7 +353,7 @@ integral_error
 
 For pure output tracking, `y_ref = r_theta` is enough.
 
-For state-feedback tracking, compute `x_ss` and `u_ss` from the tuned linear model.
+For state-feedback tracking, compute `x_ref` and `u_ff` from the tuned linear model.
 
 For sine tracking, also provide reference derivatives when useful:
 
@@ -371,12 +364,12 @@ r_ddot
 
 This keeps reference handling out of individual controller blocks.
 
-## StateEstimation
+## State_Feedback
 
 Always compute all feedback estimates in parallel:
 
 ```text
-x_dirty       dirty derivative + low-pass filter
+x_measured    measured state from the simulation plant
 x_luenberger  Luenberger observer
 x_kalman      Kalman observer
 ```
@@ -385,7 +378,7 @@ One selector chooses the active feedback state:
 
 ```text
 feedback_source_id:
-  1 dirty derivative + LPF
+  1 measured state
   2 Luenberger
   3 Kalman
 ```
@@ -394,12 +387,12 @@ All observers are logged even when they are not the active feedback source.
 
 This lets the observer comparison use the exact same trajectory.
 
-## ActuatorInterface
+## Motor_Voltage
 
 The actuator path should be shared by every controller:
 
 ```text
-u_controller
+V_cmd
   -> dead-zone compensation / nonlinear motor command block
   -> final +/-6 V saturation
   -> manual ON/OFF motor gate
@@ -411,14 +404,14 @@ The non-linear dead-zone block from `SS_tracking.slx` belongs here as a standard
 Log every actuator stage:
 
 ```text
-u_controller
+V_cmd
 u_compensated
-u_motor
+V_m
 saturation_active
 manual_on
 ```
 
-## PlantInterface
+## Seesaw_Plant
 
 The same harness should eventually support three plant modes:
 
@@ -434,28 +427,36 @@ Hardware mode should reuse the same controller bank and logger later.
 
 ## Test Matrix
 
+Current lab-readiness status from `preflight_lab_readiness('level','step')`:
+
+- `PP_measured` passed the 25 s step preflight.
+- `SMC_measured` passed the 25 s step preflight.
+- `LQI_measured`, `LQG_kalman`, and `PID_measured` failed the 25 s step preflight by exceeding the physical theta-stop estimate in simulation.
+
+Do not use LQI, LQG, or PID for hardware tomorrow unless their preflight failures are fixed and re-run successfully.
+
 Do not test every possible combination first. Start with a defensible matrix.
 
 Full matrix candidate:
 
 ```text
-PP_dirty
+PP_measured
 PP_luenberger
 PP_kalman
 
-PP_integral_dirty
+PP_integral_measured
 PP_integral_luenberger
 PP_integral_kalman
 
-LQR_dirty
-LQI_dirty
+LQR_measured
+LQI_measured
 LQG_kalman
 
-PID_dirty
+PID_measured
 PID_luenberger
 PID_kalman
 
-SMC_dirty
+SMC_measured
 SMC_luenberger
 SMC_kalman
 ```
@@ -463,14 +464,14 @@ SMC_kalman
 Reduced first-pass matrix:
 
 ```text
-PP_dirty
+PP_measured
 PP_luenberger
 PP_kalman
-LQI_dirty
+LQI_measured
 LQG_kalman
-PID_dirty
+PID_measured
 PID_kalman
-SMC_dirty
+SMC_measured
 SMC_kalman
 ```
 
@@ -506,9 +507,9 @@ result_file
 Use `Simulink.SimulationInput` for each run and save one result file per test case:
 
 ```text
-validation/data/sim_results/PP_dirty_theta.mat
+validation/data/sim_results/PP_measured_theta.mat
 validation/data/sim_results/LQG_kalman_theta.mat
-validation/data/sim_results/PID_dirty_theta.mat
+validation/data/sim_results/PID_measured_theta.mat
 validation/data/sim_results/SMC_kalman_theta.mat
 ```
 
@@ -527,13 +528,13 @@ theta_measured
 theta_tracking_error
 x_c
 theta
-x_dirty
+x_measured
 x_luenberger
 x_kalman
 x_feedback
-u_controller
+V_cmd
 u_compensated
-u_motor
+V_m
 saturation_active
 manual_on
 controller_id
@@ -546,7 +547,7 @@ Optional but useful:
 ```text
 x_ref
 x_ss
-u_ss
+u_ff
 integral_error
 SMC_sliding_variable
 PID_outer_output
@@ -580,7 +581,7 @@ Frequency-domain tracking metrics:
 
 - Fit `r_theta -> theta` gain and phase at every sine frequency.
 - Plot measured Bode points over the ideal tuned linear model `T(s)`.
-- Fit `r_theta -> u_motor` gain if actuator demand needs explanation.
+- Fit `r_theta -> V_m` gain if actuator demand needs explanation.
 - Report sine-fit residuals.
 
 Observer metrics:
@@ -622,7 +623,7 @@ For nonlinear controllers such as SMC, use sine-fit simulation results as the mo
 
 Time validation figures:
 
-- Full-run overview: `r_theta(t)`, `theta(t)`, `x_c(t)`, and `u_motor(t)` with segment labels.
+- Full-run overview: `r_theta(t)`, `theta(t)`, `x_c(t)`, and `V_m(t)` with segment labels.
 - Free-run response at `r_theta = 0`, including theta limit-cycle envelope and voltage effort.
 - `+theta` step response measured/simulated vs ideal tracking model.
 - `-theta` step response measured/simulated vs ideal tracking model.
@@ -632,7 +633,7 @@ Time validation figures:
 Frequency validation figures:
 
 - Bode plot of measured/simulated sine-fit points for `r_theta -> theta` over ideal `T_theta(s)`.
-- Optional Bode or gain plot of `r_theta -> u_motor` to show actuator demand.
+- Optional Bode or gain plot of `r_theta -> V_m` to show actuator demand.
 - Controller comparison Bode plot for PP, LQI/LQG, PID, and SMC.
 
 Observer validation figures:
@@ -673,9 +674,9 @@ validation/
     protocol/
       reference_tracking_protocol.mat
     sim_results/
-      PP_dirty_theta.mat
+      PP_measured_theta.mat
       LQG_kalman_theta.mat
-      PID_dirty_theta.mat
+      PID_measured_theta.mat
       SMC_kalman_theta.mat
 
   docs/
@@ -714,7 +715,7 @@ Do not keep editing all of those models independently.
 Use this framing:
 
 ```text
-The controllers were validated in closed loop by injecting the required test signals into the seesaw-angle reference command r_theta(t). This evaluates closed-loop tracking performance, represented by the complementary sensitivity function T_theta(s)=Theta(s)/R_theta(s). Each controller was first measured in free-run at r_theta=0 to quantify the bounded limit-cycle envelope. Time-domain validation used finite positive and negative theta-reference steps and a short theta-reference pulse. Frequency-domain validation used zero-mean sinusoidal theta-reference commands over the selected frequency range. The measured/simulated output response theta(t) and control effort u(t) were compared against the ideal tuned linear closed-loop tracking model, while deviations were interpreted in terms of actuator saturation, dead-zone compensation, friction, directional asymmetry, and observer limitations.
+The controllers were validated in closed loop by injecting the required test signals into the seesaw-angle reference command r_theta(t). This evaluates closed-loop tracking performance, represented by the complementary sensitivity function T_theta(s)=Theta(s)/R_theta(s). Each controller was first measured in free-run at r_theta=0 to quantify the bounded limit-cycle envelope. Time-domain validation used finite positive and negative theta-reference steps and a short theta-reference pulse. Frequency-domain validation used zero-mean sinusoidal theta-reference commands over the selected frequency range. The measured/simulated output response theta(t) and motor voltage V_m(t) were compared against the ideal tuned linear closed-loop tracking model, while deviations were interpreted in terms of actuator saturation, dead-zone compensation, friction, directional asymmetry, and observer limitations.
 ```
 
 For observers:

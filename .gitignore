@@ -36,3 +36,8 @@ indent.log
 *_quarc_win64/
 *.rt-win64
 *.win64
+
+# Validation run outputs
+validation/data/preflight/
+validation/data/prebuilt/
+validation/data/sim_results/

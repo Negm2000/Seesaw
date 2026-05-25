@@ -8,7 +8,7 @@ if nargin < 1 || isempty(controller_id)
     controller_id = 'PP';
 end
 if nargin < 2 || isempty(feedback_source_id)
-    feedback_source_id = 'dirty';
+    feedback_source_id = 'measured';
 end
 
 opts = parse_inputs(varargin{:});
@@ -94,8 +94,9 @@ switch controller_id
 end
 
 switch feedback_source_id
-    case {"dirty", "raw", "dd"}
+    case {"measured", "dirty", "raw", "dd"}
         cfg.feedback_selector_id = 1;
+        cfg.feedback_source_id = 'measured';
     case {"luenberger", "leuenberger"}
         cfg.feedback_selector_id = 2;
     case "kalman"
@@ -105,6 +106,7 @@ switch feedback_source_id
 end
 
 assign_cfg(cfg);
+apply_tuning_if_present();
 fprintf('Configured validation case: controller=%s, feedback=%s\n', cfg.controller_id, cfg.feedback_source_id);
 end
 
@@ -123,6 +125,9 @@ cfg.Ts = evalin('base', 'Ts');
 cfg.V_sat_hw = 6.0;
 cfg.V_model_sat = evalin('base', 'V_sat');
 cfg.dd_filter_N = 50;
+cfg.validation_log_columns = {'segment_id','theta_ref','x_ref','u_ff', ...
+    'x_feedback','V_cmd','V_m','theta','x_measured', ...
+    'x_luenberger','x_kalman'};
 
 % The tuned params and current seesaw_params variants disagree in state order.
 % For validation we standardize on the controller order used by PP/SMC/observers.
@@ -135,7 +140,7 @@ cfg.C_meas = [1 0 0 0; 0 0 1 0];
 
 ss_map = [cfg.A_ctrl cfg.B_ctrl; cfg.C_theta 0] \ [zeros(4, 1); 1];
 cfg.theta_xss_gain = ss_map(1:4);
-cfg.theta_uss_gain = ss_map(5);
+cfg.theta_uff_gain = ss_map(5);
 
 cfg.K_basic = zeros(1, 4);
 cfg.K_aug = zeros(1, 5);
@@ -204,6 +209,12 @@ function assign_cfg(cfg)
 names = fieldnames(cfg);
 for i = 1:numel(names)
     assignin('base', names{i}, cfg.(names{i}));
+end
+end
+
+function apply_tuning_if_present()
+if evalin('base', 'exist(''validation_tuning'', ''var'')')
+    tune_validation_case('verbose', false);
 end
 end
 

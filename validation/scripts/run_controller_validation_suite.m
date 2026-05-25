@@ -20,12 +20,16 @@ for k = 1:numel(cases)
     case_id = sprintf('%s_%s_theta', c.controller_id, c.feedback_source_id);
     fprintf('\n[%d/%d] Running %s\n', k, numel(cases), case_id);
     try
-        load_controller_validation_case(c.controller_id, c.feedback_source_id, 'root', opts.root);
+        build_controller_validation_harness('root', opts.root, ...
+            'controller_id', c.controller_id, ...
+            'feedback_source_id', c.feedback_source_id);
+        cfg = load_controller_validation_case(c.controller_id, c.feedback_source_id, 'root', opts.root);
         in = Simulink.SimulationInput('ControllerValidationHarness');
         in = in.setModelParameter('StopTime', num2str(protocol.t(end)));
         out = sim(in);
         result_file = fullfile(out_dir, [case_id '.mat']);
-        save(result_file, 'out', 'c', 'protocol', '-v7.3');
+        validation_log_columns = cfg.validation_log_columns;
+        save(result_file, 'out', 'c', 'cfg', 'protocol', 'validation_log_columns', '-v7.3');
         results(end+1) = make_result(case_id, c, result_file, 'ok', ''); %#ok<AGROW>
     catch ME
         results(end+1) = make_result(case_id, c, '', 'failed', ME.message); %#ok<AGROW>
@@ -44,21 +48,21 @@ end
 function cases = default_cases(quick)
 if quick
     rows = {
-        'PP', 'dirty'
-        'LQI', 'dirty'
+        'PP', 'measured'
+        'LQI', 'measured'
         'LQG', 'kalman'
-        'PID', 'dirty'
-        'SMC', 'dirty'};
+        'PID', 'measured'
+        'SMC', 'measured'};
 else
     rows = {
-        'PP', 'dirty'
+        'PP', 'measured'
         'PP', 'luenberger'
         'PP', 'kalman'
-        'LQI', 'dirty'
+        'LQI', 'measured'
         'LQG', 'kalman'
-        'PID', 'dirty'
+        'PID', 'measured'
         'PID', 'kalman'
-        'SMC', 'dirty'
+        'SMC', 'measured'
         'SMC', 'kalman'};
 end
 cases = struct('controller_id', {}, 'feedback_source_id', {});

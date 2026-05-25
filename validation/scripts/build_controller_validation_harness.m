@@ -1,279 +1,223 @@
-function build_controller_validation_harness()
-%BUILD_CONTROLLER_VALIDATION_HARNESS Build the canonical theta-tracking harness.
+function build_controller_validation_harness(varargin)
+%BUILD_CONTROLLER_VALIDATION_HARNESS Build a clean theta-tracking harness.
 %
-% This model is simulation-first. It uses the shared protocol
-% r_theta(t) -> theta(t), controller bank, observer bank, actuator path, and
-% logger. Existing deployment models remain references; this is the common
-% validation harness.
+% The model contains one Controller subsystem at a time. Batch tests
+% rebuild that subsystem for each controller case, which keeps the diagram
+% readable and prevents inactive controller branches from compiling.
 
-root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
-run(fullfile(root, 'startup.m'));
-generate_validation_protocol('root', root);
-load_controller_validation_case('PP', 'dirty', 'root', root);
+opts = parse_inputs(varargin{:});
+run(fullfile(opts.root, 'startup.m'));
+generate_validation_protocol('root', opts.root);
+load_controller_validation_case(opts.controller_id, opts.feedback_source_id, 'root', opts.root);
 
-model_dir = fullfile(root, 'validation', 'models');
+model_dir = fullfile(opts.root, 'validation', 'models');
 if ~exist(model_dir, 'dir')
     mkdir(model_dir);
 end
 
 mdl = 'ControllerValidationHarness';
 model_file = fullfile(model_dir, [mdl '.slx']);
+shadow_warning = warning('off', 'Simulink:Engine:MdlFileShadowing');
+restore_shadow_warning = onCleanup(@() warning(shadow_warning));
+
 if bdIsLoaded(mdl)
     close_system(mdl, 0);
 end
 if exist(model_file, 'file') == 2
-    delete(model_file);
+    open_system(model_file);
+    clear_system(mdl);
+else
+    new_system(mdl);
+    open_system(mdl);
 end
-
-new_system(mdl);
-open_system(mdl);
 set_param(mdl, 'SolverType', 'Fixed-step', 'Solver', 'ode4', ...
     'FixedStep', 'Ts', 'StopTime', 'protocol.t(end)', ...
     'SignalLogging', 'on', 'SignalLoggingName', 'logsout');
 
-add_top_level(mdl);
+build_top_level(mdl, opts.controller_id);
 save_system(mdl, model_file);
-fprintf('Built controller validation harness: %s\n', model_file);
+fprintf('Built %s with controller=%s, feedback=%s\n', model_file, opts.controller_id, opts.feedback_source_id);
 end
 
-function add_top_level(mdl)
-add_subsystem(mdl, 'ProtocolSource', [40 95 170 185]);
-add_subsystem(mdl, 'PlantInterface', [980 130 1130 260]);
-add_subsystem(mdl, 'StateEstimation', [300 330 480 500]);
-add_subsystem(mdl, 'ReferenceBuilder', [300 75 480 230]);
-add_subsystem(mdl, 'ControllerBank', [560 95 760 285]);
-add_subsystem(mdl, 'ControllerSelector', [805 145 920 245]);
-add_subsystem(mdl, 'ActuatorInterface', [1180 145 1340 245]);
-add_subsystem(mdl, 'Logger', [1410 115 1580 360]);
+function build_top_level(mdl, controller_id)
+add_subsystem(mdl, 'Theta_Protocol', [90 230 230 320]);
+add_subsystem(mdl, 'Steady_State_Targets', [420 220 590 340]);
+add_subsystem(mdl, 'Controller', [800 210 1000 355]);
+add_subsystem(mdl, 'Motor_Voltage', [1230 220 1410 340]);
+add_subsystem(mdl, 'Seesaw_Plant', [1640 220 1810 340]);
+add_subsystem(mdl, 'State_Feedback', [1640 520 1830 700]);
+add_subsystem(mdl, 'Validation_Log', [2160 265 2350 625]);
 
-build_protocol_source([mdl '/ProtocolSource']);
-build_reference_builder([mdl '/ReferenceBuilder']);
-build_plant_interface([mdl '/PlantInterface']);
-build_state_estimation([mdl '/StateEstimation']);
-build_controller_bank([mdl '/ControllerBank']);
-build_controller_selector([mdl '/ControllerSelector']);
-build_actuator_interface([mdl '/ActuatorInterface']);
-build_logger([mdl '/Logger']);
+build_protocol_source([mdl '/Theta_Protocol']);
+build_reference_builder([mdl '/Steady_State_Targets']);
+build_controller_under_test([mdl '/Controller'], controller_id);
+build_actuator_interface([mdl '/Motor_Voltage']);
+build_plant_interface([mdl '/Seesaw_Plant']);
+build_state_estimation([mdl '/State_Feedback']);
+build_logger([mdl '/Validation_Log']);
 
-connect(mdl, 'ProtocolSource/1', 'ReferenceBuilder/1');
-connect(mdl, 'ProtocolSource/2', 'Logger/1');
-connect(mdl, 'ReferenceBuilder/1', 'ControllerBank/1');
-connect(mdl, 'ReferenceBuilder/2', 'ControllerBank/2');
-connect(mdl, 'ReferenceBuilder/3', 'ControllerBank/3');
-connect(mdl, 'ReferenceBuilder/1', 'Logger/2');
-connect(mdl, 'ReferenceBuilder/2', 'Logger/3');
-connect(mdl, 'ReferenceBuilder/3', 'Logger/4');
-connect(mdl, 'PlantInterface/1', 'StateEstimation/1');
-connect(mdl, 'PlantInterface/2', 'StateEstimation/2');
-connect(mdl, 'ActuatorInterface/1', 'StateEstimation/3');
-connect(mdl, 'StateEstimation/1', 'ControllerBank/4');
-connect(mdl, 'StateEstimation/2', 'ControllerBank/5');
-connect(mdl, 'StateEstimation/3', 'ControllerBank/6');
-connect(mdl, 'StateEstimation/4', 'ControllerBank/7');
-connect(mdl, 'StateEstimation/4', 'Logger/5');
-connect(mdl, 'StateEstimation/5', 'Logger/9');
-connect(mdl, 'StateEstimation/6', 'Logger/10');
-connect(mdl, 'StateEstimation/7', 'Logger/11');
-connect(mdl, 'ControllerBank/1', 'ControllerSelector/1');
-connect(mdl, 'ControllerBank/2', 'ControllerSelector/2');
-connect(mdl, 'ControllerBank/3', 'ControllerSelector/3');
-connect(mdl, 'ControllerBank/4', 'ControllerSelector/4');
-connect(mdl, 'ControllerBank/5', 'ControllerSelector/5');
-connect(mdl, 'ControllerBank/6', 'ControllerSelector/6');
-connect(mdl, 'ControllerSelector/1', 'ActuatorInterface/1');
-connect(mdl, 'ActuatorInterface/1', 'PlantInterface/1');
-connect(mdl, 'ControllerSelector/1', 'Logger/6');
-connect(mdl, 'ActuatorInterface/1', 'Logger/7');
-connect(mdl, 'PlantInterface/1', 'Logger/8');
-connect(mdl, 'PlantInterface/2', 'Logger/12');
+style_top_level(mdl, controller_id);
+wire_top_level_with_tags(mdl);
+end
+
+function wire_top_level_with_tags(mdl)
+publish_signal(mdl, 'Theta_Protocol/1', 'r_theta', 'tag_r_theta', [255 235 315 255]);
+publish_signal(mdl, 'Theta_Protocol/2', 'segment_id', 'tag_segment_id', [255 290 315 310]);
+publish_signal(mdl, 'Steady_State_Targets/1', 'theta_ref', 'tag_theta_ref', [620 225 695 245]);
+publish_signal(mdl, 'Steady_State_Targets/2', 'x_ref', 'tag_x_ref', [620 265 695 285]);
+publish_signal(mdl, 'Steady_State_Targets/3', 'u_ff', 'tag_u_ff', [620 305 695 325]);
+publish_signal(mdl, 'Controller/1', 'V_cmd', 'tag_V_cmd', [1025 265 1115 285]);
+publish_signal(mdl, 'Motor_Voltage/1', 'V_m', 'tag_V_m', [1440 270 1525 290]);
+publish_signal(mdl, 'Seesaw_Plant/1', 'x_state', 'tag_x_state', [1845 240 1935 260]);
+publish_signal(mdl, 'Seesaw_Plant/2', 'theta', 'tag_theta', [1845 295 1935 315]);
+publish_signal(mdl, 'State_Feedback/1', 'x_measured', 'tag_x_measured', [1875 535 1975 555]);
+publish_signal(mdl, 'State_Feedback/2', 'x_luenberger', 'tag_x_luenberger', [1875 580 1995 600]);
+publish_signal(mdl, 'State_Feedback/3', 'x_kalman', 'tag_x_kalman', [1875 625 1975 645]);
+publish_signal(mdl, 'State_Feedback/4', 'x_feedback', 'tag_x_feedback', [1875 670 1995 690]);
+
+subscribe_signal(mdl, 'r_theta', 'r_theta_to_targets', 'Steady_State_Targets/1', [360 255 390 275]);
+subscribe_signal(mdl, 'theta_ref', 'theta_ref_to_controller', 'Controller/1', [745 220 775 240]);
+subscribe_signal(mdl, 'x_ref', 'x_ref_to_controller', 'Controller/2', [745 255 775 275]);
+subscribe_signal(mdl, 'u_ff', 'u_ff_to_controller', 'Controller/3', [745 290 775 310]);
+subscribe_signal(mdl, 'x_feedback', 'x_feedback_to_controller', 'Controller/4', [745 325 775 345]);
+subscribe_signal(mdl, 'V_cmd', 'V_cmd_to_motor_voltage', 'Motor_Voltage/1', [1170 270 1205 290]);
+subscribe_signal(mdl, 'V_m', 'V_m_to_plant', 'Seesaw_Plant/1', [1585 255 1615 275]);
+subscribe_signal(mdl, 'x_state', 'x_state_to_feedback', 'State_Feedback/1', [1585 560 1615 580]);
+subscribe_signal(mdl, 'V_m', 'V_m_to_feedback', 'State_Feedback/2', [1585 620 1615 640]);
+
+subscribe_signal(mdl, 'segment_id', 'log_segment_id', 'Validation_Log/1', [2100 290 2140 310]);
+subscribe_signal(mdl, 'theta_ref', 'log_theta_ref', 'Validation_Log/2', [2100 315 2140 335]);
+subscribe_signal(mdl, 'x_ref', 'log_x_ref', 'Validation_Log/3', [2100 340 2140 360]);
+subscribe_signal(mdl, 'u_ff', 'log_u_ff', 'Validation_Log/4', [2100 365 2140 385]);
+subscribe_signal(mdl, 'x_feedback', 'log_x_feedback', 'Validation_Log/5', [2100 390 2140 410]);
+subscribe_signal(mdl, 'V_cmd', 'log_V_cmd', 'Validation_Log/6', [2100 415 2140 435]);
+subscribe_signal(mdl, 'V_m', 'log_V_m', 'Validation_Log/7', [2100 440 2140 460]);
+subscribe_signal(mdl, 'theta', 'log_theta', 'Validation_Log/8', [2100 465 2140 485]);
+subscribe_signal(mdl, 'x_measured', 'log_x_measured', 'Validation_Log/9', [2100 490 2140 510]);
+subscribe_signal(mdl, 'x_luenberger', 'log_x_luenberger', 'Validation_Log/10', [2100 515 2140 535]);
+subscribe_signal(mdl, 'x_kalman', 'log_x_kalman', 'Validation_Log/11', [2100 540 2140 560]);
+end
+
+function style_top_level(mdl, controller_id)
+style_block(mdl, 'Theta_Protocol', 'lightBlue');
+style_block(mdl, 'Steady_State_Targets', 'cyan');
+style_block(mdl, 'Controller', 'yellow');
+style_block(mdl, 'Motor_Voltage', 'orange');
+style_block(mdl, 'Seesaw_Plant', 'green');
+style_block(mdl, 'State_Feedback', 'magenta');
+style_block(mdl, 'Validation_Log', 'gray');
+
+add_note(mdl, sprintf('Theta Tracking Validation Harness\nController: %s', controller_id), [80 35 620 90], 'white');
+add_note(mdl, sprintf('Use this model\nBuild/select case: build_controller_validation_harness(''controller_id'',''PP'',''feedback_source_id'',''measured'')\nRun current case: sim(''ControllerValidationHarness'')\nBatch: run_controller_validation_suite(''quick'',true); analyze_controller_validation_suite'), [690 25 2050 115], 'white');
+add_note(mdl, sprintf('01 Theta Protocol\nfree-run, theta steps, pulse, stepped sine sweep'), [75 145 310 205], 'lightBlue');
+add_note(mdl, sprintf('02 Steady-State Targets\ncreates theta_ref, x_ref, u_ff'), [395 145 645 205], 'cyan');
+add_note(mdl, sprintf('03 Controller\none selected controller per generated model'), [770 145 1060 200], 'yellow');
+add_note(mdl, sprintf('04 Motor Voltage\ndead-zone compensation + final +/-6 V saturation'), [1140 145 1480 200], 'orange');
+add_note(mdl, sprintf('05 Plant + State Feedback\nlinear plant; measured, Luenberger, Kalman state'), [1585 145 1945 200], 'green');
+add_note(mdl, sprintf('06 Validation Log\nwrites validation_log timeseries'), [2075 180 2400 240], 'gray');
 end
 
 function build_protocol_source(ss)
 clear_system(ss);
-add_block('simulink/Sources/From Workspace', [ss '/r_theta_ts'], 'VariableName', 'protocol.r_theta_ts', 'Position', [35 35 145 65]);
-add_block('simulink/Sources/From Workspace', [ss '/segment_id_ts'], 'VariableName', 'protocol.segment_id_ts', 'Position', [35 100 145 130]);
-add_block('simulink/Sinks/Out1', [ss '/r_theta'], 'Position', [210 40 240 60]);
-add_block('simulink/Sinks/Out1', [ss '/segment_id'], 'Position', [210 105 240 125]);
+add_note(ss, sprintf('Theta reference protocol\nfree-run, steps, pulse, sine sweep'), [20 10 260 45], 'lightBlue');
+add_block('simulink/Sources/From Workspace', [ss '/r_theta_ts'], 'VariableName', 'protocol.r_theta_ts', 'Position', [45 70 175 100]);
+add_block('simulink/Sources/From Workspace', [ss '/segment_id_ts'], 'VariableName', 'protocol.segment_id_ts', 'Position', [45 145 175 175]);
+add_out(ss, 'r_theta', [270 75 300 95]);
+add_out(ss, 'segment_id', [270 150 300 170]);
 connect(ss, 'r_theta_ts/1', 'r_theta/1');
 connect(ss, 'segment_id_ts/1', 'segment_id/1');
 end
 
 function build_reference_builder(ss)
 clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/r_theta'], 'Position', [30 70 60 90]);
-add_block('simulink/Continuous/Derivative', [ss '/theta_ref_dot'], 'Position', [115 110 145 140]);
-add_block('simulink/Continuous/Derivative', [ss '/theta_ref_ddot'], 'Position', [190 145 220 175]);
-add_block('simulink/Sources/Constant', [ss '/zero'], 'Value', '0', 'Position', [110 25 140 45]);
-add_block('simulink/Signal Routing/Mux', [ss '/x_ref_mux'], 'Inputs', '4', 'Position', [285 55 295 155]);
-add_block('simulink/Math Operations/Gain', [ss '/theta_xss_gain'], 'Gain', 'theta_xss_gain', 'Multiplication', 'Matrix(K*u)', 'Position', [275 190 345 220]);
-add_block('simulink/Math Operations/Gain', [ss '/theta_uss_gain'], 'Gain', 'theta_uss_gain', 'Position', [275 250 345 280]);
-add_block('simulink/Sinks/Out1', [ss '/theta_ref'], 'Position', [420 40 450 60]);
-add_block('simulink/Sinks/Out1', [ss '/x_ref'], 'Position', [420 90 450 110]);
-add_block('simulink/Sinks/Out1', [ss '/u_ss'], 'Position', [420 255 450 275]);
+add_note(ss, sprintf('Steady-state target map\nr_theta -> theta_ref, x_ref, u_ff'), [25 10 335 45], 'cyan');
+add_in(ss, 'r_theta', [35 115 65 135]);
+add_block('simulink/Math Operations/Gain', [ss '/theta_to_x_ref'], 'Gain', 'theta_xss_gain', 'Multiplication', 'Matrix(K*u)', 'Position', [165 80 285 120]);
+add_block('simulink/Math Operations/Gain', [ss '/theta_to_u_ff'], 'Gain', 'theta_uff_gain', 'Position', [165 170 285 200]);
+add_out(ss, 'theta_ref', [395 70 425 90]);
+add_out(ss, 'x_ref', [395 115 425 135]);
+add_out(ss, 'u_ff', [395 180 425 200]);
 connect(ss, 'r_theta/1', 'theta_ref/1');
-connect(ss, 'r_theta/1', 'theta_ref_dot/1');
-connect(ss, 'theta_ref_dot/1', 'theta_ref_ddot/1');
-connect(ss, 'zero/1', 'x_ref_mux/1');
-connect(ss, 'zero/1', 'x_ref_mux/2');
-connect(ss, 'r_theta/1', 'x_ref_mux/3');
-connect(ss, 'theta_ref_dot/1', 'x_ref_mux/4');
-connect(ss, 'x_ref_mux/1', 'x_ref/1');
-connect(ss, 'r_theta/1', 'theta_xss_gain/1');
-connect(ss, 'r_theta/1', 'theta_uss_gain/1');
-connect(ss, 'theta_uss_gain/1', 'u_ss/1');
+connect(ss, 'r_theta/1', 'theta_to_x_ref/1');
+connect(ss, 'theta_to_x_ref/1', 'x_ref/1');
+connect(ss, 'r_theta/1', 'theta_to_u_ff/1');
+connect(ss, 'theta_to_u_ff/1', 'u_ff/1');
 end
 
-function build_plant_interface(ss)
+function build_controller_under_test(ss, controller_id)
 clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/u_motor'], 'Position', [30 65 60 85]);
-add_block('simulink/Continuous/State-Space', [ss '/LinearPlant'], 'A', 'A_ctrl', 'B', 'B_ctrl', 'C', 'C_ctrl', 'D', 'D_ctrl', 'X0', '[0;0;0;0]', 'Position', [135 45 250 105]);
-add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [300 35 305 125]);
-add_block('simulink/Sinks/Out1', [ss '/x_state'], 'Position', [360 55 390 75]);
-add_block('simulink/Sinks/Out1', [ss '/theta'], 'Position', [360 100 390 120]);
-connect(ss, 'u_motor/1', 'LinearPlant/1');
-connect(ss, 'LinearPlant/1', 'x_state/1');
-connect(ss, 'LinearPlant/1', 'state_demux/1');
-connect(ss, 'state_demux/3', 'theta/1');
+add_note(ss, sprintf('Controller: %s\nInputs are reference targets plus selected feedback state.', upper(char(controller_id))), [25 10 460 55], 'yellow');
+add_in(ss, 'theta_ref', [25 75 55 95]);
+add_in(ss, 'x_ref', [25 135 55 155]);
+add_in(ss, 'u_ff', [25 195 55 215]);
+add_in(ss, 'x_feedback', [25 255 55 275]);
+
+switch lower(string(controller_id))
+    case {"pp", "pole_placement"}
+        add_state_feedback_controller(ss, 'K_pp');
+    case {"lqr"}
+        add_state_feedback_controller(ss, 'K_lqr');
+    case {"pp_integral", "ppi"}
+        add_integral_state_feedback_controller(ss, 'K_aug');
+    case {"lqi", "lqg"}
+        add_integral_state_feedback_controller(ss, 'K_lqi');
+    case "pid"
+        add_pid_cascade_controller(ss);
+    case "smc"
+        add_smc_controller(ss);
+    otherwise
+        error('Unsupported controller_id for harness build: %s', controller_id);
+end
 end
 
-function build_state_estimation(ss)
-clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/x_state'], 'Position', [25 50 55 70]);
-add_block('simulink/Sources/In1', [ss '/theta'], 'Position', [25 115 55 135]);
-add_block('simulink/Sources/In1', [ss '/u_motor'], 'Position', [25 180 55 200]);
-add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [95 35 100 125]);
-add_block('simulink/Signal Routing/Mux', [ss '/measurement_mux'], 'Inputs', '2', 'Position', [180 145 190 205]);
-add_block('simulink/Signal Routing/Mux', [ss '/observer_input_mux'], 'Inputs', '3', 'Position', [250 145 260 225]);
-add_block('simulink/Continuous/State-Space', [ss '/Luenberger'], 'A', 'A_obs_l', 'B', 'B_obs_l', 'C', 'C_obs_l', 'D', 'D_obs_l', 'X0', '[0;0;0;0]', 'Position', [330 135 430 185]);
-add_block('simulink/Continuous/State-Space', [ss '/Kalman'], 'A', 'A_obs_k', 'B', 'B_obs_k', 'C', 'C_obs_k', 'D', 'D_obs_k', 'X0', '[0;0;0;0]', 'Position', [330 215 430 265]);
-add_block('simulink/Signal Routing/Multiport Switch', [ss '/FeedbackSelector'], 'DataPortOrder', 'One-based contiguous', 'Inputs', '3', 'Position', [520 80 585 220]);
-add_block('simulink/Sources/Constant', [ss '/feedback_source_id'], 'Value', 'feedback_selector_id', 'Position', [405 55 475 80]);
-add_block('simulink/Sinks/Out1', [ss '/x_dirty'], 'Position', [660 40 690 60]);
-add_block('simulink/Sinks/Out1', [ss '/x_luenberger'], 'Position', [660 90 690 110]);
-add_block('simulink/Sinks/Out1', [ss '/x_kalman'], 'Position', [660 140 690 160]);
-add_block('simulink/Sinks/Out1', [ss '/x_feedback'], 'Position', [660 195 690 215]);
-add_block('simulink/Sinks/Out1', [ss '/xc'], 'Position', [660 250 690 270]);
-add_block('simulink/Sinks/Out1', [ss '/theta_out'], 'Position', [660 300 690 320]);
-add_block('simulink/Sinks/Out1', [ss '/theta_dot'], 'Position', [660 350 690 370]);
-connect(ss, 'x_state/1', 'state_demux/1');
-connect(ss, 'x_state/1', 'x_dirty/1');
-connect(ss, 'x_state/1', 'FeedbackSelector/2');
-connect(ss, 'u_motor/1', 'observer_input_mux/1');
-connect(ss, 'state_demux/1', 'measurement_mux/1');
-connect(ss, 'state_demux/3', 'measurement_mux/2');
-connect(ss, 'state_demux/1', 'observer_input_mux/2');
-connect(ss, 'state_demux/3', 'observer_input_mux/3');
-connect(ss, 'observer_input_mux/1', 'Luenberger/1');
-connect(ss, 'observer_input_mux/1', 'Kalman/1');
-connect(ss, 'Luenberger/1', 'x_luenberger/1');
-connect(ss, 'Kalman/1', 'x_kalman/1');
-connect(ss, 'Luenberger/1', 'FeedbackSelector/3');
-connect(ss, 'Kalman/1', 'FeedbackSelector/4');
-connect(ss, 'feedback_source_id/1', 'FeedbackSelector/1');
-connect(ss, 'FeedbackSelector/1', 'x_feedback/1');
-connect(ss, 'state_demux/1', 'xc/1');
-connect(ss, 'state_demux/3', 'theta_out/1');
-connect(ss, 'state_demux/4', 'theta_dot/1');
-end
-
-function build_controller_bank(ss)
-clear_system(ss);
-ins = {'theta_ref','x_ref','u_ss','x_dirty','x_luenberger','x_kalman','x_feedback'};
-for i = 1:numel(ins)
-    add_block('simulink/Sources/In1', [ss '/' ins{i}], 'Position', [30 30+45*i 60 50+45*i]);
-end
-
-add_state_feedback_controller(ss, 'PP', 'K_pp', 150, 65, false);
-add_augmented_controller(ss, 'PP_Integral', 'K_aug', 150, 140);
-add_state_feedback_controller(ss, 'LQR', 'K_lqr', 150, 215, false);
-add_augmented_controller(ss, 'LQI_LQG', 'K_lqi', 150, 290);
-add_pid_controller(ss, 150, 380);
-add_smc_controller(ss, 150, 500);
-
-outs = {'u_pp','u_pp_integral','u_lqr','u_lqi_lqg','u_pid','u_smc'};
-for i = 1:numel(outs)
-    add_block('simulink/Sinks/Out1', [ss '/' outs{i}], 'Position', [780 65+75*(i-1) 810 85+75*(i-1)]);
-end
-connect(ss, 'PP/1', 'u_pp/1');
-connect(ss, 'PP_Integral/1', 'u_pp_integral/1');
-connect(ss, 'LQR/1', 'u_lqr/1');
-connect(ss, 'LQI_LQG/1', 'u_lqi_lqg/1');
-connect(ss, 'PID_Cascade/1', 'u_pid/1');
-connect(ss, 'SMC_STA/1', 'u_smc/1');
-
-% Common inputs to subsystems.
-connect(ss, 'theta_ref/1', 'PP_Integral/1');
-connect(ss, 'theta_ref/1', 'LQI_LQG/1');
-connect(ss, 'theta_ref/1', 'PID_Cascade/1');
-connect(ss, 'theta_ref/1', 'SMC_STA/1');
-connect(ss, 'x_ref/1', 'PP/1');
-connect(ss, 'x_ref/1', 'LQR/1');
-connect(ss, 'x_ref/1', 'SMC_STA/2');
-connect(ss, 'u_ss/1', 'PP/2');
-connect(ss, 'u_ss/1', 'LQR/2');
-connect(ss, 'x_feedback/1', 'PP/3');
-connect(ss, 'x_feedback/1', 'PP_Integral/2');
-connect(ss, 'x_feedback/1', 'LQR/3');
-connect(ss, 'x_feedback/1', 'LQI_LQG/2');
-connect(ss, 'x_feedback/1', 'PID_Cascade/2');
-connect(ss, 'x_feedback/1', 'SMC_STA/3');
-end
-
-function add_state_feedback_controller(parent, name, gain_var, x, y, ~)
-ss = [parent '/' name];
-add_subsystem(parent, name, [x y x+180 y+90]);
-clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/x_ref'], 'Position', [25 30 55 50]);
-add_block('simulink/Sources/In1', [ss '/u_ss'], 'Position', [25 80 55 100]);
-add_block('simulink/Sources/In1', [ss '/x_feedback'], 'Position', [25 130 55 150]);
-add_block('simulink/Math Operations/Sum', [ss '/x_error'], 'Inputs', '+-', 'Position', [120 65 150 115]);
-add_block('simulink/Math Operations/Gain', [ss '/K'], 'Gain', ['-' gain_var], 'Multiplication', 'Matrix(K*u)', 'Position', [210 75 265 105]);
-add_block('simulink/Math Operations/Sum', [ss '/add_u_ss'], 'Inputs', '++', 'Position', [315 75 345 105]);
-add_block('simulink/Sinks/Out1', [ss '/u'], 'Position', [400 85 430 105]);
-connect(ss, 'x_ref/1', 'x_error/1');
-connect(ss, 'x_feedback/1', 'x_error/2');
+function add_state_feedback_controller(ss, gain_var)
+add_block('simulink/Math Operations/Sum', [ss '/x_error'], 'Inputs', '+-', 'Position', [155 205 190 260]);
+add_block('simulink/Math Operations/Gain', [ss '/K'], 'Gain', ['-' gain_var], 'Multiplication', 'Matrix(K*u)', 'Position', [285 215 365 245]);
+add_block('simulink/Math Operations/Sum', [ss '/add_u_ff'], 'Inputs', '++', 'Position', [465 215 500 260]);
+add_out(ss, 'V_cmd', [600 225 630 245]);
+add_terminator(ss, 'unused_theta_ref', [115 75 140 95]);
+connect(ss, 'theta_ref/1', 'unused_theta_ref/1');
+connect(ss, 'x_feedback/1', 'x_error/1');
+connect(ss, 'x_ref/1', 'x_error/2');
 connect(ss, 'x_error/1', 'K/1');
-connect(ss, 'u_ss/1', 'add_u_ss/1');
-connect(ss, 'K/1', 'add_u_ss/2');
-connect(ss, 'add_u_ss/1', 'u/1');
+connect(ss, 'u_ff/1', 'add_u_ff/1');
+connect(ss, 'K/1', 'add_u_ff/2');
+connect(ss, 'add_u_ff/1', 'V_cmd/1');
 end
 
-function add_augmented_controller(parent, name, gain_var, x, y)
-ss = [parent '/' name];
-add_subsystem(parent, name, [x y x+210 y+100]);
-clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/theta_ref'], 'Position', [25 30 55 50]);
-add_block('simulink/Sources/In1', [ss '/x_feedback'], 'Position', [25 95 55 115]);
-add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [100 75 105 145]);
-add_block('simulink/Math Operations/Sum', [ss '/theta_error'], 'Inputs', '+-', 'Position', [165 35 195 65]);
-add_block('simulink/Continuous/Integrator', [ss '/integral_theta_error'], 'InitialCondition', '0', 'Position', [235 35 265 65]);
-add_block('simulink/Signal Routing/Mux', [ss '/aug_state'], 'Inputs', '5', 'Position', [325 70 335 165]);
-add_block('simulink/Math Operations/Gain', [ss '/K_aug'], 'Gain', ['-' gain_var], 'Multiplication', 'Matrix(K*u)', 'Position', [390 100 450 130]);
-add_block('simulink/Sinks/Out1', [ss '/u'], 'Position', [500 105 530 125]);
+function add_integral_state_feedback_controller(ss, gain_var)
+add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [135 225 140 315]);
+add_block('simulink/Math Operations/Sum', [ss '/theta_error'], 'Inputs', '+-', 'Position', [220 80 255 115]);
+add_block('simulink/Continuous/Integrator', [ss '/integral_theta_error'], 'InitialCondition', '0', 'Position', [330 80 370 115]);
+add_block('simulink/Math Operations/Sum', [ss '/x_error'], 'Inputs', '+-', 'Position', [220 190 255 245]);
+add_block('simulink/Signal Routing/Mux', [ss '/augmented_error'], 'Inputs', '2', 'Position', [445 175 455 265]);
+add_block('simulink/Math Operations/Gain', [ss '/K_augmented'], 'Gain', ['-' gain_var], 'Multiplication', 'Matrix(K*u)', 'Position', [550 205 650 235]);
+add_out(ss, 'V_cmd', [740 210 770 230]);
+add_terminator(ss, 'unused_u_ff', [115 195 140 215]);
+connect(ss, 'u_ff/1', 'unused_u_ff/1');
 connect(ss, 'x_feedback/1', 'state_demux/1');
 connect(ss, 'theta_ref/1', 'theta_error/1');
 connect(ss, 'state_demux/3', 'theta_error/2');
 connect(ss, 'theta_error/1', 'integral_theta_error/1');
-for i = 1:4
-    connect(ss, sprintf('state_demux/%d', i), sprintf('aug_state/%d', i));
-end
-connect(ss, 'integral_theta_error/1', 'aug_state/5');
-connect(ss, 'aug_state/1', 'K_aug/1');
-connect(ss, 'K_aug/1', 'u/1');
+connect(ss, 'x_feedback/1', 'x_error/1');
+connect(ss, 'x_ref/1', 'x_error/2');
+connect(ss, 'x_error/1', 'augmented_error/1');
+connect(ss, 'integral_theta_error/1', 'augmented_error/2');
+connect(ss, 'augmented_error/1', 'K_augmented/1');
+connect(ss, 'K_augmented/1', 'V_cmd/1');
 end
 
-function add_pid_controller(parent, x, y)
-ss = [parent '/PID_Cascade'];
-add_subsystem(parent, 'PID_Cascade', [x y x+235 y+110]);
-clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/theta_ref'], 'Position', [25 30 55 50]);
-add_block('simulink/Sources/In1', [ss '/x_feedback'], 'Position', [25 90 55 110]);
-add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [95 75 100 145]);
-add_block('simulink/Math Operations/Sum', [ss '/theta_error'], 'Inputs', '+-', 'Position', [150 35 180 65]);
-add_block('simulink/Continuous/Transfer Fcn', [ss '/Outer_PID'], 'Numerator', 'pid_outer_num', 'Denominator', 'pid_outer_den', 'Position', [225 30 310 70]);
-add_block('simulink/Math Operations/Sum', [ss '/cart_error'], 'Inputs', '+-', 'Position', [365 50 395 80]);
-add_block('simulink/Continuous/Transfer Fcn', [ss '/Inner_PID'], 'Numerator', 'pid_inner_num', 'Denominator', 'pid_inner_den', 'Position', [445 45 530 85]);
-add_block('simulink/Sinks/Out1', [ss '/u'], 'Position', [590 55 620 75]);
+function add_pid_cascade_controller(ss)
+add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [135 245 140 335]);
+add_block('simulink/Math Operations/Sum', [ss '/theta_error'], 'Inputs', '+-', 'Position', [220 75 255 110]);
+add_block('simulink/Continuous/Transfer Fcn', [ss '/Outer_PID'], 'Numerator', 'pid_outer_num', 'Denominator', 'pid_outer_den', 'Position', [330 70 430 115]);
+add_block('simulink/Math Operations/Sum', [ss '/cart_error'], 'Inputs', '+-', 'Position', [515 105 550 140]);
+add_block('simulink/Continuous/Transfer Fcn', [ss '/Inner_PID'], 'Numerator', 'pid_inner_num', 'Denominator', 'pid_inner_den', 'Position', [640 100 740 145]);
+add_out(ss, 'V_cmd', [835 110 865 130]);
+add_terminator(ss, 'unused_x_ref', [115 135 140 155]);
+add_terminator(ss, 'unused_u_ff', [115 195 140 215]);
+connect(ss, 'x_ref/1', 'unused_x_ref/1');
+connect(ss, 'u_ff/1', 'unused_u_ff/1');
 connect(ss, 'x_feedback/1', 'state_demux/1');
 connect(ss, 'theta_ref/1', 'theta_error/1');
 connect(ss, 'state_demux/3', 'theta_error/2');
@@ -281,28 +225,26 @@ connect(ss, 'theta_error/1', 'Outer_PID/1');
 connect(ss, 'Outer_PID/1', 'cart_error/1');
 connect(ss, 'state_demux/1', 'cart_error/2');
 connect(ss, 'cart_error/1', 'Inner_PID/1');
-connect(ss, 'Inner_PID/1', 'u/1');
+connect(ss, 'Inner_PID/1', 'V_cmd/1');
 end
 
-function add_smc_controller(parent, x, y)
-ss = [parent '/SMC_STA'];
-add_subsystem(parent, 'SMC_STA', [x y x+250 y+115]);
-clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/theta_ref'], 'Position', [25 25 55 45]);
-add_block('simulink/Sources/In1', [ss '/x_ref'], 'Position', [25 75 55 95]);
-add_block('simulink/Sources/In1', [ss '/x_feedback'], 'Position', [25 125 55 145]);
-add_block('simulink/Math Operations/Sum', [ss '/x_error'], 'Inputs', '+-', 'Position', [105 85 135 135]);
-add_block('simulink/Math Operations/Gain', [ss '/SlidingSurface'], 'Gain', 'S_smc', 'Multiplication', 'Matrix(K*u)', 'Position', [180 90 250 120]);
-add_block('simulink/Math Operations/Gain', [ss '/EquivalentControl'], 'Gain', '-K_eq_smc', 'Multiplication', 'Matrix(K*u)', 'Position', [180 150 250 180]);
-add_block('simulink/Math Operations/Gain', [ss '/BoundaryScale'], 'Gain', '1/phi_smc', 'Position', [300 85 360 115]);
-add_block('simulink/Discontinuities/Saturation', [ss '/BoundarySaturation'], 'UpperLimit', '1', 'LowerLimit', '-1', 'Position', [400 85 460 115]);
-add_block('simulink/Math Operations/Gain', [ss '/ReachingGain'], 'Gain', '-k1_smc', 'Position', [510 80 570 110]);
-add_block('simulink/Math Operations/Gain', [ss '/IntegratorGain'], 'Gain', '-k2_smc', 'Position', [510 135 570 165]);
-add_block('simulink/Continuous/Integrator', [ss '/STAIntegrator'], 'InitialCondition', 'smc_int_ic', 'Position', [610 135 640 165]);
-add_block('simulink/Math Operations/Sum', [ss '/ReachingSum'], 'Inputs', '++', 'Position', [685 95 715 140]);
-add_block('simulink/Math Operations/Gain', [ss '/InputNormalize'], 'Gain', '1/SB_smc', 'Position', [755 100 815 130]);
-add_block('simulink/Math Operations/Sum', [ss '/TotalControl'], 'Inputs', '++', 'Position', [860 125 890 170]);
-add_block('simulink/Sinks/Out1', [ss '/u'], 'Position', [950 140 980 160]);
+function add_smc_controller(ss)
+add_block('simulink/Math Operations/Sum', [ss '/x_error'], 'Inputs', '+-', 'Position', [155 220 190 275]);
+add_block('simulink/Math Operations/Gain', [ss '/SlidingSurface'], 'Gain', 'S_smc', 'Multiplication', 'Matrix(K*u)', 'Position', [285 190 375 220]);
+add_block('simulink/Math Operations/Gain', [ss '/EquivalentControl'], 'Gain', '-K_eq_smc', 'Multiplication', 'Matrix(K*u)', 'Position', [285 285 375 315]);
+add_block('simulink/Math Operations/Gain', [ss '/BoundaryScale'], 'Gain', '1/phi_smc', 'Position', [455 190 535 220]);
+add_block('simulink/Discontinuities/Saturation', [ss '/BoundarySaturation'], 'UpperLimit', '1', 'LowerLimit', '-1', 'Position', [610 190 690 220]);
+add_block('simulink/Math Operations/Gain', [ss '/ReachingGain'], 'Gain', '-k1_smc', 'Position', [760 165 835 195]);
+add_block('simulink/Math Operations/Gain', [ss '/IntegratorGain'], 'Gain', '-k2_smc', 'Position', [760 240 835 270]);
+add_block('simulink/Continuous/Integrator', [ss '/STAIntegrator'], 'InitialCondition', 'smc_int_ic', 'Position', [910 240 950 270]);
+add_block('simulink/Math Operations/Sum', [ss '/ReachingSum'], 'Inputs', '++', 'Position', [1025 185 1060 235]);
+add_block('simulink/Math Operations/Gain', [ss '/InputNormalize'], 'Gain', '1/SB_smc', 'Position', [1135 195 1215 225]);
+add_block('simulink/Math Operations/Sum', [ss '/TotalControl'], 'Inputs', '++', 'Position', [1290 240 1325 290]);
+add_out(ss, 'V_cmd', [1415 255 1445 275]);
+add_terminator(ss, 'unused_theta_ref', [115 75 140 95]);
+add_terminator(ss, 'unused_u_ff', [115 195 140 215]);
+connect(ss, 'theta_ref/1', 'unused_theta_ref/1');
+connect(ss, 'u_ff/1', 'unused_u_ff/1');
 connect(ss, 'x_feedback/1', 'x_error/1');
 connect(ss, 'x_ref/1', 'x_error/2');
 connect(ss, 'x_error/1', 'SlidingSurface/1');
@@ -317,61 +259,91 @@ connect(ss, 'STAIntegrator/1', 'ReachingSum/2');
 connect(ss, 'ReachingSum/1', 'InputNormalize/1');
 connect(ss, 'EquivalentControl/1', 'TotalControl/1');
 connect(ss, 'InputNormalize/1', 'TotalControl/2');
-connect(ss, 'TotalControl/1', 'u/1');
-end
-
-function build_controller_selector(ss)
-clear_system(ss);
-for i = 1:6
-    add_block('simulink/Sources/In1', [ss '/u' num2str(i)], 'Position', [35 20+40*i 65 40+40*i]);
-end
-add_block('simulink/Sources/Constant', [ss '/controller_selector_id'], 'Value', 'controller_selector_id', 'Position', [35 20 110 45]);
-add_block('simulink/Signal Routing/Multiport Switch', [ss '/selector'], 'DataPortOrder', 'One-based contiguous', 'Inputs', '6', 'Position', [175 60 245 275]);
-add_block('simulink/Sinks/Out1', [ss '/u_controller'], 'Position', [315 160 345 180]);
-connect(ss, 'controller_selector_id/1', 'selector/1');
-for i = 1:6
-    connect(ss, ['u' num2str(i) '/1'], sprintf('selector/%d', i+1));
-end
-connect(ss, 'selector/1', 'u_controller/1');
+connect(ss, 'TotalControl/1', 'V_cmd/1');
 end
 
 function build_actuator_interface(ss)
 clear_system(ss);
-add_block('simulink/Sources/In1', [ss '/u_controller'], 'Position', [30 55 60 75]);
-add_block('simulink/Sources/Constant', [ss '/ud_pos'], 'Value', 'ud_pos', 'Position', [95 10 145 30]);
-add_block('simulink/Sources/Constant', [ss '/ud_neg'], 'Value', '-ud_neg', 'Position', [95 120 145 140]);
-add_block('simulink/Sources/Constant', [ss '/zero'], 'Value', '0', 'Position', [95 175 145 195]);
-add_block('simulink/Math Operations/Sum', [ss '/add_positive_comp'], 'Inputs', '++', 'Position', [190 25 220 55]);
-add_block('simulink/Math Operations/Sum', [ss '/add_negative_comp'], 'Inputs', '++', 'Position', [190 105 220 135]);
-add_block('simulink/Signal Routing/Switch', [ss '/positive_switch'], 'Threshold', '0.1', 'Criteria', 'u2 > Threshold', 'Position', [285 45 335 95]);
-add_block('simulink/Math Operations/Gain', [ss '/negate_u'], 'Gain', '-1', 'Position', [285 125 335 155]);
-add_block('simulink/Signal Routing/Switch', [ss '/negative_switch'], 'Threshold', '0.1', 'Criteria', 'u2 > Threshold', 'Position', [390 65 440 115]);
-add_block('simulink/Discontinuities/Saturation', [ss '/FinalSaturation'], 'UpperLimit', 'V_sat_hw', 'LowerLimit', '-V_sat_hw', 'Position', [495 75 555 115]);
-add_block('simulink/Sinks/Out1', [ss '/u_motor'], 'Position', [620 85 650 105]);
-connect(ss, 'u_controller/1', 'add_positive_comp/1');
-connect(ss, 'ud_pos/1', 'add_positive_comp/2');
-connect(ss, 'u_controller/1', 'add_negative_comp/1');
-connect(ss, 'ud_neg/1', 'add_negative_comp/2');
-connect(ss, 'add_positive_comp/1', 'positive_switch/1');
-connect(ss, 'u_controller/1', 'positive_switch/2');
-connect(ss, 'zero/1', 'positive_switch/3');
-connect(ss, 'add_negative_comp/1', 'negative_switch/1');
-connect(ss, 'u_controller/1', 'negate_u/1');
-connect(ss, 'negate_u/1', 'negative_switch/2');
-connect(ss, 'positive_switch/1', 'negative_switch/3');
-connect(ss, 'negative_switch/1', 'FinalSaturation/1');
-connect(ss, 'FinalSaturation/1', 'u_motor/1');
+add_note(ss, sprintf('Motor voltage path\ndead-zone compensation, then hard +/-6 V limit'), [25 10 410 45], 'orange');
+add_in(ss, 'V_cmd', [35 145 65 165]);
+add_block('simulink/Sources/Constant', [ss '/ud_pos'], 'Value', 'ud_pos', 'Position', [35 215 95 240]);
+add_block('simulink/Sources/Constant', [ss '/ud_neg'], 'Value', 'ud_neg', 'Position', [35 275 95 300]);
+add_block('simulink/User-Defined Functions/MATLAB Function', [ss '/DeadzoneCompensation'], 'Position', [200 115 390 225]);
+set_matlab_function_script([ss '/DeadzoneCompensation'], sprintf([ ...
+    'function V_comp = fcn(V_cmd, ud_pos, ud_neg)\n' ...
+    '%% Add just enough voltage to overcome measured motor dead-zone.\n' ...
+    'threshold = 0.1;\n' ...
+    'if V_cmd > threshold\n' ...
+    '    V_comp = V_cmd + ud_pos;\n' ...
+    'elseif V_cmd < -threshold\n' ...
+    '    V_comp = V_cmd - ud_neg;\n' ...
+    'else\n' ...
+    '    V_comp = 0;\n' ...
+    'end\n']));
+add_block('simulink/Discontinuities/Saturation', [ss '/FinalSaturation'], 'UpperLimit', 'V_sat_hw', 'LowerLimit', '-V_sat_hw', 'Position', [515 150 610 190]);
+add_out(ss, 'V_m', [735 160 765 180]);
+connect(ss, 'V_cmd/1', 'DeadzoneCompensation/1');
+connect(ss, 'ud_pos/1', 'DeadzoneCompensation/2');
+connect(ss, 'ud_neg/1', 'DeadzoneCompensation/3');
+connect(ss, 'DeadzoneCompensation/1', 'FinalSaturation/1');
+connect(ss, 'FinalSaturation/1', 'V_m/1');
+end
+
+function build_plant_interface(ss)
+clear_system(ss);
+add_note(ss, sprintf('Linear simulation plant\nx = [x_c; x_c_dot; theta; theta_dot]'), [25 10 430 45], 'green');
+add_in(ss, 'V_m', [35 115 65 135]);
+add_block('simulink/Continuous/State-Space', [ss '/LinearPlant'], 'A', 'A_ctrl', 'B', 'B_ctrl', 'C', 'C_ctrl', 'D', 'D_ctrl', 'X0', '[0;0;0;0]', 'Position', [165 85 300 145]);
+add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [385 70 390 170]);
+add_out(ss, 'x_state', [500 95 530 115]);
+add_out(ss, 'theta', [500 150 530 170]);
+connect(ss, 'V_m/1', 'LinearPlant/1');
+connect(ss, 'LinearPlant/1', 'x_state/1');
+connect(ss, 'LinearPlant/1', 'state_demux/1');
+connect(ss, 'state_demux/3', 'theta/1');
+end
+
+function build_state_estimation(ss)
+clear_system(ss);
+add_note(ss, sprintf('State feedback selection\nUse x_state directly, or select an observer estimate.'), [25 10 560 45], 'magenta');
+add_in(ss, 'x_state', [35 145 65 165]);
+add_in(ss, 'V_m', [35 255 65 275]);
+add_block('simulink/Signal Routing/Demux', [ss '/state_demux'], 'Outputs', '4', 'Position', [150 115 155 225]);
+add_block('simulink/Signal Routing/Mux', [ss '/observer_input'], 'Inputs', '3', 'Position', [285 205 295 335]);
+add_block('simulink/Continuous/State-Space', [ss '/Luenberger'], 'A', 'A_obs_l', 'B', 'B_obs_l', 'C', 'C_obs_l', 'D', 'D_obs_l', 'X0', '[0;0;0;0]', 'Position', [435 185 565 235]);
+add_block('simulink/Continuous/State-Space', [ss '/Kalman'], 'A', 'A_obs_k', 'B', 'B_obs_k', 'C', 'C_obs_k', 'D', 'D_obs_k', 'X0', '[0;0;0;0]', 'Position', [435 300 565 350]);
+add_block('simulink/Sources/Constant', [ss '/feedback_source_id'], 'Value', 'feedback_selector_id', 'Position', [650 80 745 105]);
+add_block('simulink/Signal Routing/Multiport Switch', [ss '/SelectFeedbackState'], 'DataPortOrder', 'One-based contiguous', 'Inputs', '3', 'Position', [790 145 870 295]);
+add_out(ss, 'x_measured', [980 90 1010 110]);
+add_out(ss, 'x_luenberger', [980 155 1010 175]);
+add_out(ss, 'x_kalman', [980 220 1010 240]);
+add_out(ss, 'x_feedback', [980 285 1010 305]);
+connect(ss, 'x_state/1', 'x_measured/1');
+connect(ss, 'x_state/1', 'state_demux/1');
+connect(ss, 'V_m/1', 'observer_input/1');
+connect(ss, 'state_demux/1', 'observer_input/2');
+connect(ss, 'state_demux/3', 'observer_input/3');
+connect(ss, 'observer_input/1', 'Luenberger/1');
+connect(ss, 'observer_input/1', 'Kalman/1');
+connect(ss, 'Luenberger/1', 'x_luenberger/1');
+connect(ss, 'Kalman/1', 'x_kalman/1');
+connect(ss, 'feedback_source_id/1', 'SelectFeedbackState/1');
+connect(ss, 'x_state/1', 'SelectFeedbackState/2');
+connect(ss, 'Luenberger/1', 'SelectFeedbackState/3');
+connect(ss, 'Kalman/1', 'SelectFeedbackState/4');
+connect(ss, 'SelectFeedbackState/1', 'x_feedback/1');
 end
 
 function build_logger(ss)
 clear_system(ss);
-names = {'segment_id','theta_ref','x_ref','u_ss','x_feedback','u_controller','u_motor','theta','x_dirty','x_luenberger','x_kalman','x_state'};
-add_block('simulink/Signal Routing/Mux', [ss '/log_mux'], 'Inputs', num2str(numel(names)), 'Position', [270 40 280 40+25*numel(names)]);
+names = {'segment_id','theta_ref','x_ref','u_ff','x_feedback','V_cmd','V_m','theta','x_measured','x_luenberger','x_kalman'};
+add_note(ss, sprintf('Validation log order is exported as validation_log_columns.'), [25 10 430 45], 'gray');
+add_block('simulink/Signal Routing/Mux', [ss '/log_mux'], 'Inputs', num2str(numel(names)), 'Position', [330 65 340 65+32*numel(names)]);
 for i = 1:numel(names)
-    add_block('simulink/Sources/In1', [ss '/' names{i}], 'Position', [35 20+25*i 65 40+25*i]);
+    add_in(ss, names{i}, [45 45+32*i 75 65+32*i]);
     connect(ss, [names{i} '/1'], sprintf('log_mux/%d', i));
 end
-add_block('simulink/Sinks/To Workspace', [ss '/validation_log'], 'VariableName', 'validation_log', 'SaveFormat', 'Timeseries', 'Position', [360 150 445 180]);
+add_block('simulink/Sinks/To Workspace', [ss '/validation_log'], 'VariableName', 'validation_log', 'SaveFormat', 'Timeseries', 'Position', [460 220 565 250]);
 connect(ss, 'log_mux/1', 'validation_log/1');
 end
 
@@ -379,14 +351,65 @@ function add_subsystem(parent, name, pos)
 add_block('simulink/Ports & Subsystems/Subsystem', [parent '/' name], 'Position', pos);
 end
 
-function clear_system(ss)
-blocks = find_system(ss, 'SearchDepth', 1, 'Type', 'Block');
-for i = 2:numel(blocks)
-    delete_block(blocks{i});
+function publish_signal(parent, source_port, tag, block_name, pos)
+add_block('simulink/Signal Routing/Goto', [parent '/' block_name], ...
+    'GotoTag', tag, 'TagVisibility', 'local', 'ShowName', 'off', 'Position', pos);
+connect(parent, source_port, [block_name '/1']);
 end
+
+function subscribe_signal(parent, tag, block_name, destination_port, pos)
+add_block('simulink/Signal Routing/From', [parent '/' block_name], ...
+    'GotoTag', tag, 'ShowName', 'off', 'Position', pos);
+connect(parent, [block_name '/1'], destination_port);
+end
+
+function style_block(parent, block_name, color)
+set_param([parent '/' block_name], 'BackgroundColor', color, 'ForegroundColor', 'black');
+end
+
+function add_note(parent, text, pos, color)
+annotation = Simulink.Annotation(parent, text);
+annotation.Position = pos;
+annotation.BackgroundColor = color;
+annotation.ForegroundColor = 'black';
+annotation.FontWeight = 'bold';
+end
+
+function set_matlab_function_script(block_path, script)
+rt = sfroot;
+chart = rt.find('-isa', 'Stateflow.EMChart', 'Path', block_path);
+if isempty(chart)
+    error('Could not find MATLAB Function block: %s', block_path);
+end
+chart.Script = script;
+end
+
+function add_in(parent, name, pos)
+add_block('simulink/Sources/In1', [parent '/' name], 'Position', pos);
+end
+
+function add_out(parent, name, pos)
+add_block('simulink/Sinks/Out1', [parent '/' name], 'Position', pos);
+end
+
+function add_terminator(parent, name, pos)
+add_block('simulink/Sinks/Terminator', [parent '/' name], 'Position', pos);
+end
+
+function clear_system(ss)
 lines = find_system(ss, 'SearchDepth', 1, 'FindAll', 'on', 'Type', 'Line');
 for i = 1:numel(lines)
     delete_line(lines(i));
+end
+blocks = find_system(ss, 'SearchDepth', 1, 'Type', 'Block');
+for i = 1:numel(blocks)
+    if ~strcmp(blocks{i}, ss)
+        delete_block(blocks{i});
+    end
+end
+annotations = find_system(ss, 'SearchDepth', 1, 'FindAll', 'on', 'Type', 'annotation');
+for i = 1:numel(annotations)
+    delete(annotations(i));
 end
 end
 
@@ -396,4 +419,21 @@ try
 catch
     add_line(sys, src, dst);
 end
+end
+
+function opts = parse_inputs(varargin)
+if evalin('base', 'exist(''SEESAW_ROOT'', ''var'')')
+    default_root = evalin('base', 'SEESAW_ROOT');
+else
+    default_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+end
+p = inputParser;
+addParameter(p, 'root', default_root, @(x) ischar(x) || isstring(x));
+addParameter(p, 'controller_id', 'PP', @(x) ischar(x) || isstring(x));
+addParameter(p, 'feedback_source_id', 'dirty', @(x) ischar(x) || isstring(x));
+parse(p, varargin{:});
+opts = p.Results;
+opts.root = char(opts.root);
+opts.controller_id = char(opts.controller_id);
+opts.feedback_source_id = char(opts.feedback_source_id);
 end
