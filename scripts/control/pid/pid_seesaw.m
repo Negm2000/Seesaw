@@ -16,7 +16,7 @@ if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = pwd; end
 seesaw_params; 
 
 % Load the voltage non-linearities
-cart_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'params', 'param_nonlinear.mat');
 if exist(cart_file, 'file')
     load(cart_file, 'ud_pos', 'ud_neg', 'ud_sym');
 else
@@ -24,7 +24,7 @@ else
 end
 
 % Load the validated inner plant model (Gx)
-cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat');
+cart_file = fullfile(SEESAW_ROOT, 'data', 'tuned', 'tuned_cart.mat');
 if exist(cart_file, 'file')
     load(cart_file, 'Gx', 'num_x', 'den_x');
 else
@@ -32,7 +32,7 @@ else
 end
 
 % Load the validated inner closed-loop tracking model (T_in)
-inner_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
+inner_file = fullfile(SEESAW_ROOT, 'data','controllers', 'controller_inner_pid.mat');
 if exist(inner_file, 'file')
     load(inner_file, 'T_in', 'C_in', ...
         'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
@@ -41,7 +41,7 @@ else
 end
 
 % Load the validated inner plant model (Gx)
-seesaw_file = fullfile(SEESAW_ROOT, 'data', 'tuned_seesaw.mat');
+seesaw_file = fullfile(SEESAW_ROOT, 'data','tuned', 'tuned_seesaw.mat');
 if exist(seesaw_file, 'file')
     load(seesaw_file, 'Gt', 'num_t', 'den_t');
 else

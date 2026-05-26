@@ -40,7 +40,7 @@ Ts             = 1/exp_fs_Hz;
 
 r_step_deg     = 1.0;        % step amplitude
 r_pulse_deg    = 1.0;        % pulse amplitude
-r_sine_deg     = 0.5;        % sine amplitude (tapered to keep cart safe @ HF)
+r_sine_deg     = 0.2;        % sine amplitude (tapered to keep cart safe @ HF)
 deg2rad_       = pi/180;
 
 prep_s         = 15;
