@@ -31,8 +31,8 @@ Kf = ctrl.Kf;
 SB = smcd.S * B;
 SB_smc = SB * G_neg;  % use weaker gain so SMC never under-actuates
 
-% Total cart mass matches controller design
-M_c_total = M_c + ctrl.M_c_added;  % 0.38 + 0.370 = 0.75 kg
+% Total cart mass matches controller design (cart + clipped weight from seesaw_params)
+M_c_total = M_total;  % 0.38 + 0.37 = 0.75 kg
 
 fprintf('Deadzone: +/- %.2f V (symmetric)\n', V_dz)
 fprintf('Directional gain: G_pos=%.1f / G_neg=%.1f (%.0f%% bias)\n', G_pos, G_neg, (G_pos/G_neg-1)*100)

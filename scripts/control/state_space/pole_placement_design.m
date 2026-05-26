@@ -18,9 +18,7 @@ figdir = fullfile(root, 'docs', 'figures');
 run(fullfile(root, 'scripts', 'config', 'seesaw_params.m'))
 tuned     = load(fullfile(root, 'data', 'tuned_params.mat'));
 B_eq      = tuned.B_eq;
-M_c_base  = M_c;
-M_c_added = 0.370;
-M_c       = M_c_base + M_c_added;
+M_c       = M_total;        % cart + clipped weight (0.38 + 0.37 = 0.75 kg) from seesaw_params
 
 B_total = B_eq + B_emf;
 M_eff   = [M_c, -M_c*D_T; -M_c*D_T, J_pivot + M_c*D_T^2];
@@ -33,8 +31,8 @@ B_sw    = [0; M_inv(1,:)*[alpha_f*eta_m; 0]; 0; M_inv(2,:)*[alpha_f*eta_m; 0]];
 poles_ol   = sort(eig(A_sw));
 p_unstable = max(real(poles_ol));     % seesaw fall rate -- design driver
 
-fprintf('Tuned B_eq = %.4f, M_c = %.3f kg (%.3f base + %.3f added)\n', ...
-    B_eq, M_c, M_c_base, M_c_added)
+fprintf('Tuned B_eq = %.4f, M_c = %.3f kg (cart + weight, from seesaw_params M_total)\n', ...
+    B_eq, M_c)
 fprintf('Open-loop poles: '); fprintf('%.3f  ', poles_ol); fprintf('\n')
 fprintf('Unstable mode: p_OL = %+.3f rad/s (seesaw fall rate)\n', p_unstable)
 fprintf('Controllability rank: %d/4\n\n', rank(ctrb(A_sw, B_sw)))
@@ -175,7 +173,7 @@ figure
 %% Save
 p_final = p_des;
 save(fullfile(root, 'data', 'controllers', 'controller_freq.mat'), ...
-     'Kf', 'p_final', 'sigma_th', 'zeta_th', 'p3', 'p4', 'M_c_added', 'V_noise_th');
+     'Kf', 'p_final', 'sigma_th', 'zeta_th', 'p3', 'p4', 'V_noise_th');
 fprintf('Saved data/controllers/controller_freq.mat\n')
 
 %% Helpers

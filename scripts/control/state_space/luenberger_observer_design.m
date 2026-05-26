@@ -25,7 +25,7 @@ tuned = load(fullfile(root, 'data', 'tuned_params.mat'));
 ctrl  = load(fullfile(root, 'data', 'controller_freq.mat'));
 
 B_eq      = tuned.B_eq;
-M_c       = M_c + ctrl.M_c_added;
+M_c       = M_total;       % cart + clipped weight (0.75 kg) from seesaw_params
 B_total   = B_eq + B_emf;
 M_eff     = [M_c, -M_c*D_T; -M_c*D_T, J_pivot + M_c*D_T^2];
 M_inv     = inv(M_eff);

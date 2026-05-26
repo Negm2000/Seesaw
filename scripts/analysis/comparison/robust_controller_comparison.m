@@ -43,12 +43,12 @@ run(fullfile(root, 'scripts', 'config', 'seesaw_params.m'))
 tuned = load(fullfile(root, 'data', 'tuned', 'tuned_params.mat'));
 ctrl = load(fullfile(root, 'data', 'controllers', 'controller_freq.mat'));
 
-plant = build_benchmark_plant(tuned, ctrl, M_c);
+plant = build_benchmark_plant(tuned, ctrl, M_total);
 
 fprintf('\nPlant used for comparison:\n')
 fprintf('  B_eq = %.4f N*s/m\n', plant.B_eq)
-fprintf('  M_c  = %.3f kg (includes %.3f kg added mass)\n', ...
-    plant.M_c, ctrl.M_c_added)
+fprintf('  M_c  = %.3f kg (cart + clipped weight from seesaw_params)\n', ...
+    plant.M_c)
 fprintf('  Open-loop max real pole = %.3f rad/s\n', max(real(eig(plant.A))))
 fprintf('  Voltage limit = +/- %.1f V\n', V_sat)
 fprintf('  Rail limit    = +/- %.1f mm\n', x_c_max * 1000)
@@ -190,12 +190,12 @@ function s = yesno(tf)
     if tf, s = 'yes'; else, s = 'no'; end
 end
 
-function plant = build_benchmark_plant(tuned, ctrl, M_c_base)
+function plant = build_benchmark_plant(tuned, ctrl, M_total)
     % Match scripts/analysis/smc_vs_pp_nonlinear.m exactly: use the tuned
-    % linear A/B matrices from identification, and use the controller's added
-    % cart mass only when converting Coulomb friction to acceleration.
+    % linear A/B matrices from identification. Cart mass = M_total (cart +
+    % clipped weight, 0.75 kg) from seesaw_params.
     plant.B_eq = tuned.B_eq;
-    plant.M_c = M_c_base + ctrl.M_c_added;
+    plant.M_c = M_total;
     plant.A = tuned.A_sw;
     plant.B = tuned.B_sw;
 end

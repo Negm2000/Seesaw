@@ -85,7 +85,7 @@ fprintf('  K_fb          = [%.3f, %.3f, %.3f, %.3f]\n', K_fb);
 fprintf('  Dominant pole = %.2f rad/s\n', ctrl.sigma_th);
 
 % Rebuild seesaw plant for eigenvalue reference
-M_c_use = M_c + ctrl.M_c_added;
+M_c_use = M_total;  % cart + clipped weight (0.75 kg) from seesaw_params
 B_total = B_eq + B_emf;
 M_eff = [M_c_use, -M_c_use*D_T; -M_c_use*D_T, J_pivot + M_c_use*D_T^2];
 M_inv = inv(M_eff);
@@ -904,9 +904,7 @@ else
     fprintf('  Saved: docs/figures/Verification-CLBode.png\n');
 
     %% C4. Overlay with analytical prediction
-    M_c_added = ctrl.M_c_added;
-    if ~exist('M_c_added', 'var'), M_c_added = 0; end
-    M_c_use = M_c + M_c_added;
+    M_c_use = M_total;  % cart + clipped weight (0.75 kg) from seesaw_params
     B_total = B_eq + B_emf;
     M_eff = [M_c_use, -M_c_use*D_T; -M_c_use*D_T, J_pivot + M_c_use*D_T^2];
     M_inv = inv(M_eff);
