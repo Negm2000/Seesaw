@@ -68,10 +68,10 @@ T_in = feedback(L_in, 1);   % Closed-Loop
 S_u_fb = C_in / (1 + L_in); % Feedback voltage sensitivity
 
 %% 6. SAVE
-save(fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat'), ...
+save(fullfile(SEESAW_ROOT, 'data', 'controllers', 'controller_inner_pid.mat'), ...
     'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in', ...
     'C_in', 'L_in', 'T_in');
-fprintf('\n  Tuned Inner Controller saved to: data/controller_inner_pid.mat\n');
+fprintf('\n  Tuned Inner Controller saved to: data/controllers/controller_inner_pid.mat\n');
 
 %% 4. BESSEL PRE-FILTER DESIGN
 num_bes = [3 * wf_bes^2];

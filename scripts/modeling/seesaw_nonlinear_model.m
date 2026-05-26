@@ -191,7 +191,7 @@ legend('$\dot{x}_c$', 'Positive motion', 'Negative motion', 'Location', 'best')
 
 %% SAVE DATA
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-save_file = fullfile(SEESAW_ROOT, 'data', 'param_nonlinear.mat');
+save_file = fullfile(SEESAW_ROOT, 'data', 'params', 'param_nonlinear.mat');
 save(save_file, 'ud_neg', 'ud_pos', 'ud_sym');
 fprintf('\n  Tuned parameters saved to: data/tuned_cart.mat\n');
 fprintf('============================================================\n');

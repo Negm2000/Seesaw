@@ -221,7 +221,7 @@ yline(V_nom, 'k--', 'HandleVisibility', 'off'); yline(-V_nom, 'k--', 'Max Safe L
 yline(V_LIMIT, 'r--', 'HandleVisibility', 'off'); yline(-V_LIMIT, 'r--', 'Hardware Peak Limit', 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
 
 %% 7. SAVE PARAMS
-save_file = fullfile(SEESAW_ROOT, 'data', 'controller_outer_pid.mat');
+save_file = fullfile(SEESAW_ROOT, 'data', 'controllers', 'controller_outer_pid.mat');
 save(save_file, 'Kp_out', 'Ki_out', 'Kd_out', 'N_out', 'antiwindup_out', 'C_theta', 'L_theta', 'T_theta');
 fprintf('\n>>> Outer Controller saved to: %s\n', save_file);
 

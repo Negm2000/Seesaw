@@ -278,7 +278,7 @@ end
 
 % Save tuned parameters
 if ~exist('SEESAW_ROOT', 'var'), SEESAW_ROOT = fileparts(mfilename('fullpath')); SEESAW_ROOT = fileparts(fileparts(SEESAW_ROOT)); end
-save_file = fullfile(SEESAW_ROOT, 'data', 'tuned_cart.mat');
+save_file = fullfile(SEESAW_ROOT, 'data', 'tuned', 'tuned_cart.mat');
 save(save_file, 'B_eq', 'B_eq_nominal', 'B_total', 'alpha_f', 'B_emf', ...
      'eta_g', 'A_cart', 'B_cart', 'C_cart', 'D_cart', 'sys_cart', ...
      'Gx', 'num_x', 'den_x', 'rmse_tuned');

@@ -135,10 +135,10 @@ ylabel('V_m [V]'); xlabel('Time [s]')
 saveas(gcf, fullfile(figdir, 'Observer-IC-Response.png'))
 
 %% Save
-save(fullfile(root, 'data', 'observer.mat'), ...
+save(fullfile(root, 'data', 'params', 'observer.mat'), ...
      'L', 'p_obs', 'k_obs', 'A_sw', 'B_sw', 'Kf', ...
      'A_obs', 'B_obs', 'C_obs', 'D_obs');
-fprintf('Saved data/observer.mat\n')
+fprintf('Saved data/params/observer.mat\n')
 
 %% Helpers
 function p_out = make_placeable_poles(p_in)

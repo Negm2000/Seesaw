@@ -174,9 +174,9 @@ figure
 
 %% Save
 p_final = p_des;
-save(fullfile(root, 'data', 'controller_freq.mat'), ...
+save(fullfile(root, 'data', 'controllers', 'controller_freq.mat'), ...
      'Kf', 'p_final', 'sigma_th', 'zeta_th', 'p3', 'p4', 'M_c_added', 'V_noise_th');
-fprintf('Saved data/controller_freq.mat\n')
+fprintf('Saved data/controllers/controller_freq.mat\n')
 
 %% Helpers
 function [K, poles_cl, x, v, m] = sim_regulator(A, B, p, x0, t)
