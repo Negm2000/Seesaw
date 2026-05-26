@@ -8,7 +8,7 @@ set(groot, 'defaultTextInterpreter', 'latex');
 %% 1. LOAD SYSTEM PARAMETERS
 if ~exist('SEESAW_ROOT', 'var')
     curr = pwd;
-    while ~exist(fullfile(curr, 'startup.m'), 'file') && ~strcmp(curr, fileparts(curr))
+    while ~exist(fullfile(curr, 'startup_seesaw.m'), 'file') && ~strcmp(curr, fileparts(curr))
         curr = fileparts(curr);
     end
     SEESAW_ROOT = curr;
