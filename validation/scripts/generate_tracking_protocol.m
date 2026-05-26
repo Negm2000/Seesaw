@@ -10,7 +10,7 @@ function generate_tracking_protocol()
 %   benchmark.
 %
 % Segment map (matches HVP labels):
-%    0  prep / offset reset       (5  s, r=0, excluded from analysis)
+%    0  prep / offset reset       (15  s, r=0, excluded from analysis)
 %    1  free-run baseline         (10 s, r=0)
 %    2  +1.0 deg step              (12 s)
 %    3  recovery                  (8  s, r=0)
@@ -43,7 +43,7 @@ r_pulse_deg    = 1.0;        % pulse amplitude
 r_sine_deg     = 0.5;        % sine amplitude (tapered to keep cart safe @ HF)
 deg2rad_       = pi/180;
 
-prep_s         = 5;
+prep_s         = 15;
 baseline_s     = 10;
 step_dur_s     = 12;
 recovery_s     = 8;
