@@ -58,9 +58,9 @@ disp('P_out = T_in(s) * Gt(s)');
 
 %% 3. PI-LEAD POLE PLACEMENT
 wn_target = 4.3;    % Speed of balance reaction
-zeta_target = 0.65;  % Tolerance for overshoot
+zeta_target = 0.6;  % Tolerance for overshoot
 p_lead = 25;        % Derivative filter pole (N)
-z_i = 0.5;          % Integrator zero 
+z_i = 0.25;          % Integrator zero 
 
 % 1. Target Pole
 sd = -zeta_target * wn_target + 1j * wn_target * sqrt(1 - zeta_target^2);
