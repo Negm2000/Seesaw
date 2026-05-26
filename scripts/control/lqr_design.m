@@ -41,7 +41,7 @@ req_dist     = 0.05;            % maximum displacement [m]
 req_angle    = deg2rad(1);      % maximum angle [rad]
 req_speed    = 0.1;             % maximum speed [m/s]
 %req_angspeed = +inf
-req_integral = 1 * deg2rad(2);  % maximum time to clear a given angle
+req_integral = 2 * deg2rad(2);  % maximum time to clear a given angle
                                 % [rad*s]
 
 req_volt  = 3;                  % maximum voltage [V]
@@ -161,7 +161,7 @@ eig_close_5d = eig(A5d - B5d*K5d);
 % In practice, Rn is usually estimated from sensor data first,
 % while Qn is then tuned to reflect the confidence in the model.
 Gn = eye(4);
-Qn = diag([1e-7, 7.6154e-7, 1e-4, 1.2185e-4]);
+Qn = diag([1e-7, 7.6154e-7, 1e-6, 1e-6]);
 Rn = diag([2.275e-5, 0.00015]);
 
 L = lqe(A_sw, Gn, C_sw, Qn, Rn);
