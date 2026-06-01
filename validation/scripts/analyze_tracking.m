@@ -57,9 +57,9 @@ for i = 1:numel(caps)
     % consistent field template so per-file structs concatenate cleanly
     m = struct('name',[],'controller',[],'fmt',[],'duration_s',[], ...
         'theta_offset_deg',[],'V_rms',[],'V_peak',[],'V_clamp',[],'V_pct_motor',[], ...
-        'xc_rms_cm',[],'xc_pp_cm',[], ...
+        'xc_rms_cm',[],'xc_pp_cm',[],'angle_rms_deg',[],'angle_p2p_deg',[], ...
         'step_pos',[],'step_neg',[],'pulse',[],'frf',[],'bw_hz',[], ...
-        'frf_peak',[],'track_rms_sines_deg',[],'osc',[],'observer',[]);
+        'frf_peak',[],'track_rms_sines_deg',[],'osc',[],'model',[],'observer',[]);
     m.name = c.name; m.controller = c.controller; m.fmt = c.fmt;
     m.duration_s = c.t(end); m.theta_offset_deg = rad2deg(c.theta_offset);
 
@@ -73,6 +73,9 @@ for i = 1:numel(caps)
     % cart travel = actuator authority used (track usable half-stroke ~41 cm)
     m.xc_rms_cm = rms(c.xc(runmask) - mean(c.xc(runmask))) * 100;
     m.xc_pp_cm  = (max(c.xc(runmask)) - min(c.xc(runmask))) * 100;
+    % whole-run angle-tracking error
+    m.angle_rms_deg = rad2deg(rms(c.theta(runmask) - c.r_theta(runmask)));
+    m.angle_p2p_deg = rad2deg(max(c.theta(runmask)) - min(c.theta(runmask)));
 
     % --- step & pulse tracking (segmented runs only) ---
     if c.has_seg
@@ -89,6 +92,7 @@ for i = 1:numel(caps)
         gd = frf.mag(frf.ok);
         m.frf_peak = max([gd; NaN]);
         m.track_rms_sines_deg = rad2deg(local_rms_err(c, 10:21));
+        m.model = local_fit_2nd_order(c);   % closed-loop 2nd-order model from data
     end
 
     % --- bounded oscillation on recovery / baseline (r=0) ---
@@ -118,6 +122,23 @@ try
     local_controller_comparison(caps(cmp_idx), per(cmp_idx), P, outdir);
 catch ME
     fprintf('[warn] controller comparison failed: %s\n', ME.message);
+end
+try
+    local_tradeoff(per(cmp_idx), outdir);
+catch ME
+    fprintf('[warn] trade-off plot failed: %s\n', ME.message);
+end
+try
+    local_model_summary(caps(cmp_idx), per(cmp_idx), outdir);
+catch ME
+    fprintf('[warn] model summary failed: %s\n', ME.message);
+end
+for i = 1:numel(caps)
+    if caps{i}.has_states
+        try, local_phase_portrait(caps{i}, outdir); catch ME
+            fprintf('[warn] phase portrait (%s) failed: %s\n', caps{i}.name, ME.message);
+        end
+    end
 end
 
 % =====================================================================
@@ -185,7 +206,10 @@ s.final_deg = yf; s.cmd_deg = A;
 s.dc_gain = yf / A;                     % steady tracking gain (~1 is ideal)
 s.ss_err_deg = yf - A;
 tpk = t < min(2.5, 0.5*t(end));         % transient window only (not whole seg)
+s.peak_deg = sign(A) * max(sign(A)*th(tpk));   % signed transient peak
 s.overshoot_pct = max(0, (max(sign(A)*th(tpk)) - sign(A)*yf) / abs(A) * 100);
+s.p2p_deg = max(th) - min(th);                 % angle peak-to-peak over the step
+s.rms_angle_deg = rms(th(steady) - yf);        % steady-state rocking about final
 % 10-90 rise time
 tgt10 = y0 + 0.1*(yf-y0); tgt90 = y0 + 0.9*(yf-y0);
 i10 = find((th-tgt10)*sign(A) >= 0, 1); i90 = find((th-tgt90)*sign(A) >= 0, 1);
@@ -212,7 +236,8 @@ function frf = local_tracking_frf(c, sine_freqs)
 % complementary sensitivity T=theta/r_theta with a fit-quality gate.
 nf = numel(sine_freqs);
 frf = struct('f',sine_freqs,'mag',nan(nf,1),'phase_deg',nan(nf,1), ...
-             'r2',nan(nf,1),'r_amp_deg',nan(nf,1),'th_amp_deg',nan(nf,1),'ok',false(nf,1));
+             'r2',nan(nf,1),'r_amp_deg',nan(nf,1),'th_amp_deg',nan(nf,1), ...
+             'rms_err_deg',nan(nf,1),'ok',false(nf,1));
 for k = 1:nf
     id = 9+k; m = c.segmask(id); if ~any(m), continue; end
     t = c.t(m); t = t - t(1); r = c.r_theta(m); th = c.theta(m);
@@ -223,6 +248,7 @@ for k = 1:nf
     ra = hypot(ar(1),ar(2)); ta = hypot(at(1),at(2));
     resid = th(idx) - X*at;
     r2 = 1 - var(resid)/max(var(th(idx)),eps);
+    frf.rms_err_deg(k) = rad2deg(rms(th(idx)-r(idx)));
     frf.r_amp_deg(k)=rad2deg(ra); frf.th_amp_deg(k)=rad2deg(ta);
     frf.mag(k) = ta/ra;
     frf.phase_deg(k) = rad2deg(atan2(at(1),at(2)) - atan2(ar(1),ar(2)));
@@ -359,35 +385,37 @@ end
 grid on; xlim([0.09 11]); xlabel('Frequency [Hz]'); ylabel('\angle (\theta/\theta_{ref}) [deg]');
 title('Closed-loop phase');
 
-% (3) RMS tracking error per segment (steps vs swept sine)
+% (3) tracking error vs frequency (swept sine) + steps as reference markers
 subplot(2,2,3);
-labels = {'+1{\circ} step','-1{\circ} step','swept sine'};
-M = nan(numel(per),3);
 for i=1:numel(per)
-    M(i,1)=per(i).step_pos.track_rms_deg;
-    M(i,2)=per(i).step_neg.track_rms_deg;
-    M(i,3)=per(i).track_rms_sines_deg;
+    g=per(i).frf; ok=g.ok;
+    semilogx(g.f(ok), g.rms_err_deg(ok),'o-','Color',cols(i,:),'LineWidth',1.6, ...
+        'MarkerFaceColor',cols(i,:)); hold on;
 end
-b=bar(M'); for i=1:numel(b), b(i).FaceColor=cols(i,:); end
-set(gca,'XTickLabel',labels); grid on; ylabel('RMS angle error [deg]');
-title('Tracking error by segment');
+for i=1:numel(per)
+    yline(per(i).step_pos.track_rms_deg, '--','Color',cols(i,:),'Alpha',0.5,'HandleVisibility','off');
+end
+grid on; xlim([0.09 11]); xlabel('Frequency [Hz]'); ylabel('RMS angle error [deg]');
+title('Tracking error vs frequency  (dashed = 1{\circ}-step error)');
 legend({per.controller},'Location','northwest','Interpreter','none');
 
 % (4) performance table (clean, mixed units)
 subplot(2,2,4); axis off;
-rows = {'Bandwidth [Hz]','Peak |\theta/\theta_{ref}| [-]','Voltage rms [V]', ...
-        'Voltage peak [V]','Cart travel p-p [cm]','Rocking rms [deg]','Step error [deg]'};
+rows = {'Bandwidth [Hz]','Peak |\theta/\theta_{ref}| [-]','Damping \zeta [-]', ...
+        'Voltage rms [V]','Voltage peak [V]','Cart travel p-p [cm]', ...
+        'Angle p-p [deg]','Rocking rms [deg]','Step error [deg]'};
 vals = zeros(numel(rows), numel(per));
 for i=1:numel(per)
-    vals(:,i) = [per(i).bw_hz; per(i).frf_peak; per(i).V_rms; per(i).V_peak; ...
-                 per(i).xc_pp_cm; per(i).osc.rms_deg; per(i).step_pos.ss_err_deg];
+    zeta = local_getf(per(i).model,'zeta',NaN);
+    vals(:,i) = [per(i).bw_hz; per(i).frf_peak; zeta; per(i).V_rms; per(i).V_peak; ...
+                 per(i).xc_pp_cm; per(i).angle_p2p_deg; per(i).osc.rms_deg; per(i).step_pos.ss_err_deg];
 end
 short = {'PID','PP+DD','LQR+DD'};
 tx = sprintf('%-22s %8s %8s %8s\n','metric', short{:});
 for r=1:numel(rows)
     tx = [tx sprintf('%-22s %8.2f %8.2f %8.2f\n', rows{r}, vals(r,:))]; %#ok<AGROW>
 end
-text(0.0, 0.95, tx, 'FontName','FixedWidth','FontSize',10,'VerticalAlignment','top','Interpreter','tex');
+text(0.0, 0.98, tx, 'FontName','FixedWidth','FontSize',10,'VerticalAlignment','top','Interpreter','tex');
 title('Performance summary');
 
 sgtitle('Controller comparison — identical reference protocol','FontWeight','bold');
@@ -509,6 +537,123 @@ end
 %% ===================================================================
 %  Base-MATLAB DSP helpers (no Signal Processing Toolbox dependency)
 %  ===================================================================
+function v = local_getf(s, f, d)
+% Safe struct field fetch with default.
+if isstruct(s) && isfield(s,f) && ~isempty(s.(f)), v = s.(f); else, v = d; end
+end
+
+function md = local_fit_2nd_order(c)
+% Fit a 2nd-order closed-loop model theta/theta_ref from the (stable) logged
+% reference-tracking data. Returns natural frequency, damping, resonant peak.
+md = struct('valid',false,'wn',NaN,'fn_hz',NaN,'zeta',NaN,'Mr',NaN,'dc',NaN,'fit_pct',NaN);
+mask = c.t > 15; dec = 2; idx = find(mask); idx = idx(1:dec:end);
+if numel(idx) < 200, return; end
+z = iddata(c.theta(idx), c.r_theta(idx), 0.002*dec);
+try
+    sys = tfest(z, 2, 0);
+    [~,fit] = compare(z, sys); if iscell(fit), fit = fit{1}; end
+    p = pole(sys); wn = abs(p(1)); ze = -real(p(1))/wn;
+    md.valid = true; md.sys = sys; md.wn = wn; md.fn_hz = wn/(2*pi);
+    md.zeta = ze; md.dc = dcgain(sys); md.fit_pct = fit;
+    if ze < 1, md.Mr = 1/(2*ze*sqrt(1-ze^2)); else, md.Mr = md.dc; end
+catch
+end
+end
+
+function local_model_summary(caps, per, outdir)
+% Per-controller 2nd-order closed-loop model: step + frequency-response fit,
+% with natural frequency and damping. Ties the time- and frequency-domain
+% behaviour together through one identified model per controller.
+cols = lines(numel(per));
+f = local_newfig([50 50 1300 560]);
+
+% (left) measured +1 deg step vs identified 2nd-order step
+subplot(1,2,1); hold on; h=[]; leg={};
+for i=1:numel(per)
+    c = caps{i}; md = per(i).model;
+    mm = c.segmask(2); t = c.t(mm)-c.t(find(mm,1));
+    h(end+1) = plot(t, rad2deg(c.theta(mm)),'-','Color',cols(i,:),'LineWidth',1.0); %#ok<AGROW>
+    leg{end+1} = sprintf('%s  (\\zeta=%.2f, f_n=%.2f Hz)', per(i).controller, ...
+        local_getf(md,'zeta',NaN), local_getf(md,'fn_hz',NaN)); %#ok<AGROW>
+    if local_getf(md,'valid',false)
+        tt = linspace(0,t(end),1500)';
+        ys = step(md.sys, tt) * deg2rad(1);     % 1 deg reference step
+        plot(tt, rad2deg(ys),'--','Color',cols(i,:),'LineWidth',1.8);
+    end
+end
+yline(1,'k:'); grid on; xlim([0 12]); ylim([-0.5 4]);
+xlabel('Time from step [s]'); ylabel('Seesaw angle \theta [deg]');
+legend(h, leg, 'Location','northeast','Interpreter','tex');
+title('1{\circ} step: measured (solid) vs 2nd-order model (dashed)');
+
+% (right) measured FRF points vs identified model magnitude
+subplot(1,2,2);
+fline = logspace(log10(0.09), log10(11), 200)';
+for i=1:numel(per)
+    g = per(i).frf; ok = g.ok; md = per(i).model;
+    semilogx(g.f(ok), 20*log10(g.mag(ok)),'o','Color',cols(i,:), ...
+        'MarkerFaceColor',cols(i,:),'HandleVisibility','off'); hold on;
+    if local_getf(md,'valid',false)
+        mgm = squeeze(bode(md.sys, 2*pi*fline));
+        semilogx(fline, 20*log10(mgm),'-','Color',cols(i,:),'LineWidth',1.6);
+    end
+end
+grid on; yline(0,'k:','HandleVisibility','off'); xlim([0.09 11]); ylim([-40 25]);
+xlabel('Frequency [Hz]'); ylabel('|\theta/\theta_{ref}| [dB]');
+legend({per.controller},'Location','southwest','Interpreter','none');
+title('Closed-loop response: measured (points) vs 2nd-order model (line)');
+
+sgtitle('Data-driven 2nd-order closed-loop model','FontWeight','bold');
+saveas(f, fullfile(outdir,'Model-ClosedLoop.png')); close(f);
+fprintf('  saved Model-ClosedLoop.png\n');
+end
+
+function local_tradeoff(per, outdir)
+% Intuitive trade-off scatter: tracking accuracy vs control effort,
+% bubble size = cart travel used. Lower-left = better.
+f = local_newfig([60 60 820 640]);
+cols = lines(numel(per)); hold on;
+for i=1:numel(per)
+    x = per(i).angle_rms_deg; y = per(i).V_rms;
+    sz = 200 + 60*per(i).xc_pp_cm;
+    scatter(x, y, sz, cols(i,:), 'filled', 'MarkerFaceAlpha',0.6, 'MarkerEdgeColor','k');
+    text(x, y, ['  ' per(i).controller], 'FontSize',10,'Interpreter','none');
+end
+grid on; xlabel('Angle tracking error (rms) [deg]'); ylabel('Motor voltage (rms) [V]');
+title('Accuracy vs effort trade-off  (bubble \propto cart travel; lower-left is better)');
+xl=xlim; yl=ylim; xlim([0 xl(2)*1.15]); ylim([0 yl(2)*1.15]);
+saveas(f, fullfile(outdir,'Compare-Tradeoff.png')); close(f);
+fprintf('  saved Compare-Tradeoff.png\n');
+end
+
+function local_phase_portrait(c, outdir)
+% Phase portrait theta vs theta_dot — shows the limit cycle / dead-zone shape.
+% Trajectories are broken at segment gaps so non-contiguous spans are not
+% joined by spurious straight lines.
+f = local_newfig([60 60 900 760]);
+% use the smooth observer rate (the dirty-derivative is too quantization-spiky
+% for a legible phase portrait)
+thd = c.theta_dot_hat;
+[xr,yr] = local_break(rad2deg(c.theta), thd, c.segmask([1 3 5 7 30]));
+[xs,ys] = local_break(rad2deg(c.theta), thd, c.segmask([2 4]));
+h2 = plot(xs, ys, '-', 'Color',[.85 .3 .1 0.8],'LineWidth',0.7); hold on;
+h1 = plot(xr, yr, '-', 'Color',[.2 .4 .9 0.6],'LineWidth',0.6);
+grid on; xlabel('Seesaw angle \theta [deg]');
+ylabel('Angular rate $\dot\theta$ (observer) [rad/s]','Interpreter','latex');
+legend([h1 h2],{'reference held at 0 (rocking)','\pm1{\circ} steps'},'Location','northeast');
+title(sprintf('Phase portrait — %s', c.controller),'FontWeight','bold');
+saveas(f, fullfile(outdir, sprintf('Phase-%s.png', c.name))); close(f);
+fprintf('  saved Phase-%s.png\n', c.name);
+end
+
+function [xb, yb] = local_break(x, y, mask)
+% Return x,y over mask with NaNs inserted at non-contiguous index gaps.
+idx = find(mask); if isempty(idx), xb=[]; yb=[]; return; end
+gap = [false; diff(idx)>1];
+xb = x(idx); yb = y(idx);
+xb(gap) = NaN; yb(gap) = NaN;
+end
+
 function local_light_theme()
 % Force clean light-on-white figures regardless of the MATLAB app theme.
 set(groot,'defaultAxesTickLabelInterpreter','tex');
