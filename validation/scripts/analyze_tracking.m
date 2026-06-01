@@ -573,8 +573,8 @@ for i=1:numel(per)
     c = caps{i}; md = per(i).model;
     mm = c.segmask(2); t = c.t(mm)-c.t(find(mm,1));
     h(end+1) = plot(t, rad2deg(c.theta(mm)),'-','Color',cols(i,:),'LineWidth',1.0); %#ok<AGROW>
-    leg{end+1} = sprintf('%s  (\\zeta=%.2f, f_n=%.2f Hz)', per(i).controller, ...
-        local_getf(md,'zeta',NaN), local_getf(md,'fn_hz',NaN)); %#ok<AGROW>
+    leg{end+1} = sprintf('%s  (\\zeta=%.2f, f_n=%.2f Hz, fit %.0f%%)', per(i).controller, ...
+        local_getf(md,'zeta',NaN), local_getf(md,'fn_hz',NaN), local_getf(md,'fit_pct',NaN)); %#ok<AGROW>
     if local_getf(md,'valid',false)
         tt = linspace(0,t(end),1500)';
         ys = step(md.sys, tt) * deg2rad(1);     % 1 deg reference step
@@ -603,7 +603,9 @@ xlabel('Frequency [Hz]'); ylabel('|\theta/\theta_{ref}| [dB]');
 legend({per.controller},'Location','southwest','Interpreter','none');
 title('Closed-loop response: measured (points) vs 2nd-order model (line)');
 
-sgtitle('Data-driven 2nd-order closed-loop model','FontWeight','bold');
+sgtitle({'Data-driven 2nd-order closed-loop model', ...
+    'reduced fit (small-signal, limit-cycle-contaminated) — damping \zeta is indicative, not a precise identification'}, ...
+    'FontWeight','bold');
 saveas(f, fullfile(outdir,'Model-ClosedLoop.png')); close(f);
 fprintf('  saved Model-ClosedLoop.png\n');
 end

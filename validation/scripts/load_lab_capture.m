@@ -68,6 +68,16 @@ switch nc
         cap.seg_id = D(6,:).';   cap.V_real = D(7,:).';
         cap.has_seg = true; cap.has_states = false;
         cap.has_obs = false; cap.has_vreal = true;
+    case 14
+        % 15-ch SSi layout minus seg_id (manual references, e.g. staircase)
+        cap.fmt = '14ch_SS';
+        cap.r_theta = D(3,:).';  cap.theta_raw = D(7,:).';
+        cap.xc = D(6,:).';       cap.V = D(14,:).';
+        cap.xc_dot = D(8,:).';   cap.theta_dot = D(9,:).';
+        cap.xc_hat = D(10,:).';  cap.theta_hat = D(11,:).';
+        cap.xc_dot_hat = D(12,:).'; cap.theta_dot_hat = D(13,:).';
+        cap.has_seg = false; cap.has_states = true;
+        cap.has_obs = true;  cap.has_vreal = false;
     case 15
         cap.fmt = '15ch_SS';
         cap.r_theta = D(3,:).';  cap.theta_raw = D(7,:).';
