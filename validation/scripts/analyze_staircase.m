@@ -13,7 +13,7 @@ function res = analyze_staircase(file, outdir)
 
 root = getenv('SEESAW_ROOT');
 if isempty(root) || exist(root,'dir')~=7, root = 'C:\Users\Karim Negm\Seesaw'; end
-if nargin < 1 || isempty(file), file = fullfile(root,'data_26-May-2026_18-11-55.mat'); end
+if nargin < 1 || isempty(file), file = fullfile(root,'LQRDD_STAIRCASE.mat'); end
 if nargin < 2 || isempty(outdir), outdir = fullfile(root,'validation','docs','figures'); end
 addpath(fullfile(root,'validation','scripts'));
 local_theme();
