@@ -677,7 +677,7 @@ With the reference held at $0^\circ$ the seesaw does not sit perfectly still: fr
 \subsection{Frequency Validation: Reference Tracking}\label{sec:angle_tracking_results}
 All three angle controllers were run through the same $\approx 280$~s protocol (\texttt{generate\_tracking\_protocol.m}): $\pm 1^\circ$ steps and a short pulse, followed by stepped sines from $0.10$ to $10$~Hz. The cascaded PID tracks the $+1^\circ$ step with a steady-state gain of $1.06$ and $0.06^\circ$ residual error (rise time $0.08$~s), but the response is strongly underdamped, overshooting to about $3.6^\circ$ before settling into its rocking band. Across the stepped sines the RMS angle error is $0.52^\circ$. It is also the heaviest user of the actuator: $1.56$~V RMS, saturating the $6$~V motor clamp, with $11.6$~cm of cart travel.
 
-A caveat applies to the swept-sine results for all three controllers. The sine amplitude was kept at $0.2^\circ$ for safety at high frequency, but that is below the $0.3$--$0.7^\circ$ limit cycle, so the low-frequency frequency response is partly the seesaw's own rocking rather than commanded motion. The $\pm 1^\circ$ steps (well above the rocking floor) are therefore the more reliable measure of tracking quality.
+One feature of the swept sine should be read with care for all three controllers. The sine amplitude was kept at $0.2^\circ$ for safety at high frequency, which is below the $0.3$--$0.7^\circ$ limit cycle, so the \emph{absolute low-frequency gain} is partly the seesaw's own rocking rather than commanded motion. This softens the precise $-3$~dB bandwidth, but it does not devalue the sweep: the resonant peak, the high-frequency roll-off, the phase loss and the relative ranking of the controllers all sit well above the rocking floor and are corroborated by the $\pm 1^\circ$ steps. The interpretation of these results, and what the design predicted versus what the hardware delivered, is collected in Sec.~\ref{sec:design_vs_reality}.
 
 \begin{figure}[H]
     \centering
@@ -688,15 +688,43 @@ A caveat applies to the swept-sine results for all three controllers. The sine a
 
 \section{State-Space Control Design: Pole Placement}
 \subsection{Full-State Feedback}
-The full-state gain places the four closed-loop poles using the dominant-pole redesign of the preceding section, giving
-\[ K_{PP} = \begin{bmatrix} 258.3 & -196.8 & 24.9 & -69.7 \end{bmatrix}, \]
-on the state $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta}]$. Velocities fed back to this gain are obtained from dirty (filtered) derivatives of the two measured positions; the term ``PP+DD'' denotes this pole-placement-plus-dirty-derivative implementation.
+The full-state gain places the four closed-loop poles using the dominant-pole redesign of the preceding section. The balancing pair is set at $-5.5\pm 4.125j$~rad/s ($\omega_n=6.88$~rad/s, $\zeta=0.8$), with the two cart modes faster, at $-8.25$ and $-6.6$~rad/s, giving the regulation gain
+\[ K_{4} = \begin{bmatrix} 258.3 & -196.8 & 24.9 & -69.7 \end{bmatrix}, \]
+on the state $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta}]$. This pure state feedback holds the body at $\theta=0$ but, carrying no disturbance model, settles to a non-zero angle under a constant load. Reference tracking therefore uses the integral-augmented form (a fifth state $\dot{\xi}=\theta$, integrator pole at $-0.5$~rad/s), which is the gain that was actually deployed for the tracking runs:
+\[ K_{5} = \begin{bmatrix} 276.5 & -231.7 & 26.9 & -77.1 & -58.9 \end{bmatrix}, \]
+on $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta},\ \textstyle\int\!\theta]$. Velocities fed back to either gain come from dirty (filtered) derivatives of the two measured positions; the term ``PP+DD'' denotes this pole-placement-plus-dirty-derivative implementation.
 
 \subsection{Time Validation: Horizontal Stability}
 At $\theta_{ref}=0$ the pole-placement loop holds the tightest rocking band of the three controllers, $0.32^\circ$ RMS, at less than half the cascaded-PID control effort ($0.56$~V RMS).
 
 \subsection{State Estimator: Luenberger Observer}
-A Luenberger observer was run in parallel with the dirty-derivative feedback (poles $\{-27.4,-27.6,-41.2,-33.1\}$~rad/s, i.e.\ the closed-loop poles scaled by $\approx 5$). Logged against the encoders, its angle-estimate error (innovation) is $0.009^\circ$ RMS with near-white character (lag-1 correlation $0.82$), confirming a good match to the linear model. Its angular-rate estimate is also cleaner than the dirty derivative at high frequency, as the latter amplifies encoder quantization (Fig.~\ref{fig:obs_pp}). The observer was logged only, not used in the loop.
+\label{sec:luenberger}
+Only $x_c$ and $\theta$ are measured; the two velocities $\dot{x}_c,\dot{\theta}$ in the feedback law have to be reconstructed. Differentiating the encoders through a filter (the dirty derivative used in the loop) works but injects phase lag and amplifies quantization at high frequency. A Luenberger observer estimates the velocities from the plant model instead, and was logged alongside the dirty-derivative feedback as a benchmark.
+
+\paragraph{Structure and separation.}
+With the measured outputs $y=C\mathbf{x}$, where
+\[ C = \begin{bmatrix} 1 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \end{bmatrix} \]
+picks off $x_c$ and $\theta$, the observer
+\begin{equation}
+\dot{\hat{\mathbf{x}}} = A\hat{\mathbf{x}} + Bu + L\,(y - C\hat{\mathbf{x}})
+\end{equation}
+drives the estimation error $e=\mathbf{x}-\hat{\mathbf{x}}$ by $\dot{e}=(A-LC)\,e$. Closing the loop with $u=-K_4\hat{\mathbf{x}}$ leaves a block-triangular system whose eigenvalues split as $\operatorname{eig}(A-BK_4)\,\cup\,\operatorname{eig}(A-LC)$ --- the separation principle. Controller and observer can therefore be designed independently, and $L$ assigns the error-dynamics poles freely because $(A,C)$ is observable: the observability matrix has full rank $4$ and a condition number of $211$, so both velocities are cleanly recoverable from the two position channels.
+
+\paragraph{Pole selection.}
+The observer poles are taken as a proportional scaling of the controller poles --- the textbook $3$--$10\times$ rule for timescale separation, here fixed at $k_{\mathrm{obs}}=5$. Two refinements are applied. First, only the \emph{real parts} of the controller poles are scaled, so the observer poles are all real; this gives a smooth, non-ringing convergence of the estimate. Second, because the controller has a repeated real part ($-5.5$ twice) and pole-placement cannot resolve a multiplicity, the duplicate is split by a small $\pm0.1$~rad/s offset. The result is
+\begin{equation}
+p_{\mathrm{obs}} = \{-27.4,\ -27.6,\ -41.2,\ -33.1\}\ \text{rad/s},
+\end{equation}
+with the slowest observer pole at $27.4$~rad/s sitting a full decade above the unstable plant pole ($2.74$~rad/s) --- ample separation for the estimate to lead the regulator. The corresponding gain is
+\begin{equation}
+L = \begin{bmatrix} 46.4 & -0.9 \\ -4.3 & 68.5 \\ 247.1 & -20.5 \\ -197.9 & 1133.0 \end{bmatrix}.
+\end{equation}
+
+\paragraph{Why this aggressive a gain was acceptable.}
+A fast observer is noisy: each encoder count maps to a voltage perturbation $|K_4 L|\,q$ at the motor. At $k_{\mathrm{obs}}=5$ this gain is $0.75$~V/count on the cart channel and $47$~V/count on the angle channel --- the latter far beyond the $6$~V saturation, so an \emph{in-loop} observer at this bandwidth would chatter the actuator into the rails and $k_{\mathrm{obs}}$ would have to be backed down to a few units. Here the observer was run only as a logged estimator while the dirty derivative drove the loop, so this noise-amplification constraint never bound; the aggressive bandwidth simply buys a sharp estimate to compare against.
+
+\paragraph{Result.}
+Logged against the encoders, the observer's angle innovation is $0.009^\circ$ RMS with near-white character (lag-1 correlation $0.82$), confirming a good match to the linear model. Its angular-rate estimate is also visibly cleaner than the dirty derivative at high frequency, where the latter amplifies quantization (Fig.~\ref{fig:obs_pp}). This is the qualitative payoff the observer promises --- a smoother velocity without the lag of an aggressively filtered differentiator --- and motivates moving it into the loop in a future iteration, at a noise-appropriate $k_{\mathrm{obs}}$.
 
 \begin{figure}[H]
     \centering
@@ -706,7 +734,7 @@ A Luenberger observer was run in parallel with the dirty-derivative feedback (po
 \end{figure}
 
 \subsection{Frequency Validation: Reference Tracking}
-On the same protocol the pole-placement controller tracks the $+1^\circ$ step with unity gain ($1.01$) and $0.01^\circ$ residual error, overshooting only to about $2.1^\circ$ --- the best-damped of the three. Swept-sine RMS error is $0.33^\circ$. It is efficient on the actuator ($0.56$~V RMS, $7.5$~cm cart travel), though transient peaks reach $9$~V (the state-feedback runs use a $\pm 9$~V clamp, above the $6$~V motor rating).
+On the same protocol the pole-placement controller ($K_5$) tracks the $+1^\circ$ step with unity gain ($1.01$) and $0.01^\circ$ residual error, overshooting only to about $2.1^\circ$ --- the best-damped of the three. That residual, some twenty times smaller than the free-run rocking band, is the direct evidence that the integral state was active: pure state feedback ($K_4$) would have left a load-dependent offset. Swept-sine RMS error is $0.33^\circ$. It is efficient on the actuator ($0.56$~V RMS, $7.5$~cm cart travel), though transient peaks reach $9$~V (the state-feedback runs use a $\pm 9$~V clamp, above the $6$~V motor rating).
 
 \section{State-Space Control Design: Linear Quadratic Regulator}
 \subsection{Full-State Feedback}
@@ -755,13 +783,16 @@ $+1^\circ$ step rise time [s]      & 0.08 & 0.09 & 0.22 \\
 $+1^\circ$ step peak [deg]         & 3.6  & 2.1  & 2.5  \\
 Steady-state step error [deg]      & 0.06 & 0.01 & 0.02 \\
 Swept-sine RMS error [deg]         & 0.52 & 0.33 & 0.42 \\
-$-3$\,dB bandwidth [Hz]            & 1.00 & 0.63 & 0.40 \\
-Peak $|\theta/\theta_{ref}|$ [--]  & 6.0  & 3.4  & 4.2  \\
+Swept-sine $-3$\,dB bandwidth [Hz]$^\dagger$ & 1.00 & 0.63 & 0.40 \\
+Resonant peak $|\theta/\theta_{ref}|$ [--] & 6.0  & 3.4  & 4.2  \\
 Free-run rocking [deg RMS]         & 0.74 & 0.32 & 0.42 \\
 Motor voltage [V RMS]              & 1.56 & 0.56 & 0.58 \\
 Cart travel [cm p-p]               & 11.6 & 7.5  & 5.0  \\
 \hline
 \end{tabular}
+
+\vspace{2pt}
+{\footnotesize $^\dagger$ Small-signal value, read against the lowest reference-dominated point of the sweep; see the design-versus-measurement discussion below for why the absolute bandwidth should be read as a lower bound rather than a precise figure.}
 \end{table}
 
 \begin{figure}[H]
@@ -772,6 +803,20 @@ Cart travel [cm p-p]               & 11.6 & 7.5  & 5.0  \\
     \caption{Controller comparison on the identical reference protocol.}
     \label{fig:compare}
 \end{figure}
+
+\subsection{Design intent versus measured behaviour}
+\label{sec:design_vs_reality}
+The linear designs all aim for a well-damped response. Pole placement puts the balancing pair at $1.09$~Hz with $\zeta=0.8$, which for an ideal second-order mode predicts about $1.5\%$ overshoot and a $0.7$~s settling time; the LQR loop crosses over near $1.7$~Hz with a $64^\circ$ phase margin and the gain/phase margins guaranteed by the regulator. The hardware does not match this on-paper damping. Every controller overshoots its $1^\circ$ step far more than the design allows --- to $2.1$--$3.6^\circ$ --- and the swept-sine magnitude shows a clear resonant peak ($3.4\times$ for pole placement, $4.2\times$ for the LQR, $6.0\times$ for the PID). The time-domain overshoot and the frequency-domain peak are two independent measurements of the same thing, and they agree: the closed loop is markedly more lightly damped than the pole locations claim.
+
+This is exactly why the swept sine earns its place even though the drive amplitude ($0.2^\circ$) sits below the $0.3$--$0.7^\circ$ limit cycle. The contamination affects only the \emph{absolute low-frequency gain} --- and hence the precise $-3$~dB point, which is why the bandwidth in Table~\ref{tab:ctrl_compare} is reported as a lower bound. The \emph{shape} of the response is well above the rocking floor and fully trustworthy: the resonant peak that quantifies the under-damping, the high-frequency roll-off, the phase loss, and the relative ranking of the three controllers all come straight from the sweep and corroborate the step data. ``Bandwidth'' itself is the slippery quantity here, not the measurement --- for an integral servo it depends on where the reference is injected, and a single headline number conceals more than it reveals.
+
+The damping shortfall is common to all three controllers, so it is a property of the plant-plus-implementation rather than a mis-tuning of any one design. Three mechanisms account for it, none of them in the linear model:
+\begin{itemize}
+    \item \textbf{Dirty-derivative phase lag.} The velocities are reconstructed by filtered differentiation of the encoders, not by the ideal full-state measurement the pole placement assumes. The filter spends phase margin the design counted on, which shows up directly as reduced closed-loop damping.
+    \item \textbf{Coulomb friction, stiction and gear backlash.} These are visible in the data, not inferred: the $1.5$--$2^\circ$ hysteresis loop on the staircase descent (Fig.~\ref{fig:staircase}) and the sustained limit cycle at $\theta_{ref}=0$ are their signatures.
+    \item \textbf{Encoder quantization}, which sustains the residual rocking and sets the floor below which small-signal tracking cannot be resolved.
+\end{itemize}
+The claims that survive this scrutiny --- and on which the comparison rests --- are the ones measured well clear of these effects: each controller stabilizes the unstable plant, tracks to a near-zero steady-state error through integral action, holds a tight regulation band ($0.32$--$0.74^\circ$ RMS), and, for the LQR, tracks cleanly up to $10^\circ$. The precise damping ratio and absolute bandwidth are best read as indicative.
 
 \section{Advanced Non-Linear Maneuver: Seesaw Lift-up}
 \subsection{Region of Attraction}
