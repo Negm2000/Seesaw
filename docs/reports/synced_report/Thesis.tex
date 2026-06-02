@@ -885,148 +885,73 @@ Control law: $V_m = -\mathbf{K}\mathbf{x}$, with closed-loop dynamics $\dot{\mat
 
 \subsubsection{Open-Loop Poles}
 
+The identified coupled plant, linearised about the horizontal equilibrium with the state ordered $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta}]$, has open-loop poles
 \begin{equation}
-	\lambda_{1,2,3,4} = \{+2.61, \quad -0.42, \quad -2.25, \quad -36.50\} \quad [\text{rad/s}]
+	\lambda = \{+2.74,\ \ -1.48\pm1.30j,\ \ -14.13\}\ \ [\text{rad/s}].
 \end{equation}
-The pole at $+2.61$ is unstable (beam tips over, $\tau \approx 0.38$ s). Controllability rank = 4/4, so all poles can be relocated.
+The pole at $+2.74$~rad/s is the unstable mode --- the seesaw tipping over, with a $\tau\approx0.37$~s time constant. The controllability matrix has full rank $4$, so all four poles can be relocated by state feedback.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.6\linewidth]{Pole Placement/OL-Poles.png}
-	\caption{Open-loop pole map. The pole at $+2.61$ (right of dashed line) confirms instability.}
+	\caption{Open-loop pole map of the deployed plant. The pole at $+2.74$ (right of the dashed axis) is the seesaw fall rate and sets the closed-loop bandwidth target.}
 	\label{fig:ol_poles}
 \end{figure}
 
-\subsubsection{Baseline Stabilizing Design}
+\subsubsection{Dominant-Pole Design}
 
-\textbf{Attempt 1:} mirror the unstable pole to the LHP and keep all other poles at their open-loop locations. This is the simplest stabilizing controller and serves as the baseline.
+The simplest stabilizing choice --- mirroring the unstable pole into the left half-plane and leaving the others untouched --- is stable but sluggish, since the dominant dynamics then sit barely faster than the original fall rate. Instead the dominant pair is placed to \emph{outrun} the instability: at twice the fall rate, $\sigma=5.5$~rad/s, with damping $\zeta=0.8$ (hence $\omega_n=6.88$~rad/s), giving the complex pair $-5.5\pm4.125j$. The two cart-related modes are placed faster still, at $-8.25$ and $-6.6$~rad/s, so they do not introduce a slow transient. The resulting regulation gain is
 \begin{equation}
-	p_{\text{des}} = \{-0.42, \quad -2.25, \quad -2.61, \quad -36.50\}
+	K_4 = \begin{bmatrix} 258.3 & -196.8 & 24.9 & -69.7 \end{bmatrix},
 \end{equation}
-\begin{equation}
-	\mathbf{K}_1 = \begin{bmatrix} 78.36 & 4.46 & -59.81 & -22.90 \end{bmatrix}
-\end{equation}
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.6\linewidth]{Pole Placement/CL-Poles-Att1.png}
-	\caption{Closed-loop poles --- Attempt 1. All poles in LHP, system is stable.}
-	\label{fig:cl_poles_att1}
-\end{figure}
-
-Fig.~\ref{fig:ic_att1} shows the $4.5^\circ$ initial-tilt regulator test. The system is stable but too slow: settling exceeds $10$ s (see Table~\ref{tab:pole_comparison}).
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.8\linewidth]{Pole Placement/IC-Response-Att1.png}
-	\caption{Initial condition response ($4.5^\circ$ tilt), Attempt 1. Stable, but settling exceeds $10$ s.}
-	\label{fig:ic_att1}
-\end{figure}
-
-\subsubsection{Dominant-Pole Redesign}
-
-The baseline is stable but too slow (Table~\ref{tab:pole_comparison}). The next step is to size the dominant poles from settling-time and damping requirements. Using the standard $2\%$ approximation
-\begin{equation}
-	T_s \approx \frac{4}{\zeta\omega_n}
-\end{equation}
-with $T_s = 2$ s and $\zeta = 0.7$, this gives $\omega_n \approx 2.86$ rad/s, rounded to $3.0$ rad/s. The resulting dominant pair is
-\begin{equation}
-	p_{1,2} = -\zeta\omega_n \pm j\omega_n\sqrt{1-\zeta^2} = -2.10 \pm j2.14
-\end{equation}
-
-The two stable open-loop poles at $-2.25$ and $-36.50$ were kept unchanged; only the unstable/slow part of the dynamics was reshaped. The final pole set is
-\begin{equation}
-	p_{\mathrm{final}} = \{-2.10 \pm j2.14,\ -2.25,\ -36.50\}
-\end{equation}
-
-\begin{table}[H]
-	\centering
-	\begin{tabular}{l c c}
-		\toprule
-		              & Attempt 1                       & Final design                       \\
-		\midrule
-		Poles         & $[-0.42, -2.25, -2.61, -36.50]$ & $[-2.10 \pm j2.14, -2.25, -36.50]$ \\
-		Peak $V_m$    & 4.70 V                          & 7.91 V                             \\
-		Peak $\theta$ & $7.69^\circ$                    & $5.72^\circ$                       \\
-		Peak cart     & 10.06 cm                        & 9.60 cm                            \\
-		Settling time & $>10$ s                         & 2.10 s                             \\
-		\bottomrule
-	\end{tabular}
-	\caption{Pole-placement evolution on the tuned plant. The final design changes only the dominant part of the dynamics.}
-	\label{tab:pole_comparison}
-\end{table}
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.85\linewidth]{Pole Placement/Pole-Comparison.png}
-	\caption{Comparison between the baseline stabilizing design and the final dominant-pole design for the $4.5^\circ$ initial-tilt test.}
-	\label{fig:pole_comparison}
-\end{figure}
-
-The gain vector for this design is
-\begin{equation}
-	\mathbf{K} = \begin{bmatrix} 101.67 & 6.85 & -100.69 & -40.10 \end{bmatrix}
-\end{equation}
+on $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta}]$.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.6\linewidth]{Pole Placement/CL-Poles-Final.png}
-	\caption{Closed-loop poles of the final pole-placement controller.}
+	\caption{Closed-loop poles of the deployed pole-placement design. The complex pair is the dominant balancing mode; the two real cart modes are faster.}
 	\label{fig:cl_poles_final}
 \end{figure}
+
+A $\theta(0)=2^\circ$ initial-tilt simulation (Fig.~\ref{fig:ic_final}) peaks at $V_m=6.9$~V, $\theta=2.4^\circ$, and a $2.9$~cm cart excursion. These gains are deliberately aggressive: a $2^\circ$ tilt already reaches the $6$~V motor limit, so the unsaturated linear regime holds only to about $1.75^\circ$. Beyond that, saturation reshapes the response and the placed poles no longer describe it --- the price paid for a balancing mode fast enough to beat the friction and rocking that the slower simulation-only designs could not.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\linewidth]{Pole Placement/IC-Response-Final.png}
-	\caption{Initial condition response of the final design for a $4.5^\circ$ tilt disturbance.}
+	\caption{Initial-tilt response, $\theta(0)=2^\circ$, deployed $K_4$. Peak $V_m=6.9$~V, peak $\theta=2.4^\circ$, peak cart $2.9$~cm.}
 	\label{fig:ic_final}
 \end{figure}
 
-\subsubsection{Constant Bias Torque and Integral Action}
+Broken at the plant input, the loop $L(s)=K_4(sI-A)^{-1}B$ has a phase margin of $58.4^\circ$ and crossover at $12.9$~rad/s (Fig.~\ref{fig:loop_final}).
 
-The initial-tilt test validates transient performance but not steady-state accuracy under persistent disturbances. A constant bias torque (100 g equivalent weight left on the seesaw) reveals a residual tilt of $6.69^\circ$ (Fig.~\ref{fig:rep_final}).
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.9\linewidth]{Pole Placement/loop_analysis.png}
+	\caption{Frequency-domain check of the deployed pole-placement loop: Bode, Nyquist, root-locus and pole-zero views.}
+	\label{fig:loop_final}
+\end{figure}
+
+\subsubsection{Integral Action}
+
+Pure state feedback carries no disturbance model, so a constant load torque produces a steady offset: a $100$~g off-centre mass leaves a $2.1^\circ$ residual tilt (Fig.~\ref{fig:rep_final}). Augmenting the state with an angle integrator, $\dot{\xi}=\theta$, and placing the extra pole slowly at $-0.5$~rad/s (so it barely perturbs the transient shape) gives the deployed tracking gain
+\begin{equation}
+	K_5 = \begin{bmatrix} 276.5 & -231.7 & 26.9 & -77.1 & -58.9 \end{bmatrix},
+\end{equation}
+on the augmented state $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta},\ \textstyle\int\!\theta]$. Under the same bias the residual collapses to $0.2^\circ$ at a $1.8$~cm cart offset and under $1.5$~V (Fig.~\ref{fig:bias_integral}). In what follows $K_4$ is the pure-regulation gain and $K_5$ the gain behind every pole-placement tracking result.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\linewidth]{Pole Placement/repeated_disturbance.png}
-	\caption{Constant bias torque test without integral action. The response is stable but settles to a non-zero tilt of $6.69^\circ$.}
+	\caption{Constant bias torque without integral action: stable but settles to a non-zero tilt of $2.1^\circ$.}
 	\label{fig:rep_final}
 \end{figure}
-
-To eliminate steady-state error, the state is augmented with an integrator on $\theta$:
-\begin{equation}
-	\mathbf{x}_a = \begin{bmatrix} x_c & \dot{x}_c & \theta & \dot{\theta} & \xi \end{bmatrix}^\top,
-	\qquad \dot{\xi} = \theta,
-	\qquad V_m = -\mathbf{K}_a\mathbf{x}_a
-\end{equation}
-The four poles from the previous design are retained and one integrator pole is added at $-1.0$ (slower than the dominant pair, so the transient shape is preserved):
-\begin{equation}
-	p_{\mathrm{aug}} = \{-2.10 \pm j2.14, \,-2.25, \,-36.50, \,-1.0\}
-\end{equation}
-\begin{equation}
-	\mathbf{K}_a = \begin{bmatrix} 121.29 & 8.50 & -140.79 & -51.41 & -28.63 \end{bmatrix}
-\end{equation}
-
-Under the same 100 g bias-load test, steady-state tilt is eliminated ($\theta_{ss} \approx 0^\circ$), as shown in Fig.~\ref{fig:bias_integral}. The cart settles at about $3.3$ cm to maintain balance, and peak voltage stays below $2.1$ V.
 
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\linewidth]{Pole Placement/bias_with_integral.png}
-	\caption{Constant bias torque test with integral action. Steady-state tilt is eliminated.}
+	\caption{Constant bias torque with integral action ($K_5$): steady-state tilt is driven to $\approx0.2^\circ$.}
 	\label{fig:bias_integral}
 \end{figure}
-
-\subsubsection{Deployed controller}
-\label{sssec:pp_deployed}
-The gains above come from the simulation model. On the bench the dominant pair was pushed faster --- to $-5.5\pm 4.125j$~rad/s ($\omega_n=6.88$~rad/s, $\zeta=0.8$), with the two cart modes at $-8.25$ and $-6.6$~rad/s --- to outrun friction and the residual rocking, which the slower simulated design ($-2.1\pm2.14j$) could not. The deployed gains (with the state ordered $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta}]$, note the swapped middle entries relative to the simulation vector) are
-\begin{equation}
-	K_4 = \begin{bmatrix} 258.3 & -196.8 & 24.9 & -69.7 \end{bmatrix},
-\end{equation}
-for pure regulation, and with the angle integrator (pole at $-0.5$~rad/s, faster than the simulated $-1.0$),
-\begin{equation}
-	K_5 = \begin{bmatrix} 276.5 & -231.7 & 26.9 & -77.1 & -58.9 \end{bmatrix},
-\end{equation}
-on $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta},\ \textstyle\int\!\theta]$. These are the gains behind every pole-placement hardware result below.
 
 \subsection{Time Validation: Horizontal Stability}
 \label{sssec:pp_horizontal}
