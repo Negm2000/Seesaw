@@ -862,7 +862,7 @@ This controller makes $L_\theta(s)$ stable, but what about the performances ?
     \label{fig:quadtree2}
 \end{figure}
 \subsection{Time Validation: Horizontal Stability}
-With the reference held at $0^\circ$ the seesaw does not sit perfectly still: friction in the pivot and encoder quantization sustain a small limit cycle. The cascaded PID holds the body to a $0.74^\circ$ RMS angle (rocking at $\approx0.21$~Hz), the loosest of the three controllers tested, consistent with its high control activity reported below.
+With the reference held at $0^\circ$ the seesaw does not sit perfectly still: friction in the pivot and encoder quantization sustain a small limit cycle. Free-run tests show why integral action matters here. The PD outer loop, with no integral term, lets the body settle into a large bounded oscillation --- $3.5^\circ$ RMS, with $95\%$ of samples inside $10.3^\circ$, i.e.\ swinging nearly to the $\pm11.5^\circ$ stops --- because any static torque imbalance is left uncorrected. Adding integral action (the PID) collapses this to $0.69^\circ$ RMS, a five-fold improvement, at the cost of the heaviest actuator activity of the three controllers (this rocking is consistent with the $0.74^\circ$ measured on the level segments of the tracking protocol below).
 
 \subsection{Frequency Validation: Reference Tracking}
 \label{sec:angle_tracking_results}
@@ -1232,7 +1232,7 @@ In this formulation, the matrix $K_x$ acts on the original plant states, while t
 Finally, it should be emphasized that the actuator voltage is limited to $\pm 6~\mathrm{V}$. Under saturation, the integral state may continue to accumulate error even when the actuator can no longer provide additional effort. This phenomenon, known as integral windup, may degrade performance and should be addressed in a practical implementation through an anti-windup strategy. Nevertheless, the simulation results confirm that the LQI controller stabilizes the Seesaw system and improves angular regulation compared with the standard LQR design.
 
 \subsection{Time Validation: Horizontal Stability}
-With the reference held at $0^\circ$ the LQR holds the body to $0.42^\circ$ RMS --- between the pole-placement ($0.32^\circ$) and cascaded-PID ($0.74^\circ$) controllers --- at essentially the same control effort as pole placement ($0.58$~V RMS). As with the other controllers the residual motion is a bounded friction/quantization limit cycle, not a true rest, but the plant is held stable about the horizontal.
+With the reference held at $0^\circ$ the LQR holds the body to $0.42^\circ$ RMS --- between the pole-placement ($0.32^\circ$) and cascaded-PID ($0.74^\circ$) controllers --- at essentially the same control effort as pole placement ($0.58$~V RMS). As with the other controllers the residual motion is a bounded friction/quantization limit cycle, not a true rest, but the plant is held stable about the horizontal. A dedicated $5.5$-minute disturbance run confirms the robustness: under applied disturbances (peak effort $7.3$~V, versus $\approx5$~V undisturbed) the LQR kept the body to $0.39^\circ$ RMS, recovering to the same band each time.
 
 \subsection{State Estimator: Kalman Filter}
 \begin{align}
@@ -1248,14 +1248,16 @@ $Q_n$ the process noise matrix is basically â€œhow much do we trust the model?â€
 Only the ratio between $Q_n / R_n$ : >> 1 means bad model but good sensors and << 1 means good model bad sensors.
 
 \paragraph{Result.}
-The estimator logged during the LQR runs performed markedly worse than the pole-placement observer: its angle innovation is $0.154^\circ$ RMS with a lag-1 correlation of $1.00$ --- a slow, biased estimate rather than the near-white error a well-matched filter produces --- and its angular-rate estimate is about five times noisier (Fig.~\ref{fig:obs_lqr}). This points to a mismatched or poorly conditioned gain for that configuration rather than a clean Kalman result, and is why the dirty-derivative feedback, not the estimate, was kept in the loop. Reconciling this estimator is the clearest follow-up item for the state-space work.
+A dedicated Kalman-filter run (\texttt{kf.mat}, $\theta_{ref}=0$, $53$~s) shows the filter behaving as intended. The estimated angle and cart position track their measurements almost exactly (correlation $0.998$ on both); the angle innovation $\theta-\hat\theta$ settles below $0.05^\circ$ within $\approx5$~s and then holds a steady-state RMS of $0.023^\circ$ with negligible bias ($<0.001^\circ$), and the cart-position innovation is $0.06$~cm RMS (Fig.~\ref{fig:kf}). The reconstructed angular rate is smooth. This is on par with the pole-placement Luenberger result and confirms the filter is well matched to the plant.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.85\textwidth]{Images/Tracking Results/Observer-LQRDDTEST.png}
-    \caption{LQR run: the logged estimator drifts (innovation lag-1 correlation $\approx 1$) and its angular-rate estimate is noticeably noisier than in the pole-placement case.}
-    \label{fig:obs_lqr}
+    \includegraphics[width=0.85\textwidth]{Images/Tracking Results/Kalman-KF.png}
+    \caption{Kalman-filter validation (\texttt{kf.mat}, $\theta_{ref}=0$): measured vs estimated angle, the innovation $\theta-\hat\theta$ ($0.023^\circ$ RMS, unbiased), and the angular-rate estimate.}
+    \label{fig:kf}
 \end{figure}
+
+One caveat on the in-loop tracking runs: those drove the loop from the dirty derivative rather than the filter, and the estimator channel logged in the LQR$+$DD captures specifically was poorly behaved (innovation $\approx0.15^\circ$, drifting). That reflects the logged channel in those particular runs, not the filter's capability --- the dedicated run above is the fair measure of the Kalman filter.
 
 \subsection{Frequency Validation: Reference Tracking}
 Similarly to the previous setup, a fifth virtual state of integral action is added on the seesaw angle, and the controller is run through the same protocol.
@@ -1275,7 +1277,7 @@ The LQR tracks the $+1^\circ$ step with gain $1.02$ and $0.02^\circ$ residual er
 
 \subsection{Controller Comparison and Design-versus-Reality}
 \label{sec:ss_comparison}
-Table~\ref{tab:ctrl_compare} summarizes the three controllers on the identical protocol. The cascaded PID is the fastest but by far the least damped (largest overshoot, resonant peak, rocking and control effort). The two state-space designs trade a little bandwidth for much better damping and far lower effort: pole placement gives the tightest regulation and the best-behaved estimate, while the LQR is the gentlest on the cart but currently carries the degraded estimator noted above.
+Table~\ref{tab:ctrl_compare} summarizes the three controllers on the identical protocol. The cascaded PID is the fastest but by far the least damped (largest overshoot, resonant peak, rocking and control effort). The two state-space designs trade a little bandwidth for much better damping and far lower effort: pole placement gives the tightest regulation, while the LQR is the gentlest on the cart and is the only design carrying a fully validated state estimator (its dedicated Kalman run tracks to a $0.023^\circ$ innovation).
 
 \begin{table}[H]
 \centering
