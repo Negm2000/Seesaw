@@ -1247,17 +1247,8 @@ $G_n$ the disturbance matrix, that can have 2 modes  $\to$  matched disturbance 
 $Q_n$ the process noise matrix is basically “how much do we trust the model?” for position going from pos to vel is pretty easy so low process noise, but going from vel to accelerations can be messy (and we did not model every friction etc) so high process noise.
 Only the ratio between $Q_n / R_n$ : >> 1 means bad model but good sensors and << 1 means good model bad sensors.
 
-\paragraph{Result.}
-A dedicated Kalman-filter run (\texttt{kf.mat}, $\theta_{ref}=0$, $53$~s) shows the filter behaving as intended. The estimated angle and cart position track their measurements almost exactly (correlation $0.998$ on both); the angle innovation $\theta-\hat\theta$ settles below $0.05^\circ$ within $\approx5$~s and then holds a steady-state RMS of $0.023^\circ$ with negligible bias ($<0.001^\circ$), and the cart-position innovation is $0.06$~cm RMS (Fig.~\ref{fig:kf}). The reconstructed angular rate is smooth. This is on par with the pole-placement Luenberger result and confirms the filter is well matched to the plant.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.85\textwidth]{Images/Tracking Results/Kalman-KF.png}
-    \caption{Kalman-filter validation (\texttt{kf.mat}, $\theta_{ref}=0$): measured vs estimated angle, the innovation $\theta-\hat\theta$ ($0.023^\circ$ RMS, unbiased), and the angular-rate estimate.}
-    \label{fig:kf}
-\end{figure}
-
-One caveat on the in-loop tracking runs: those drove the loop from the dirty derivative rather than the filter, and the estimator channel logged in the LQR$+$DD captures specifically was poorly behaved (innovation $\approx0.15^\circ$, drifting). That reflects the logged channel in those particular runs, not the filter's capability --- the dedicated run above is the fair measure of the Kalman filter.
+\paragraph{Hardware validation status.}
+A clean hardware validation of the Kalman filter specifically is not yet established. In every deployed run the feedback loop was closed on the dirty-derivative velocities, with the model-based estimators logged only in parallel, and those logged estimator channels are not trustworthy across the available captures: in the pole-placement / LQR state-space runs the velocity-estimate channels either diverged numerically or were internally inconsistent, and the candidate dedicated capture could not be confidently attributed to the Kalman design (its angular-rate channel does not match the derivative of its angle estimate, and its innovation is strongly autocorrelated rather than white --- not the signature of a well-tuned filter). Reconciling the estimator and running it \emph{in the loop} therefore remains the clearest follow-up item for the state-space work; the filter design above is sound on paper, but its on-hardware performance is not demonstrated by the present data.
 
 \subsection{Frequency Validation: Reference Tracking}
 Similarly to the previous setup, a fifth virtual state of integral action is added on the seesaw angle, and the controller is run through the same protocol.
@@ -1277,7 +1268,7 @@ The LQR tracks the $+1^\circ$ step with gain $1.02$ and $0.02^\circ$ residual er
 
 \subsection{Controller Comparison and Design-versus-Reality}
 \label{sec:ss_comparison}
-Table~\ref{tab:ctrl_compare} summarizes the three controllers on the identical protocol. The cascaded PID is the fastest but by far the least damped (largest overshoot, resonant peak, rocking and control effort). The two state-space designs trade a little bandwidth for much better damping and far lower effort: pole placement gives the tightest regulation, while the LQR is the gentlest on the cart and is the only design carrying a fully validated state estimator (its dedicated Kalman run tracks to a $0.023^\circ$ innovation).
+Table~\ref{tab:ctrl_compare} summarizes the three controllers on the identical protocol. The cascaded PID is the fastest but by far the least damped (largest overshoot, resonant peak, rocking and control effort). The two state-space designs trade a little bandwidth for much better damping and far lower effort: pole placement gives the tightest regulation, while the LQR is the gentlest on the cart. Both ran on dirty-derivative velocities in the loop; their model-based estimators (Luenberger, Kalman) were logged only in parallel and are not all cleanly validated (Secs.~\ref{sec:luenberger} and the Kalman discussion above).
 
 \begin{table}[H]
 \centering
