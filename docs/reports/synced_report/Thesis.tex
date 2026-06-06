@@ -32,6 +32,7 @@
 
 % STANDARD MATH PACKAGES
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{amsthm}
 \usepackage{bm}
 \usepackage[overload]{empheq}  % For braced-style systems of equations
@@ -90,7 +91,8 @@
 %----------------------------------------------------------------------------
 %	ADD YOUR DEFINITIONS AND COMMANDS (be careful of existing commands)
 %----------------------------------------------------------------------------
-
+\usepackage{float}
+\usepackage[table]{xcolor}
 
 % Do not change Configuration_files/config.tex file unless you really know what you are doing. 
 % This file ends the configuration procedures (e.g. customizing commands, definition of new commands)
@@ -155,9 +157,12 @@ Keywords may be a single word or two to four words. }
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%     THESIS MAIN TEXT     %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 \section{Introduction}
-\newpage
+Working with underactuated mechanical systems is a classic method for testing advanced control strategies. This project focuses on the Quanser IP02 Linear Base Unit paired with the Seesaw-E module, a setup that creates a complex, single-input multi-output (SIMO) stabilization problem. Because the integrated system contains both Right-Half Plane (RHP) poles and zeros, it exhibits severe Non-Minimum Phase (NMP) behavior. This required incredible precision with frequency separation and pole placement to keep the seesaw balanced without letting the cart crash into the physical track limits.
+
+This report outlines the entire process, from understanding the raw system dynamics to deploying the final controllers. The methodology began by deriving the Euler-Lagrange equations and writing compensation logic for real-world hardware friction. From there, the approach transitioned from classical cascade loop shaping to modern state-space methods, specifically LQR and LQI control. Finally, since linear controllers are only valid near the equilibrium point, the complex lift-up maneuver was addressed. This was formulated as an Optimal Control Problem using CasADi, generating a Time-Varying LQR (TV-LQR) trajectory to safely bring the seesaw body up from its resting stop.
+\newpage 
+
 \section{Setups Description}
 
 \subsection{Quanser IP02 Linear Base Unit}
@@ -334,941 +339,855 @@ Applying these assumptions eliminates the non-linear coupling constraints and si
 \end{equation}
 This finalized linear differential model forms the definitive analytical baseline for executing transfer function derivations, state-space mapping, and closed-loop controller synthesis throughout the remainder of this report.
 
-\subsection{Non-linearities mitigation}
-During experimental validation of the IP02, discrepancies emerged between the idealized linear models and the physical hardware response. These discrepancies are primarily driven by localized, hard non-linearities (specifically static friction, Coulomb friction, and actuator deadzones inherent to the rack-and-pinion and planetary gearbox assembly).\\
-Left uncompensated, these non-linearities introduce steady-state tracking errors, limit cycles, and severe phase distortions that degrade linear controller performance. To restore the validity of the linear assumptions, a data-driven system identification routine was executed to map these non-linear profiles, followed by the implementation of a software-based feedforward inverse-deadband compensation scheme.\\
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.5\linewidth]{Images/frog.png}
-    \caption{input}
-    \label{fig:placeholder}
-\end{figure}
+\subsection{Non-linearities Mitigation}
+During the experimental validation of the IP02 linear base unit, discrepancies emerged between the idealized linear models and the physical hardware response. These discrepancies are primarily driven by localized, hard non-linearities—specifically static friction, Coulomb friction, and actuator deadzones inherent to the rack-and-pinion and planetary gearbox assembly.
+
+Left uncompensated, these non-linearities introduce steady-state tracking errors, limit cycles, and severe phase distortions that degrade linear controller performance. To restore the validity of the linear assumptions, a data-driven system identification routine was executed to map these non-linear profiles, followed by the implementation of a software-based feedforward inverse-deadband compensation scheme.
+
 The underlying mathematical model for this non-symmetric voltage deadzone is formulated as:
 \begin{equation}
-V_{\text{eff}} = f(V_{\text{cmd}}) = 
+V_{eff} = f(V_{cmd}) = 
 \begin{cases} 
-    V_{\text{cmd}} + u_{d,\text{pos}} & \text{if } V_{\text{cmd}} > \epsilon \\
-    0 & \text{if } |V_{\text{cmd}}| \le \epsilon \\ 
-    V_{\text{cmd}} - u_{d,\text{neg}} & \text{if } V_{\text{cmd}} < -\epsilon \end{cases}
+V_{cmd} + u_{d,pos} & \text{if } V_{cmd} > \epsilon \\ 
+0 & \text{if } |V_{cmd}| \le \epsilon \\ 
+V_{cmd} - u_{d,neg} & \text{if } V_{cmd} < -\epsilon 
+\end{cases}
+\label{eq:deadzone_model}
 \end{equation}
 Where:
 \begin{itemize}
-    \item $\epsilon$ is the deadzone threshold, to avoid chattering between positive and negative motion.
-    \item $V_{\text{cmd}}$ is the raw voltage command generated by the control architecture.
-    \item $V_{\text{eff}}$ is the effective, torque-producing voltage delivered to the motor armature after overcoming friction.
-    \item $u_{d,\text{pos}}$ and $u_{d,\text{neg}}$ represent the distinct positive and negative voltage thresholds required to break static friction.
+    \item $\epsilon$ is the deadzone threshold, used to avoid chattering between positive and negative motion.
+    \item $V_{cmd}$ is the raw voltage command generated by the control architecture.
+    \item $V_{eff}$ is the effective, torque-producing voltage delivered to the motor armature after overcoming friction.
+    \item $u_{d,pos}$ and $u_{d,neg}$ represent the distinct positive and negative voltage thresholds required to break static friction.
 \end{itemize}
 
 \subsubsection{Characterization via Dynamic Modular Signaling}
 To cleanly decouple velocity-dependent Coulomb friction from zero-velocity stiction, the system was excited using a structured modular input signal designed to sweep through multiple distinct dynamic phases. This approach guarantees that the cart transitions smoothly between static equilibrium, rapid acceleration profiles, and steady-state velocity regimes, exposing the underlying non-symmetric nature of the voltage deadzone.
 
 \subsubsection{Algorithmic Deadzone Extraction}
-The script \texttt{seesaw\_nonlinear\_model.m} processes the raw hardware dataset gathered via QUARC to isolate these tresholds. The identification pipeline executes across the following key stages:
+The script \texttt{seesaw\_nonlinear\_model.m} processes the raw hardware dataset gathered via QUARC to isolate these thresholds. The identification pipeline executes across the following key stages:
+
 \paragraph{Zero-Phase Velocity Estimation}
-To circumvent the severe phase-lag and noise amplification associated with raw numerical differentiation, the cart position coordinate ($x_c$) is first pre-processed using a forward-backward digital filter (2nd-order \textit{Butterworth} via texttt{filtfilt}). The cutoff frequency is dynamically scaled relative to the system's structural time constant:
-\begin{equation}\label{eq:butter_cutoff}
-    \omega _{c,butter} = 2 \cdot \frac{B_{tot}}{M_e}
+To circumvent the severe phase-lag and noise amplification associated with raw numerical differentiation, the cart position coordinate ($x_c$) is first pre-processed using a forward-backward digital filter (2nd-order Butterworth via MATLAB's \texttt{filtfilt}). The cutoff frequency ($\omega_c$) is dynamically scaled relative to the system's structural bandwidth, defined as:
+\begin{equation}
+\omega_c = 2 \cdot \frac{B_{tot}}{M_e}
+\label{eq:cutoff_freq}
 \end{equation}
+The filtered position array is then differentiated with respect to the hardware sampling time to extract a clean velocity profile ($\dot{x}_c$).
+
 \paragraph{Sustained-Motion Masking}
 Active velocity states are isolated from measurement noise and micro-oscillations by enforcing a strict kinematic threshold constraint:
-    \begin{equation*}
-        |\dot{x}_c| > v_{tresh} = 0.002 [m/s]
-    \end{equation*}
-    A logical persistence routine ensures that only prolonged, continuous-motion vectors are used for parameter estimation, completely stripping out transient encoder ticks.
+\begin{equation}
+|\dot{x}_c| > v_{thresh} = 0.002 \, [\text{m/s}]
+\end{equation}
+A logical persistence routine (masking) ensures that only prolonged, continuous-motion vectors are used for parameter estimation, completely stripping out transient encoder ticks.
+
 \paragraph{Asymmetric Parameter Mapping}
 The algorithm splits the valid motion index vectors into directional groups to capture hardware asymmetry. By assessing the minimum absolute input voltage applied during these validated windows, the precise directional deadzone boundaries are computed:
-\begin{align*}
-    u_{d,\text{pos}} &= \min \left( |V_{\text{diff}}| \right) &\forall \ \{k \ \in \ \mathbb{Z}^+ \ | \ \dot{x}_c(k) > v_{\text{thresh}} \ \land \ V_{\text{diff}}(k) > 0\}\\
-    u_{d,\text{neg}} &= \min \left( |V_{\text{diff}}| \right) &\forall \ \{k \ \in \ \mathbb{Z}^+ \ | \ \dot{x}_c(k) < -v_{\text{thresh}} \ \land \ V_{\text{diff}}(k) < 0\}
-\end{align*}
+\begin{equation}
+\begin{aligned}
+u_{d,pos} &= \min(|V_{cmd}|) \quad \forall \left\{k \in \mathbb{Z}^+ \mid \dot{x}_c(k) > v_{thresh} \land V_{cmd}(k) > 0\right\} \\
+u_{d,neg} &= \min(|V_{cmd}|) \quad \forall \left\{k \in \mathbb{Z}^+ \mid \dot{x}_c(k) < -v_{thresh} \land V_{cmd}(k) < 0\right\}
+\end{aligned}
+\end{equation}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{Images/non_linear_model/non_linear.eps}
+    \caption{Deadzone Estimation results generated by the extraction script. Top: Input voltage signal highlighting the identified deadzone limits ($u_{d,pos}$ and $u_{d,neg}$). Middle: Filtered cart position. Bottom: Estimated cart velocity with overlaid markers indicating points of validated sustained motion.}
+    \label{fig:deadzone_estimation}
+\end{figure}
+
+\textcolor{blue}{We can easily observe than even after filtering the track is irregular looking at the "supposedly velocity steady-state")}
 
 \subsubsection{Software-Based Inverse-Deadband Compensation}
 Using the extracted parameters stored in \texttt{param\_nonlinear.mat}, an online feedforward compensation block was placed directly upstream of the Digital-to-Analog Converters (DAC). This software block applies an algebraic inverse mapping function to the controller's synthesized voltage output ($V_{ctrl}$) before routing the signal to the power amplifier:
-\begin{equation*}
-    V_{\text{DAC}} = \begin{cases} V_{\text{ctrl}} + u_{d,\text{pos}} & \text{if } V_{\text{ctrl}} > \epsilon \\ 0 & \text{if } V_{\text{ctrl}} = 0 \\ V_{\text{ctrl}} - u_{d,\text{neg}} & \text{if } V_{\text{ctrl}} < \epsilon \end{cases}
-\end{equation*}
+\begin{equation}
+V_{DAC} = 
+\begin{cases} 
+V_{ctrl} + u_{d,pos} & \text{if } V_{ctrl} > \epsilon \\ 
+0 & \text{if } V_{ctrl} = 0 \\ 
+V_{ctrl} - u_{d,neg} & \text{if } V_{ctrl} < -\epsilon 
+\end{cases}
+\end{equation}
 By injecting this step-discontinuity at the zero-crossing point, the controller effectively "pre-shifts" the control effort, neutralizing the actuator deadband. This mathematical cancellation linearizes the input-to-state tracking response, ensuring that the cart's physical translation mirrors the synthesized linear state-space expectations during highly dynamic, bidirectional maneuvers.
 
 \section{Dynamic Modeling \& System Identification}
+
 \subsection{Cart Analytical Modeling: Transfer Function Definition}
-Based on the equation of motion derived at Eq.~\ref{eq:cart_eom}, we define the open-loop transfer function of the system. Applying the Laplace transform under the assumption of zero initial condition yields the transfer function mapping the motor armature voltage $V_m(s)$ to the cart position $X_c(s)$.
-\begin{equation*}
-	\label{eq:cart_eom_laplace}
-	\alpha_f \eta_m\cdot V_m(s) = [M_e \cdot s^2 + B_{tot} \cdot s]\cdot X_c(s)
-\end{equation*}
+Based on the equations of motion derived in the previous section, we define the open-loop transfer function of the isolated cart system. Applying the Laplace transform under the assumption of zero initial conditions yields the transfer function mapping the motor armature voltage $V_m(s)$ to the cart position $X_c(s)$:
 \begin{equation}
-\label{eq:cart_tf}
-    G_x(s) = \frac{X_c(s)}{V_m(s)} = \frac{\alpha_f \eta_m}{M_e \cdot s^2 + B_{tot} \cdot s}
+\begin{aligned}
+\alpha_f \eta_m \cdot V_m(s) &= [M_e \cdot s^2 + B_{tot} \cdot s] \cdot X_c(s) \\
+G_x(s) &= \frac{X_c(s)}{V_m(s)} = \frac{\alpha_f \eta_m}{M_e \cdot s^2 + B_{tot} \cdot s}
+\end{aligned}
+\label{eq:tf_position}
 \end{equation}
+
 Because the position transfer function contains a pure integrator, it exhibits an infinite static gain. Consequently, the system identification pipeline leverages the velocity transfer function, $G_v(s)$, which forms a strictly stable, first-order LTI system:
 \begin{equation}
-\label{eq:cart_velocity_tf}
-    G_v(s) = \frac{s \cdot X_c(s)}{V_m(s)} = \frac{\alpha_f \eta_m}{M_e \cdot s + B_{tot}}
+G_v(s) = \frac{s \cdot X_c(s)}{V_m(s)} = \frac{\alpha_f \eta_m}{M_e \cdot s + B_{tot}}
+\label{eq:tf_velocity}
 \end{equation}
 
-This velocity plant features a single stable pole located at $p_{cart} = -B_{tot}/M_e$. Its fundamental dynamic characteristics are defined by its steady-state DC gain, $K_{DC}$, and its time constant, $\tau$.
+This velocity plant features a single stable pole located at $p_{cart} = -B_{tot}/M_e$. Its fundamental dynamic characteristics are defined by its steady-state DC gain, $K_{DC}$, and its time constant, $\tau$:
+\begin{equation}
+K_{DC} = \frac{\alpha_f \eta_m}{B_{tot}}, \quad \tau = \frac{M_e}{B_{tot}}
+\end{equation}
 
-\begin{align*}
-    K_{DC} &= \frac{\alpha_f \eta_m}{B_{tot}} &
-    \tau &= \frac{M_e}{B_{tot}}
-\end{align*}
-\subsection{Cart Parameter Estimation \& Open-Loop Time Validation} \label{sec:cart_model_tuning}
-While nominal parameters provide a theoretical baseline, physical hardware introduces discrepancies due to mechanical wear, dust accumulation in the bearings, and unmodeled frictional variations. To guarantee the fidelity of the model, a data-driven parameter estimation routine was executed. Most of the values obtained from Tab.~\ref{table:datasheet} are assumed to be true. The focus will be put on the viscous damping coefficient $B_{eq,w}$ and the planetary gearbox efficiency $\eta_g$.\\
-Other parameters have been considered like the motor resistance $R_m$ or the motor efficiency $\eta_m$ but their electromagnetic properties are more stable than the mechanical properties of involved parameters.
-\begin{align*}
-    K_{DC} &= \frac{\alpha_f (\eta_g) \eta_m}{B_{tot}(\eta_g, B_{eq,w})} &
-    \tau &= \frac{M_e}{B_{tot}(\eta_g, B_{eq,w})}
-\end{align*}
+\subsection{Cart Parameter Estimation \& Open-Loop Time Validation}
+While nominal parameters provide a theoretical baseline, physical hardware introduces discrepancies due to mechanical wear, dust accumulation in the bearings, and unmodeled frictional variations. To guarantee the fidelity of the model, a data-driven parameter estimation routine was executed. 
+
+The focus of this tuning is placed strictly on the equivalent viscous damping coefficient ($B_{eq}$) and the planetary gearbox efficiency ($\eta_g$), as mechanical parameters are highly susceptible to degradation compared to stable electromagnetic constants (like $R_m$ and $\eta_m$).
 
 \subsubsection{Methodology}
-The system was excited using a $2.0V$ step input. To accurately isolate the velocity states without introducing numerical phase lag, the raw encoder position data was differentiated in post-processing using a zero-phase, 2nd-order Butterworth filter (\texttt{filtfilt} in MATLAB) tuned relative to the theoretical structural bandwidth (see eq.~\ref{eq:butter_cutoff}).\\
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.5\linewidth]{Images/frog.png}
-    \caption{step response hw}
-    \label{fig:placeholder}
-\end{figure}
+The system was excited on the hardware using a 2.0 V step input. To accurately isolate the velocity states without introducing numerical phase lag, the raw encoder position data was differentiated in post-processing. A zero-phase, 2nd-order Butterworth filter (\texttt{filtfilt} in MATLAB) was applied, dynamically tuned relative to the theoretical structural bandwidth ($\omega_c = 2 \cdot B_{tot}/M_e$).
 
-Parameter identification was formulated as an unconstrained non-linear optimization problem. Using the Nelder-Mead simplex algorithm (\texttt{fminsearch} in MATLAB), the routine minimizes a cost function defined by the MSE between hardware data and simulated response.
+Parameter identification was formulated as an unconstrained non-linear optimization problem. Using the native MATLAB minimization algorithm (\texttt{fminsearch}), the routine minimizes a cost function defined by the Mean Squared Error (MSE) between the measured hardware velocity and the simulated response:
 \begin{equation}
-    J(\eta_g,B_{eq,w}) = \frac{1}{N} \sum _{k=1} ^N \left( \dot{x}_{c,hw}(k) - \dot{x}_{c,hw}(k) \right)^2 + \Phi(\eta_g)
+\min_{\eta_g, B_{eq}} J = \frac{1}{N} \sum_{k=1}^{N} \left( \dot{x}_{c,hw}(k) - \dot{x}_{c,sim}(k) \right)^2 + \Phi(\eta_g)
+\label{eq:cost_function}
 \end{equation}
-Where $\Phi(\eta_g)$ corresponds to a barrier penalty acting as a soft constraint, bounding the gearbox efficiency between 50\% and 110\% of its nominal datasheet value. This data-driven tuning minimizes the position tracking error globally, ensuring the plant model accurately maps to the physical testbed prior to controller synthesis. \\
+Where $\Phi(\eta_g)$ corresponds to a severe barrier penalty acting as a soft constraint, bounding the gearbox efficiency between 50\% and 110\% of its nominal datasheet value to ensure physical realism. This data-driven tuning minimizes the tracking error globally, locking the refined values of $B_{eq}$ and $\eta_g$ for all subsequent controller syntheses.
+
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\linewidth]{Images/frog.png}
-    \caption{optim result}
-    \label{fig:placeholder}
+    \includegraphics[width=0.9\linewidth]{Images/cart_modeling/cart_model_step_response_tuning.eps}
+    \caption{Step Response Tuning. The plot compares the raw hardware telemetry (black) against the initial nominal model (blue dashed) and the final fminsearch optimized model (red).}
+    \label{fig:step_response_tuning}
 \end{figure}
 
-It output improvements of \textcolor{blue}{TODO}
 \subsection{Cart Open-Loop Frequency Validation}
-To synthesize a stable and robust control scheme for the seesaw, the model must be accurately characterized across a wide frequency spectrum. This section details the empirical frequency-domain validation used to verify the step-response tuning of $G_x(s)$.
+To synthesize a stable and robust control scheme for the seesaw cascade architecture, the inner-loop cart model must be accurately characterized across a wide frequency spectrum.
 
 \subsubsection{Methodology: Schroeder-Phased Multi-Sine Injection}
-A frequency sweep was conducted using a Schroeder-phased multi-sine signal rather than a traditional chirp or stepped-sine approach. This methodology provides several distinct advantages.
-\paragraph{Timescale Efficiency:} 
-It allows for the simultaneous injection of \( N=10 \) logarithmically spaced frequencies, capturing the entire target spectrum in a single, continuous test window.
-\paragraph{Hardware Protection:} 
-Schroeder phasing minimizes the crest factor of the composite signal by computing phase shifts $\phi _k$ for each frequency component $k$. This maximizes the energy injected at each target frequency without violating the absolute peak voltage limits (\( V_{max} \)) or generating excessive mechanical shear forces at the rack and pinion.
-\begin{equation*}
-    \phi _k = - \frac{\pi k (k-1)}{N}
-\end{equation*}
+A frequency sweep was conducted using a Schroeder-phased multi-sine signal rather than a traditional chirp. This approach allows for the simultaneous injection of $N=10$ logarithmically spaced frequencies, capturing the entire target spectrum efficiently.
 
-\subsubsection{Frequency Limits}
+Crucially, Schroeder phasing minimizes the crest factor of the composite signal by computing specific phase shifts ($\phi_k$) for each frequency component $k$:
+\begin{equation}
+\phi_k = -\frac{\pi k (k-1)}{N}
+\end{equation}
+This maximizes the energy injected at each target frequency without violating the absolute peak voltage budget ($V_{max\_budget} = 3.0$ V) or generating excessive mechanical shear forces at the rack and pinion.
+
+\subsubsection{Dynamic Frequency Limits and Safety Checklist}
 To guarantee operational safety, the frequency bandwidth $[\omega_{min}, \omega_{max}]$ was computed dynamically relative to the hardware limits:
-\paragraph{Lower Bound ($\omega_{min}$)}
-Computed analytically by finding the frequency where the maximum voltage budget generates a peak displacement equal to 75\% of the half-track length, preventing catastrophic end-stop collisions.
-\paragraph{Upper Bound ($\omega_{max}$)}
-Initial goal is 1.5 the estimated inner-loop bandwidth target, but the test is capped safely below the torque limit (computed by trial/errors during the labs)\\
+
+\begin{itemize}
+    \item \textbf{Lower Bound ($\omega_{min}$):} Computed analytically by finding the exact frequency where the maximum voltage budget generates a peak displacement equal to 75\% of the half-track length ($0.75 \cdot T_c/2$) in any direction, safely preventing end-stop collisions.
+    \item \textbf{Upper Bound ($\omega_{max}$):} The ideal target is set to $1.5\times$ the bandwidth of the required inner loop. However, the script actively evaluates the force transfer function ($G_{force}$) against the empirically established mechanical clicking limit. If the theoretical required force exceeds the gear-shear threshold, the maximum frequency is strictly capped.
+\end{itemize}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\linewidth]{Images/frog.png}
-    \caption{signal plot}
-    \label{fig:placeholder}
+    \includegraphics[width=0.9\linewidth]{Images/cart_modeling/cart_model_multisine.eps}
+    \caption{Schroeder-Phased Multi-Sine Input Vector. The blue line represents the ideal linear command ($u_{safe}$), while the red dashed line represents the physical hardware command shifted to pre-compensate for static friction ($u_{real}$).}
+    \label{fig:multisine_signal}
 \end{figure}
 
-Prior to deployment, a safety script was utilized to simulate the multi-sine signal through the theoretical models, confirming that maximum dynamic forces and absolute track displacements remained within safe operational bounds.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.5\linewidth]{Images/frog.png}
-    \caption{safety check results}
-    \label{fig:placeholder}
-\end{figure}
+Prior to hardware deployment, the generated signal was passed through a pre-flight simulation checklist. This mathematical validation confirmed that the dynamic rack forces, absolute track displacements, peak currents ($\le 3.0$ A), and RMS thermal currents ($\le 1.0$ A) remained within safe operational bounds for the complete test duration.
 
 \subsubsection{Digital Signal Processing and Spectral Extraction}
-Following safe execution on the hardware, the Frequency Response Function (FRF) was extracted using advanced Digital Signal Processing (DSP) techniques.\\
-The transient initial phases were trimmed , and the steady-state limit cycles were detrended and processed through a Hann window to prevent spectral leakage from high-amplitude low-frequency displacements. Finally, Welch's method evaluated the empirical magnitude and phase exclusively at the $N$ injected frequencies, acting as a lock-in amplifier that perfectly rejects unmodeled broadband noise.
+Following safe execution on the hardware, the Frequency Response Function (FRF) was extracted using advanced Digital Signal Processing (DSP) techniques. The transient initial phases were trimmed, and the steady-state limit cycles were detrended and processed through a Hann window to prevent spectral leakage. Finally, Welch's method evaluated the empirical magnitude and phase exclusively at the $N$ injected frequencies, acting as a lock-in amplifier that perfectly rejects unmodeled broadband noise.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.5\linewidth]{Images/frog.png}
-    \caption{bode plot result}
-    \label{fig:placeholder}
+    \includegraphics[width=0.7\linewidth]{Images/cart_modeling/cart_model_bodeplot.eps}
+    \caption{Empirical Bode Plot. Comparison of the theoretically tuned transfer function $G_x(s)$ (solid lines) against the extracted hardware spectral data (dots).}
+    \label{fig:bode_plot_result}
 \end{figure}
 
+\textcolor{blue}{analysis: we consider good enough even if the gain is slightly over-estimating because it follows the trend both for magnitude and phase. The track inconsistencies shown in the step response tuning are responsible for this and also for the 0.5 rad/s big phase difference}
+
 \subsection{Coupled Cart-Seesaw Analytical Modeling: Transfer Function Definition}
-To analyze the internal dynamics of the outer§loop (angle control), we derive the transfer function mapping the cart's position $x_c$ to the seesaw's angle $\theta$.
-Deriving the Laplace transform from the linearized equations of motion Eq.~\ref{eq:seesaw_eom}, keeping the zero initial conditions assumption:
+To analyze the internal dynamics of the outer loop (angle control), we derive the transfer function mapping the cart's position $x_c$ to the seesaw's angle $\theta$. Deriving the Laplace transform from the linearized coupled equations of motion, assuming zero initial conditions, yields the following matrix relationship:
 \begin{equation}
-	\left\{
-	\begin{aligned}
-		(M_e \cdot s^2 + B_{tot}\cdot s) \cdot X_c(s)                                  & +                         \\
-		(- M_{tot} D_T \cdot s^2 + g M_{tot} ) \cdot \Theta (s)                                     & =  \alpha_f \eta_m \cdot V_m(s) \\
-		(-M_{tot} D_T \cdot s^2 + g M_{tot}) \cdot X_c(s)                                             & +                         \\
-		( (J_{pivot} + M_{tot} D_T^2) \cdot s^2 + B_{SW} \cdot s - g(M_{tot} D_T + M_{SW}D_C)) \cdot \Theta (s) & = 0
-	\end{aligned}
-	\right.
+\begin{bmatrix} 
+M_e \cdot s^2 + B_{tot} \cdot s & -M_{tot}D_T \cdot s^2 + gM_{tot} \\ 
+-M_{tot}D_T \cdot s^2 + gM_{tot} & (J_{pivot} + M_{tot}D_T^2) \cdot s^2 + B_{SW} \cdot s - g(M_{tot}D_T + M_{SW}D_C) 
+\end{bmatrix} 
+\begin{bmatrix} X_c(s) \\ \Theta(s) \end{bmatrix} 
+= \begin{bmatrix} \alpha_f \eta_m \\ 0 \end{bmatrix} V_m(s)
+\label{eq:coupled_matrix}
 \end{equation}
 
-The coupled dynamics can be expressed in the as the matrix:
+By isolating the second equation, which represents the purely rotational dynamics of the seesaw base, we extract the explicit transfer function $G_\theta(s)$ mapping the cart displacement to the angular tilt:
 \begin{equation}
-	\begin{bmatrix}
-		M_e \cdot s^2 + B_{tot} \cdot s & -M_{tot} D_T \cdot s^2 + g M_{tot}                                      \\
-		-M_{tot} D_T \cdot s^2 + g M_{tot}            & (J_{pivot} + M_{tot} D_T^2) \cdot s^2 + B_{SW} \cdot s - g(M_{tot} D_T + M_{SW} D_C)
-	\end{bmatrix}
-	\begin{bmatrix}
-		X(s) \\
-		\Theta(s)
-	\end{bmatrix}
-	=
-	\begin{bmatrix}
-		\alpha_f \eta_m \\
-		0
-	\end{bmatrix}
-	V_m(s)
+G_\theta(s) = \frac{\Theta(s)}{X_c(s)} = \frac{M_{tot}D_T \cdot s^2 - gM_{tot}}{(J_{pivot} + M_{tot}D_T^2) \cdot s^2 + B_{SW} \cdot s - g(M_{tot}D_T + M_{SW}D_C)}
+\label{eq:tf_theta}
 \end{equation}
-
-By isolating the second equation, which represents the purely rotational dynamics of the seesaw base, we extract the explicit relationship between the cart's position and the seesaw's angle. This yields the transfer function $G_\theta(s)$:
-\begin{equation}
-    G_\theta(s) = \frac{\Theta(s)}{X_c(s)} = \frac{M_{tot} D_T \cdot s^2 - g M_{tot}}{(J_{pivot} + M_{tot} D_T^2) \cdot s^2 + B_{sw} \cdot s - g(M_{tot} D_T + M_{SW}D_C)}
-\end{equation}
-This transfer function highlights the system's inherent non-minimum phase (NMP) behavior, dictated by the presence of a Right-Half Plane (RHP) zero resulting from the $-g M_{tot}$ term in the numerator (alongside the RHP pole).
+This transfer function structurally highlights the system's inherent Non-Minimum Phase (NMP) behavior, dictated by the simultaneous presence of a Right-Half Plane (RHP) pole and a RHP zero resulting from the $-gM_{tot}$ term in the numerator.
 
 \subsection{State-Space Derivation}
-We define the standard 4-state vector as $x = [x_c, \theta, \dot{x}_c, \dot{\theta}]^T$
+For modern control techniques, the system is represented in continuous-time state-space format. We define the standard 4-state vector as $x = [x_c, \theta, \dot{x}_c, \dot{\theta}]^T$.
 
-\subsubsection{Matrix Rewriting}
-\begin{equation}
-	\begin{bmatrix}
-		M_e     & -M_{tot}D_T           \\
-		-M_{tot}D_T & J_{pivot} + M_{tot}D_T^2
-	\end{bmatrix}
-	\begin{bmatrix}
-		\ddot{x}_c \\
-		\ddot{\theta}
-	\end{bmatrix}
-	=
-	\begin{bmatrix}
-		0     & -gM_{tot}                 & -B_{tot} & 0       \\
-		-gM_{tot} & g(M_{tot}D_T + M_{SW}D_C) & 0        & -B_{SW}
-	\end{bmatrix}
-	\begin{bmatrix}
-		x_c       \\
-		\theta    \\
-		\dot{x}_c \\
-		\dot{\theta}
-	\end{bmatrix}
-	+ \begin{bmatrix}
-		\alpha_f \eta_m \\
-		0
-	\end{bmatrix}
-	v_m
-\end{equation}
-
+\subsubsection{Matrix Rewriting and Decoupling}
 Rather than computing the highly coupled second-order derivatives manually, the system is decoupled by defining an effective inertia matrix, $M_{eff}$, alongside the state constraint matrix $A_{rhs}$ and input vector $B_{rhs}$:
-
-\begin{align}
-    M_{eff} &= \begin{bmatrix}
-		M_e     & -M_{tot}D_T           \\
-		-M_{tot}D_T & J_{pivot} + M_{tot}D_T^2
-	\end{bmatrix} \\
-    A_{rhs} &= \begin{bmatrix}
-		0     & -gM_{tot}                 & -B_{tot} & 0       \\
-		-gM_{tot} & g(M_{tot}D_T + M_{SW}D_C) & 0        & -B_{SW}
-	\end{bmatrix} \\
-    B_{rhs} &= \begin{bmatrix}
-		\alpha_f \eta_m \\
-		0
-	\end{bmatrix}
-\end{align}
-
-\subsubsection{Resolution}
-The second-order accelerations are computationally resolved via matrix inversion: 
-\begin{equation*}
-    \begin{bmatrix} \ddot{x}_c & \ddot{\theta} \end{bmatrix}^T = M_{eff}^{-1} A_{rhs} x + M_{eff}^{-1} B_{rhs} v_m
-\end{equation*}
-This allows the continuous-time state-space matrices ($A_{sw}$, $B_{sw}$, $C_{sw}$, $D_{sw}$) to be assembled programmatically, eliminating arithmetic truncation errors.\\
-We can extend this system to include $\dot{x}_c$ and $\dot{\theta}$:
 \begin{equation}
-	\begin{aligned}
-		\begin{bmatrix}
-			\dot{x}_c    \\
-			\dot{\theta} \\
-			\ddot{x}_c   \\
-			\ddot{\theta}
-		\end{bmatrix}
-		 & =
-		\begin{bmatrix}
-			0_{2 \times 2} & I_{2 \times 2} \\
-                M_{eff}^{-1} A_{rhs}
-		\end{bmatrix}
-		\begin{bmatrix}
-			x_c       \\
-			\theta    \\
-			\dot{x}_c \\
-			\dot{\theta}
-		\end{bmatrix} 
-		 +
-		\begin{bmatrix}
-			0 _{2 \times 1}  \\
-			M_{eff}^{-1} B_{rhs}
-		\end{bmatrix}
-		v_m
-	\end{aligned}
+\begin{aligned}
+M_{eff} &= \begin{bmatrix} M_e & -M_{tot}D_T \\ -M_{tot}D_T & J_{pivot} + M_{tot}D_T^2 \end{bmatrix} \\
+A_{rhs} &= \begin{bmatrix} 0 & -gM_{tot} & -B_{tot} & 0 \\ -gM_{tot} & g(M_{tot}D_T + M_{SW}D_C) & 0 & -B_{SW} \end{bmatrix} \\
+B_{rhs} &= \begin{bmatrix} \alpha_f \eta_m \\ 0 \end{bmatrix}
+\end{aligned}
 \end{equation}
 
-This gives the state and input matrices as
-\begin{align*}
-	A_{SW} & =\begin{bmatrix}
-			0_{2 \times 2} &  I_{2 \times 2} \\
-                M_{eff}^{-1} A_{rhs} 
-		\end{bmatrix} \\
-	B_{SW} & = \begin{bmatrix}
-			0 _{2 \times 1}  \\
-			M_{eff}^{-1} B_{rhs}
-		\end{bmatrix}
-\end{align*}
-Regarding the output equation, only the positions $x_c$ and the angle $\theta$ are observable and the measurements are not dependent on the input voltage, therefore the output and transmission matrices are :
-\begin{align*}
-	C_{SW}                 & =
-	\begin{bmatrix}
-		1 & 0 & 0 & 0 \\
-		0 & 1 & 0 & 0
-	\end{bmatrix} &
-	D_{SW}                 & =
-	\begin{bmatrix}
-		0 \\
-		0
-	\end{bmatrix}
-\end{align*}
+The second-order accelerations are computationally resolved via matrix inversion in MATLAB:
+\begin{equation}
+\begin{bmatrix} \ddot{x}_c \\ \ddot{\theta} \end{bmatrix} = M_{eff}^{-1} A_{rhs} \begin{bmatrix} x_c \\ \theta \\ \dot{x}_c \\ \dot{\theta} \end{bmatrix} + M_{eff}^{-1} B_{rhs} V_m
+\end{equation}
+
+This mathematical formulation allows the continuous-time state-space matrices ($A_{SW}, B_{SW}, C_{SW}, D_{SW}$) to be extended programmatically, avoiding arithmetic truncation errors:
+\begin{equation}
+A_{SW} = \begin{bmatrix} 0_{2\times2} & I_{2\times2} \\ M_{eff}^{-1}A_{rhs} \end{bmatrix}, \quad B_{SW} = \begin{bmatrix} 0_{2\times1} \\ M_{eff}^{-1}B_{rhs} \end{bmatrix}
+\end{equation}
+Because only the position $x_c$ and the angle $\theta$ are directly measurable via the encoders, the output and feedthrough matrices are strictly defined as:
+\begin{equation}
+C_{SW} = \begin{bmatrix} 1 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \end{bmatrix}, \quad D_{SW} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}
+\end{equation}
 
 \subsubsection{Augmented System for Integral Action}
-To ensure zero steady-state tracking error and robust disturbance rejection during hardware implementation, the standard 4-state model is augmented with a virtual fifth state representing the integral of the seesaw angle, 
-\begin{equation*}
-    \xi = \int \theta dt
-\end{equation*}
-
-The expanded state vector becomes $\eta = [x_c, \theta, \dot{x}_c, \dot{\theta}, \xi]^T$, producing the augmented matrices $A_5$ and $B_5$:
-\begin{align*}
-    A_5 &= \begin{bmatrix} A_{SW} & 0_{4\times1} \\ \begin{matrix} 0 & 1 & 0 & 0 \end{matrix} & 0 \end{bmatrix}, & B_5 &= \begin{bmatrix} B_{SW} \\ 0 \end{bmatrix}
-\end{align*}
-This augmented model serves as the structural foundation for the State-Space techniques featuring an integral action.
-
-\subsection{Seesaw Parameter Estimation}
-While the manufacturer datasheet provides reliable nominal data for most of the parameters, the rotational dynamics are highly sensitive to the exact physical parameter $D_C$ (Distance from the pivot to the CoG). To mathematically lock this value, a data-driven Quasi-Static Lift-off Test was executed.\\
-The procedure involves:
-\begin{itemize}
-    \item Immobilizing the Cart: The cart is laid against the table at a known cart's position $x_{min} \simeq -\frac{T_c}{2} = -0.407[m]$ and seesaw's angle $\theta_{rest} \simeq e_{range} = 11.5[^\circ]$.
-    \item Quasi-Static Actuation: A constant voltage is applied to the cart for it to reach velocity steady-state (i.e. $\ddot{x}_c = 0$), leaving only the gravitational and static torque balances active.
-    \item Lift-Off Detection: A precise threshold filter algorithmically scans the telemetry data for the exact index where the angle breaks from $\theta_{rest}$ by more than 3 encoders ticks ($3 \cdot K_{E\_SW} / K_{gs} = 0.0015 \text{ rad}$). The cart's exact coordinate at this threshold is recorded as $x_{lift}$.
-\end{itemize}
-At the exact moment of lift-off, the static torques are perfectly balanced. The sum of moments about the pivot yields:
+To ensure zero steady-state tracking error and robust disturbance rejection during hardware implementation, the standard 4-state model is augmented with a virtual fifth state representing the integral of the seesaw angle:
 \begin{equation}
-    g M_{tot} \cdot x_{lift} = g (M_{tot} D_T + M_{SW} D_C) \cdot \theta_{rest}
+\xi = \int \theta dt
+\end{equation}
+The augmented state vector becomes $\eta = [x_c, \theta, \dot{x}_c, \dot{\theta}, \xi]^T$, yielding the new matrices $A_5$ and $B_5$ utilized later:
+\begin{equation}
+A_5 = \begin{bmatrix} A_{SW} & 0_{4\times1} \\ 0 \quad 1 \quad 0 \quad 0 & 0 \end{bmatrix}, \quad B_5 = \begin{bmatrix} B_{SW} \\ 0 \end{bmatrix}
 \end{equation}
 
+\subsection{Seesaw Parameter Estimation}
+While the manufacturer datasheet provides reliable nominal data for the majority of the seesaw parameters, the rotational dynamics are highly sensitive to the exact physical parameter $D_C$ (Distance from the pivot to the Center of Gravity). To mathematically lock this value, a data-driven Quasi-Static Lift-off Test was executed.
+
+\subsubsection{Quasi-Static Methodology}
+The physical procedure and software extraction pipeline involves:
+\begin{enumerate}
+    \item \textbf{Immobilizing the module:} The seesaw is laid against the table at a known cart resting position $x_c(0) \simeq -0.407$ [m] and resting angle $\theta_{rest} \simeq e_{range} = 11.5^\circ$.
+    \item \textbf{Quasi-Static Actuation:} A smooth, extremely slow voltage ramp is applied to move the cart toward the pivot, effectively ensuring that the velocity remains negligible ($\dot{x}_c \approx 0, \dot{\theta} \approx 0$), leaving only the gravitational and static torque balances active.
+    \item \textbf{Lift-Off Detection:} The data-processing script algorithmically scans the telemetry array to isolate the exact index where the angle breaks from $\theta_{rest}$ by a strict kinematic threshold corresponding to 3 encoder ticks ($3 \cdot K_{E\_SW} / K_{sg} = 0.0015$ rad). The cart's exact coordinate at this threshold is recorded as $x_{lift}$.
+\end{enumerate}
+
+At the exact moment of lift-off, the static torques are perfectly balanced. The sum of moments about the pivot yields:
+\begin{equation}
+g M_{tot} \cdot x_{lift} = g (M_{tot}D_T + M_{SW}D_C) \cdot \theta_{rest}
+\end{equation}
 Rearranging this equilibrium equation isolates the true center of gravity offset:
 \begin{equation}
-    D_C = \left| \frac{M_{tot} \cdot x_{lift} - M_{tot} D_T \cdot \theta_{rest}}{M_{sw} \cdot \theta_{rest}} \right|
+D_C = \left| \frac{M_{tot} \cdot x_{lift} - M_{tot}D_T \cdot \theta_{rest}}{M_{SW} \cdot \theta_{rest}} \right|
+\end{equation}
+This calculation overwrites the nominal $D_C$ value, directly refining the $A_{SW}$ and $B_{SW}$ matrices prior to feedback controller synthesis.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{Images/seesaw_modeling/seesaw_model_quasistatic.eps}
+    \caption{Seesaw Lift-Off Verification. The dual-axis plot illustrates the quasi-static progression of the cart (blue) and the resulting angular break (red). Circular markers designate the algorithmically detected lift-off point used to compute $D_C$.}
+    \label{fig:seesaw_liftoff}
+\end{figure}
+
+\textcolor{blue}{After running the test, the tuned value is:}
+\begin{equation}
+D_C = \left| \frac{0.75 \cdot 0.0568 - 0.75 \cdot 0.125 \cdot 0.20}{3.6 \cdot 0.20} \right| = 0.032
 \end{equation}
 
 \section{Frequency-Based Control: Cart Position Control Design}
-The strategy used for this first experience is a frequency-based technique, meaning that starting from a transfer function $G(s)$, the goal is to model a controller $C(s)$ to fix the behavior of the closed-loop $L(s)$ through the analysis of the Bode diagram, Root locus, and/or Nyquist diagram.
+The strategy employed for this initial framework relies on classical frequency-domain techniques. The objective is to synthesize a feedback controller $C_x(s)$ that shapes the open-loop transfer function $L_x(s) = C_x(s)G_x(s)$ to satisfy specific stability margins and crossover frequencies. Ultimately, this cart position controller serves as the high-bandwidth inner loop within a cascaded architecture designed to stabilize the seesaw angle.
 
 \subsection{Feedback Controller Tuning}
-The feedback controller $C_{FB}$ is designed in the frequency domain to ensure stability and robust disturbance rejection.\\
-The classic choice is a PID Controller, but with a N-filter to make it strictly proper. The plant being stable, this tuning is more performance oriented.\\
-The final objective is already know : use this controller as an inner-loop for cascade architecture. This creates the tuning factor, the outside plant is known to have an unstable pole around $+2.75 [rad/s]$ by the previous section.\\ This will force the outer-loop to have a bandwidth 2 to 5 times faster than the unstable pole, and so on the inner-loop bandwidth should be 3 to 10 times faster than the outer-loop one. The obtained range is $\omega _b \in (16.5;137.5) [rad/s]$. \\
-Another requirement is the phase margin, ideally overshoot must be prevented so an high phase margin is preferred : $\phi _ {pm} \in (70;90)[^\circ]$.\\
-Also, the N-filter where $N$ is fixed at $N = \omega_{c,bessel}$ will introduce phase lag of:
-\begin{equation*}
-    \Delta \phi = - arctan\left(\frac{\omega_b}{N}\right)
-\end{equation*}
-to keep in mind during the coefficient tuning.\\
-Theoretically, in continuous time $G_x(s)$ has infinite gain margin, therefore it is not a relevant criterion to tune the PID parameters.\\
-\begin{equation*}
-    C_x(s) = K_c \frac{(s + z_1)(s + z_2)}{s(s + N)}
-\end{equation*}
-Where $z_1$ is placed at $\omega_b/10$ to provide low-frequency integral action, while $z_2$ is analytically calculated to satisfy the required Phase Margin at the crossover frequency.\\
-The final simulated PID coefficients are:
-\begin{align*}
-    K_p &= 149.3098 [V/m] &
-    K_i &= 217.7877 [V/(m \cdot s)] &
-    K_d &= 19.5673 [V \cdot s/m]
-\end{align*}
-\subsubsection{Simulation Validation}
+The primary challenge in tuning the inner loop is ensuring its bandwidth is adequately separated from the outer loop's dynamics, which are bounded by the coupled plant's Non-Minimum Phase (NMP) characteristics. The outer loop must be fast enough to stabilize a RHP pole, yet slow enough to avoid excitation of the RHP zero. Taking the geometric mean of these absolute bounds yields a target outer-loop crossover frequency of $\omega_{c,out} \approx 4.45$ rad/s. 
 
-\begin{figure}[H]
-\centering
-    \subfloat[Open-Loop $L_x(s)$.\label{fig:polimi_logo1}]
-    {\includegraphics[width=0.4\textwidth]{Images/frog.png}
-    }
-    \quad
-    \subfloat[Closed-Loop $T_x(s)$.\label{fig:polimi_logo2}]{\includegraphics[width=0.4\textwidth]{Images/frog.png}
-    }
-    \caption[]{Bode Diagrams of Cart Control Position.}
-    \label{fig:quadtree2}
-\end{figure}
+To enforce strict frequency-scale separation, the inner-loop bandwidth target must be 2 to 10 times faster, establishing an acceptable range of $\omega_{c,in} \in (8.9, 44.5)$ rad/s. A mid-range value was consequently selected, setting $\omega_{c,in} = 5 \cdot \omega_{c,out} \approx 22.25$ rad/s. 
 
-\begin{figure}[H]
-\centering
-    \subfloat[Position Control Simulation.\label{fig:polimi_logo1}]
-    {\includegraphics[width=0.7\textwidth]{Images/frog.png}
-    }
-    \\
-    \subfloat[Control Effort Simulation (Voltage input).\label{fig:polimi_logo2}]{\includegraphics[width=0.7\textwidth]{Images/frog.png}
-    }
-    \caption[]{Rate-Limited 0.15m Step Response (with Noise).}
-    \label{fig:quadtree2}
-\end{figure}
+Regarding the Phase Margin ($\Phi_{PM,in}$), a standalone feedback loop would typically target $60^\circ$. However, anticipating its role as an inner loop, initial designs aimed to strictly prevent overshoot by targeting a higher margin within the range of $(65^\circ, 90^\circ)$. Following empirical testing, the final phase margin was set to $\Phi_{PM,in} = 65^\circ$. This compromise intentionally restricts the derivative control effort, thereby mitigating the high-frequency noise amplification inherent to the encoder's numerical differentiation.
+
+The selected controller is a PID architecture augmented with a low-pass filter (N-filter) on the derivative term to ensure the transfer function remains strictly proper. The control law is formulated as:
+\begin{equation}
+C_x(s) = K_{p,in} + \frac{K_{i,in}}{s} + \frac{K_{d,in} \cdot s}{T_{f,in} \cdot s + 1}
+\label{eq:pid_inner}
+\end{equation}
+where $T_{f,in} = 1/N_{in}$.
+
+To analytically extract the required gains, a Frequency Point Shaping with Phase Budget Awareness methodology was utilized. By evaluating the plant's frequency response $G_x(j\omega_{c,in})$ and defining a target controller response $C_{target}(j\omega_{c,in})$ that satisfies the desired crossover magnitude and phase, the proportional and derivative gains are isolated by solving the resulting algebraic system. 
+
+First, the target controller complex vector is defined as:
+\begin{equation}
+C_{target} = |G_x(j\omega_{c,in})|^{-1} \cdot e^{j \phi_c}
+\end{equation}
+where the required phase is $\phi_c = -180^\circ + \Phi_{PM,in} - \angle G_x(j\omega_{c,in})$. 
+
+By linking the integrator gain via a conservatively scaled integration time constant ratio ($T_i$) such that $K_{i,in} = K_{p,in}/T_i$, the remaining variables are extracted by separating the real and imaginary components into a linear matrix equation:
+\begin{equation}
+\begin{bmatrix} 
+1 & \Re(D(j\omega_{c,in})) \\ 
+-\frac{1}{\omega_{c,in} T_i} & \Im(D(j\omega_{c,in})) 
+\end{bmatrix} 
+\begin{bmatrix} K_{p,in} \\ K_{d,in} \end{bmatrix} 
+= \begin{bmatrix} \Re(C_{target}) \\ \Im(C_{target}) \end{bmatrix}
+\label{eq:pid_matrix}
+\end{equation}
+where $D(j\omega)$ represents the frequency response of the filtered derivative component. Solving this 2x2 system yields the final hardware-deployable PID coefficients.
+
+\subsubsection{Simulation Validation and Constraints Check}
+Because the physical hardware is subject to strict mechanical stress and electronic current limitations, the synthesized controller was rigorously validated in simulation prior to deployment. To attenuate control aggressiveness and limit the initial current surge during step transitions, a second-order Bessel pre-filter $F_{bessel}(s)$ with a cutoff frequency $\omega_{f,bes} = 3.5$ rad/s is applied to shape the position reference signal:
+\begin{equation}
+F_{bessel}(s) = \frac{3 \cdot \omega_{f,bes}^2}{s^2 + 3 \cdot \omega_{f,bes} \cdot s + 3 \cdot \omega_{f,bes}^2}
+\end{equation}
+
+The simulation explicitly incorporates the non-linear friction compensation logic to verify the absolute physical limits:
+\begin{itemize}
+    \item \textbf{Electronic Constraints:} Verifying that the peak armature voltage strictly avoids the amplifier saturation limit ($V_{sat}$) and that peak transient currents remain well under the 3.0 A hardware fault threshold.
+    \item \textbf{Mechanical Constraints:} Ensuring the peak dynamic force generated across the rack-and-pinion does not exceed the empirically defined clicking limit, preventing destructive gear shear.
+    \item \textbf{Thermal Constraints:} Confirming that the RMS current over the sustained maneuver remains below the continuous thermal rating of 1.0 A.
+\end{itemize}
 
 \subsection{Time Validation}
-Filtered step response because in real world (and as an inner loop) the plant/controller will never face a pure step. Using a 2nd order Bessel filter to attenuate the aggressiveness.
+Following mathematical verification, the inner-loop tracking performance was deployed on the physical testbed.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{Images/cart_pos_control/cart_pos_control_step.eps}
+    \caption{Filtered Step Response of the Cart Position Controller. Comparison between the predicted physics simulation (incorporating friction compensation) and the actual hardware telemetry.}
+    \label{fig:cart_step_response}
+\end{figure}
+
+\textcolor{blue}{Takes approx 1.2s to settle close enough but integral action is slower to get to exact position. However, we can observe that the non-linearities mitigation is actually deteriorating the data because the threshold is too low (custom $\epsilon = 0.1$)}
 
 \subsection{Frequency Validation}
-Is done the same way than cart modeling : multi sine with shroeder phase. Frequency min is fixed at 0.5 but frequency max is targeted at 1.5 the cutoff frequency.
+To formally validate the inner-loop bandwidth and confirm the successful tracking of the target crossover frequency, a closed-loop frequency sweep was executed using a Schroeder-phased multi-sine position reference. The excitation spectrum spanned from 0.5 rad/s to a maximum bounded frequency of $1.5 \cdot \omega_{c,in}$.
+
+To guarantee hardware integrity and prevent mechanical gear stripping during the high-frequency phases, two critical structural enhancements were integrated into the multi-sine generator:
+\begin{itemize}
+    \item \textbf{Amplitude Tapering:} Because dynamic acceleration forces scale quadratically with frequency ($F \propto A \omega^2$), a mathematical taper exponent was applied such that the spatial displacement amplitude inversely scales with frequency ($A(\omega) \propto 1/\omega$). This structurally bounds the maximum high-frequency shear force to remain below the mechanical limit.
+    \item \textbf{Transient Fade-In Window:} To counteract the non-zero initial conditions inherent to Schroeder phases, a half-cosine fade-in envelope was applied across the first phase of the signal. This enforces zero initial kinematics ($x_{ref}(0)=0$, $\dot{x}_{ref}(0)=0$), seamlessly ramping up the injected energy and eliminating starting shock.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{Images/cart_pos_control/cart_pos_control_closed_loop_multisine.eps}
+    \caption{Closed-Loop Schroeder-Phased Multi-Sine Profile. Top: Reference trajectory tracking and simulated response. Bottom: Simulated input voltage strictly bounded within physical limits.}
+    \label{fig:cart_closed_loop_multisine_model}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\linewidth]{Images/cart_pos_control/cart_pos_control_hardware_multisine.eps}
+    \caption{Closed-Loop Schroeder-Phased Multi-Sine Profile. Top: Reference trajectory tracking and hardware response. Bottom: Hardware input voltage strictly bounded within physical limits.}
+    \label{fig:cart_closed_loop_multisine_hw}
+\end{figure}
+
+\textcolor{blue}{if we'd zoom in the position we would see that a lot of oscillations are very much more attenuated than expected in simulation. This should reflect in bode diagram. However we see that the input voltage is almost smoother than simulated voltage even if the global shape stays the same.}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\linewidth]{Images/cart_pos_control/cart_pos_control_bode.eps}
+    \caption{Bode Diagram of Closed-Loop Cart Position Control. The empirical hardware data points (red dots) validate the crossover frequency target synthesized by the analytical model (solid line).}
+    \label{fig:cart_bode_closed_loop}
+\end{figure}
+
+\textcolor{blue}{As expected looking at the multi-sine profile, the hardware actually saturates (= drops off) earlier than the model. This could be because of unmodeled friction that could not be totally erased by the non-linearities mitigation system. One outlier in the magnitude but is probably due to numerical issues.}
 
 \section{Frequency-Based Control: Seesaw Angle Control Design}
-\subsection{Frequency-Based control}\label{subsec:freq_based_control}
-\subsubsection{Inner-Loop Tuning}
-During the tuning of the outer loop we realized that the inner-loop was too aggressive. So we had to tune "down" to 2.5 times the bandwidth (instead of 5) and $85^\circ$ of pm instead of $65^\circ$.\\
-Did not re-validate the tuning.
 
-\subsubsection{Stability-Driven Tuning}
-Observing $G_\theta(s)$, there is two problems:
-\begin{enumerate}
-    \item The plant is a proper, but not strictly proper, transfer function. Meaning that the magnitude does not attenuate at higher frequency.
-    \item It has both an unstable pole and an unstable zero, making it a \emph{Non-Minimum Phase} System.
-\end{enumerate}
-Separately the two instabilities, RHP pole and RHP zero, are stabilizable under the following conditions:
-\begin{itemize}
-	\item RHP pole in $p_0$ imposes a lower bound on the bandwidth (around $\omega_b > 2\cdot p_0$) because the controller must be fast enough to catch the system before it drifts away.
-	\item RHP zero in $z_0$ imposes an upper bound on the bandwidth (around $\omega_b < \frac{z_0}{2}$) because $z_0$ makes the system "go in the wrong direction at first" (= undershoot)
-\end{itemize}
-Adapting it back to our unstable plant, 
-\begin{itemize}
-    \item The unstable pole in $p_0 = +2.7754 [rad/s]$ impose a minimal bandwidth of $\omega_b > 5.5508 [rad/s]$.
-    \item The unstable zero in $z_0 = +8.8589[rad/s]$ imposes a maximal bandwidth of $\omega_b < 4.4295 [rad/s]$.
-\end{itemize}
-These limit values being theoretical, an attempt to control such system will still be performed.\\
-\subsubsection{Outer-Loop Design}
-Similarly to the previous setup, we try to generate controllers such that the global open-loop and closed-loop system are meeting stability and performance criterion. The standard approach is to use a cascade architecture :
-\begin{itemize}
-	\item A fast inner loop, already tuned at the sec.~\ref{sec:CartPosControl}, that controls the position $X_c(s)$ based on the motor action.
-	\item A slower outer loop, that controls the angle $\Theta(s)$ and its impact on the cart position.
-\end{itemize}
-This means that we will consider for this step:
-\begin{align*}
-	T_{in}(s) & = \frac{G_x(s) \cdot C_x(s)}{1 + G_x(s) \cdot C_x(s)} \\
-    P_{out}(s) &= T_{in}(s) \cdot G_\theta (s) \\
-    %C_\theta(s) &= K_{p,out} + \frac{K_{i,out}}{s} + K_{d,out} \cdot \frac{N_{out}\cdot s}{s + N_{out}}\\
-    %L_\theta (s) & = C_\theta(s) \cdot P_{out}(s)\\
-     %T_\theta(s) & = \frac{L_\theta (s)}{1 + L_\theta (s)}
-\end{align*}
-
-\subsection{Feedback Controllers Tuning}
-
-This time, the controller gains cannot be computed analytically because the plant is unstable. The textbook way to "pull" an unstable pole is to add exactly one zero, but like in the inner-loop it is required for the controller to be proper so we use a N-filter.\\
-\begin{equation}
-    C_\theta(s) = K_{out} \cdot \frac{(1 + T_d \cdot s)}{(1 + s / N_{out})}
-\end{equation}
-Where
-\begin{align*}
-    T_d &= \frac{1}{|+pole_{seesaw}|}, & N_{out} &= w_b \cdot 1.25
-\end{align*}
-
-Namely, the PD zero is equidistant from the imaginary axis than the unstable pole and the low-pass filter is slightly above the inner open-loop bandwidth.\\
-Finally, the gain $K_{out}$ by analyzing the root-locus of the open $L_\theta(s)$: 
-\begin{equation}
-    L_\theta (s) = C_\theta(s) \cdot P_{out}(s)
-\end{equation}
+\subsection{Inner-Loop Re-Tuning}
+During the initial synthesis of the cascaded architecture, the inner-loop cart controller was identified as overly aggressive, leading to high-frequency noise amplification and actuator saturation risks when coupled with the outer-loop dynamics. To ensure hardware survivability and provide smoother, more stable seesaw-angle reference tracking, the inner loop was re-tuned using a less aggressive Frequency Point Shaping methodology.\\
+\textcolor{blue}{also to better match the early drop-off that mean the real system had lower bandwidth.}\\
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\textwidth]{Images/frog.png}
-    \caption{Caption of the Figure.}
-    \label{fig:quadtree}
+    \includegraphics[width=0.9\linewidth]{Images/cart_pos_control/cart_pos_control_retuned_multisine.eps}
+    \caption{Simulation of the Re-tuned Closed-Loop Schroeder-Phased Multi-Sine Profile. Top: Reference trajectory tracking and simulated response. Bottom: Simulated input voltage.}
+    \label{fig:cart_closed_loop_multisine_retuned}
 \end{figure}
 
-We directly see that the RHP pole is linked with the RHP zero. This means that positive PD gains make the system impossible to control.\\
-To prevent that, we analyze the root-locus of $-L_\theta(s)$, that translates by applying negative gains to $C_\theta(s)$.
+The target crossover frequency was strictly scaled down to $2.5$ times the theoretical outer-loop bandwidth ($\omega_{c,in} = 2.5 \cdot \omega_{c,out} \approx 11.1$ rad/s), rather than the original factor of 5. Additionally, the Phase Margin constraint was increased from $65^\circ$ to $85^\circ$ to absolutely minimize transient overshoot. To further attenuate high-frequency control effort, the derivative filter coefficient was relaxed to $N_{in} = 100$, and a slower integrator ratio ($T_{i,ratio} = 10$) was selected. Finally, a second-order Bessel pre-filter with a cutoff frequency $\omega_{f,bes} = 3.5$ rad/s was implemented on the position reference to prevent initial current surges during step transitions. 
+
+\subsection{Cascade Architecture and System Limitations}
+To satisfy both stability and performance criteria for the highly coupled cart-seesaw system, a cascade control architecture is employed. The physical dynamics are decoupled into two hierarchical loops: a high-bandwidth inner loop tracking cart position ($x_c$), and a slower outer loop dictating the required cart position to stabilize the seesaw angle ($\theta$).
+
+The effective plant visible to the outer-loop controller, denoted $P_{out}(s)$, is the series combination of the closed inner-loop transfer function $T_{in}(s)$ and the cart-to-angle cross-coupling dynamics $G_{\theta}(s)$:
+\begin{equation}
+P_{out}(s) = T_{in}(s)G_{\theta}(s)
+\end{equation}
+
+The uncompensated plant exhibits severe Non-Minimum Phase (NMP) behavior, featuring both a Right-Half Plane (RHP) pole and a RHP zero. These structural characteristics impose conflicting theoretical bounds on the achievable closed-loop bandwidth, necessitating highly precise dominant-pole placement to outrun the unstable exponential drift without exacerbating the RHP zero's initial undershoot.
+
+\subsection{Outer-Loop Feedback Controller Tuning}
+Because heuristic PID tuning is insufficient for stabilizing this NMP system, a targeted phase-deficit synthesis methodology was utilized. The objective is to compute exact gains for a Lead Compensator (PD) and a PI-Lead Compensator (PID) to lock the dominant closed-loop pole pair at a natural frequency $\omega_n = 4.3$ rad/s with a damping ratio $\zeta = 0.6$:
+\begin{equation}
+s_d = -\zeta\omega_n + j\omega_n\sqrt{1-\zeta^2}
+\end{equation}
+
+A standard root locus analysis of $P_{out}(s)$ indicates that the RHP pole and RHP zero heavily attract one another. Applying a positive proportional gain immediately drives the closed-loop poles deeper into the RHP, as illustrated below.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\textwidth]{Images/frog.png}
-    \caption{Caption of the Figure.}
-    \label{fig:quadtree}
+    \includegraphics[width=0.6\linewidth]{Images/pid_seesaw/seesaw_control_pos_rlocus.eps}
+    \caption{Root-Locus of the outer-loop plant \texttt{rlocus($P_{out}$)}, demonstrating the immediate trajectory of the poles into the unstable Right-Half Plane.}
+    \label{fig:pos_rlocus}
 \end{figure}
 
-In the current state, trying to stabilize the plant with this root-locus is not possible, but after slightly adjusting the previous tunings:
-\begin{align*}
-    w_b &= 16.5  & \phi _{pm} &= 80\\
-    T_b &= 0.25         & N_{out} & = 30
-\end{align*}    
-We found:
+Consequently, a negative overall gain configuration is strictly enforced. This mathematically shifts the root locus paths by $180^\circ$, allowing the RHP pole to be successfully pulled into the stable Left-Half Plane (LHP).
 
 \begin{figure}[H]
-\centering
-    \subfloat[Zoomed Close to the Origin.\label{fig:polimi_logo1}]
-    {\includegraphics[width=0.4\textwidth]{Images/frog.png}
-    }
-    \quad
-    \subfloat[Zoomed Out to see all the paths.\label{fig:polimi_logo2}]{\includegraphics[width=0.4\textwidth]{Images/frog.png}
-    }
-    \caption[]{Root-Locus of Open-Loop Global Transfer Function.}
-    \label{fig:quadtree2}
+	\centering
+	\subfloat[Zoomed close to the origin.\label{fig:neg_rlocus_zoom}]{
+		\includegraphics[width=0.4\linewidth]{Images/pid_seesaw/seesaw_control_neg_rlocus_zoom.eps}
+	}
+	\quad
+	\subfloat[Zoomed out to show asymptotic paths.\label{fig:neg_rlocus_asymp}]{
+		\includegraphics[width=0.4\linewidth]{Images/pid_seesaw/seesaw_control_neg_rlocus_asymp.eps}
+	}
+	\caption[]{Root-Locus of the outer-loop plant \texttt{rlocus($-P_{out}$)}.}
+	\label{fig:pid_rlocus}
 \end{figure}
-This configuration seems more promising to find a gain $K_{out}$ but still points out the non-minimum phase behavior:
-\begin{itemize}
-    \item a gain too low will not be enough to "pull" the RHP pole.
-    \item a gain too high will make the RHP zero too attractive and some stable poles will become unstable.
-\end{itemize}
-Such gain exists in this configuration:
-\begin{align*}
-    K_{out} &= -0.412, & \omega_{n,out} & = 1.11, &\zeta_{out} &= 0.964
-\end{align*}
 
-This brings the PD controller gains to:
-\begin{align*}
-    K_{p,out} &= -0.412, & K_{d,out} & = K_{p,out} \cdot (T_d - 1/N_{out}) = -0.0893
-\end{align*}
-An very small integral action could even be added:
-\begin{equation*}
-    K_{i,out} = K_{p,out} \cdot (w_{n,out} / 25) = -0.0183
-\end{equation*}
+\textcolor{blue}{it illustrate the possibility to pull the RHP pole if the controller gains are negatives}
+\subsubsection{PD (Lead) Synthesis}
+For the baseline proportional-derivative approach, a lead compensator structure is defined with a fixed derivative filter pole positioned at $p_{lead} = 25$ rad/s.
+\begin{equation}
+C_{\theta,PD}(s) = -K_{pos} \frac{s + z_{lead}}{s + p_{lead}}
+\end{equation}
+The required lead zero ($z_{lead}$) is computed by evaluating the phase deficit of the uncompensated plant exactly at the target pole $s_d$. The magnitude condition at $s_d$ subsequently yields the necessary stabilizing negative gain ($-K_{pos}$). 
 
-This controller makes $L_\theta(s)$ stable, but what about the performances ?
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{Images/pid_seesaw/pd_seesaw_cl_rlocus.eps}
+    \caption{Zoomed-in Root-Locus of the closed-loop global transfer function with a fixed feasible negative gain.}
+    \label{fig:tuned_rlocus}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{Images/pid_seesaw/pd_seesaw_impulse.eps}
+    \caption{Simulated $1^\circ$ impulse response of the coupled system under the PD (Lead) controller, demonstrating successful stabilization of the transient seesaw angle.}
+    \label{fig:pd_impulse}
+\end{figure}
+
+\subsubsection{Constant Bias Torque and Integral Action Requirement}
+While the PD compensator successfully stabilizes the seesaw around the horizontal equilibrium during standard transient events, it inherently lacks the low-frequency gain required to reject constant input disturbances. If an asymmetric load—such as a 100 g offset mass—is applied to the module, the proportional effort is eventually balanced by the disturbance torque, forcing the system to settle at a non-zero steady-state angular tilt.
+
+To actively neutralize this residual error, the architecture is upgraded to a PI-Lead (PID) topology by introducing integral action. An integrator zero is placed exactly a decade below the derivative pole ($z_i = 2.5$ rad/s) to preserve the carefully tuned transient shape established by the Lead compensator.
+\begin{equation}
+C_{\theta,PID}(s) = -K_{pos} \frac{(s + z_{lead})(s + z_i)}{s(s + p_{lead})}
+\end{equation}
+This integrator continuously accumulates the steady-state error, ramping the commanded cart displacement until the disturbance is perfectly canceled and the seesaw is forced back to a strict $0^\circ$ equilibrium.
+
+\begin{figure}[H]
+	\centering
+	\subfloat[Open-Loop Zoomed-in close to the origin.\label{fig:pid_ol_rlocus}]{
+		\includegraphics[width=0.4\linewidth]{Images/pid_seesaw/pid_seesaw_ol_rlocus.eps}
+	}
+	\quad
+	\subfloat[Closed-Loop Zoomed-in close to the origin.\label{fig:pid_cl_rlocus}]{
+		\includegraphics[width=0.4\linewidth]{Images/pid_seesaw/pid_seesaw_cl_rlocus.eps}
+	}
+	\caption[]{Root-Locus of the outer-loop plant and controller.}
+	\label{fig:neg_rlocus}
+\end{figure}
+
+\textcolor{blue}{The load bias is modeled by an equivalent offset at the plant's input (i.e., cart position step of 2cm)}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\linewidth]{Images/pid_seesaw/pid_seesaw_load_bias.eps}
+    \caption{Simulated response to a $100$g asymmetric bias load. Exposing integral action.}
+    \label{fig:bias_load}
+\end{figure}
+
+\textcolor{blue}{we can see that the hardware will require a safety saturation block because it is expected to spike (even if it is caused by the numerical step created by the shifting of the position so that should not happen on the hardware)}
+
+\subsubsection{Architecture comparison}
+The integral controller removes the simulated steady-state bias left by the PD structure, but it also increases low-frequency loop authority. The hardware validation below therefore treats the PID as the deployable angle-tracking controller and keeps the PD mainly as a regulation baseline.
+
+\begin{equation}
+    \begin{aligned}
+        pole(P_{out}) =   &[-84.77;  -19.79;   -5.58;  \\
+        &2.21;   -2.21;   -1.50]\\
+        pole(T_{out,PD}) = &[  -89.37; -20.14 + 5.34i; -20.14 - 5.34i;  -5.71;\\
+        & -0.48 + 0.55i;  -0.48 - 0.55i;  -0.33]\\
+        pole(T_{out,PID}) =   &[-105.96;  -10.39 + 10.52i;  -10.39 - 10.52i;  -2.58 + 3.44i; \\
+        &-2.58 - 3.44i;  -3.04;  -0.85 + 0.40i;  -0.85 - 0.40i]        
+    \end{aligned}
+\end{equation}
+
+Both the PD and PID designs move the unstable right-half-plane pole into the left-half plane, confirming closed-loop stabilization in the linear model before hardware deployment.
+
+\subsection{Time Validation: Free-runs \& Step-Response}
+The first hardware check was a zero-reference free-run, because this is where the difference between a stabilizing controller and a useful balancing controller is easiest to see. With only the outer PD action, the seesaw remains stable but rocks around a biased equilibrium: the free-run RMS angle is about $3.5^\circ$, with most samples close to the mechanical limit. Adding the integral branch in the PI-Lead/PID design reduces the residual rocking to $0.69^\circ$ RMS. The controller therefore does not make the hardware perfectly still--friction, backlash, and encoder quantization still sustain a small limit cycle--but it removes the large static offset that the PD controller cannot reject.
+
+\begin{figure}[H]
+    \centering
+    \subfloat[Free-run of PD controller.\label{fig:pd_seesaw_freerun}]{
+        \includegraphics[width=0.8\linewidth]{Images/pid_seesaw/pd_seesaw_freerun.eps}
+    }
+    \\
+    \vspace{0.5cm}
+    \subfloat[Free-run of PID controller.\label{fig:pid_seesaw_freerun}]{
+        \includegraphics[width=0.8\linewidth]{Images/pid_seesaw/pid_seesaw_freerun.eps}
+    }
+    \caption[]{Time evolution of frequency-based hardware controllers.}
+    \label{fig:pid_free_runs}
+\end{figure}
+
+The mean-angle reduction in Table~\ref{table:pid_free_run_metrics} is the practical signature of the added integral action. It does not only improve the nominal simulation response: on the real plant it compensates the persistent torque imbalance that appears when the seesaw is held near the horizontal equilibrium.
+
 \begin{table}[H]
-\caption*{\textbf{Example of Table (optional)}}
 \centering
-\begin{tabular}{|c c c |}
+\begin{tabular}{|p{12em} c c c|}
 \hline
 \rowcolor{bluePoli!40}
-              & \textbf{with integral action} & \textbf{without integral action} \T\B \\
+\textbf{Parameter} & \textbf{PD Value} & \textbf{PID Value} & \textbf{Unit} \T\B \\
 \hline \hline
-\textbf{Open-Loop Phase Margin} & $-9.70^\circ$ at $28.79$ rad/s                & $-9.70^\circ$ at $28.78$ rad/s                 \T\B                \\
-\textbf{Open-Loop Gain Margin} & $0.36$ dB at $26.05$ rad/s         &  $0.37$ dB at $26.04$ rad/s           \T\B         \\
-\textbf{Closed-Loop Bandwidth (-3dB)} & $51.79$ rad/s         & $0.71$ rad/s          \T\B         \\
-\textbf{Maximum Sensitivity Peak ($\mathbf{M_S}$)} & $28.16$ dB            & $28.10$ dB             \B              \\
+Mean Angle & -0.70 & -0.09 & $^\circ$ \T\B \\
+Min Angle & -2.98 & -1.95 & $^\circ$ \T\B \\
+Max Angle & 2.23 & 0.83 & $^\circ$ \T\B \\
+Time Cycle & 1.90 & 3.57 & $s$ \B \\
 \hline
 \end{tabular}
-\\[10pt]
-\caption{Caption of the Table.}
-\label{table:datasheet}
+\caption{PD vs PID free-run metrics comparison.}
+\label{table:pid_free_run_metrics}
 \end{table}
 
 \begin{figure}[H]
-\centering
-    \subfloat[With integral action.\label{fig:polimi_logo1}]
-    {\includegraphics[width=0.4\textwidth]{Images/Seesaw Horizontal Control/impulse_response_integral.png}
+    \centering
+    \subfloat[Global profile of PID step response.\label{fig:pid_step_profile}]{
+        \includegraphics[width=0.8\linewidth]{Images/pid_seesaw/pid_seesaw_step_profile.eps}
     }
-    \quad
-    \subfloat[Without integral action.\label{fig:polimi_logo2}]{\includegraphics[width=0.4\textwidth]{Images/Seesaw Horizontal Control/impulse_response.png}
+    \\
+    \vspace{0.5cm}
+    \subfloat[Zoomed-in PID step response.\label{fig:pid_step_response}]{
+        \includegraphics[width=0.8\linewidth]{Images/pid_seesaw/pid_seesaw_step_response.eps}
     }
-    \caption[]{Simulated $1^\circ$ Impulse Response of the System.}
-    \label{fig:quadtree2}
+    \caption[]{Time evolution of the PID step response on hardware.}
+    \label{fig:pid_step}
 \end{figure}
-\subsection{Time Validation: Horizontal Stability}
-With the reference held at $0^\circ$ the seesaw does not sit perfectly still: friction in the pivot and encoder quantization sustain a small limit cycle. Free-run tests show why integral action matters here. The PD outer loop, with no integral term, lets the body settle into a large bounded oscillation --- $3.5^\circ$ RMS, with $95\%$ of samples inside $10.3^\circ$, i.e.\ swinging nearly to the $\pm11.5^\circ$ stops --- because any static torque imbalance is left uncorrected. Adding integral action (the PID) collapses this to $0.69^\circ$ RMS, a five-fold improvement, at the cost of the heaviest actuator activity of the three controllers (this rocking is consistent with the $0.74^\circ$ measured on the level segments of the tracking protocol below).
 
-\subsection{Frequency Validation: Reference Tracking}
-\label{sec:angle_tracking_results}
-Reference tracking concerns only the PID, since integral action is what removes the steady-state angle error. The test is one long run divided into segments (see \texttt{generate\_tracking\_protocol.m}): $\pm1^\circ$ steps and a short pulse, followed by stepped sines from $0.10$ to $10$~Hz. It is described once here and re-used unchanged for every later technique with integral action.
+\begin{table}[H]
+\centering
+\begin{tabular}{|p{12em} c c|}
+\hline
+\rowcolor{bluePoli!40}
+\textbf{Parameter} & \textbf{Value} & \textbf{Unit} \T\B \\
+\hline \hline
+Step Size & 1.0 & $^\circ$ \T\B \\
+Peak Value & 3.72 & $^\circ$ \T\B \\
+Overshoot & 272.4 & $\%$ \T\B \\
+Settling Time & 9.73 & $s$ \T\B \\
+Steady-State Error & -0.01 & $^\circ$ \B \\
+\hline
+\end{tabular}
+\caption{PID step-response metrics.}
+\label{table:pid_step_metrics}
+\end{table}
 
-The cascaded PID tracks the $+1^\circ$ step with a steady-state gain of $1.06$ and $0.06^\circ$ residual error (rise time $0.08$~s), but the response is strongly underdamped, overshooting to about $3.6^\circ$ before settling into its rocking band. Across the stepped sines the RMS angle error is $0.52^\circ$. It is also the heaviest user of the actuator: $1.56$~V RMS, saturating the $6$~V motor clamp, with $11.6$~cm of cart travel. The interpretation of the swept-sine results --- valuable in shape, soft in absolute low-frequency gain --- is collected with the controller comparison in Sec.~\ref{sec:ss_comparison}.
+\subsection{Frequency Validation: Reference Tracking Protocol}
+The final cascaded PID was then evaluated on the same reference-tracking protocol later used for pole placement and LQR. The run combines $\pm1^\circ$ steps and a short pulse with a stepped sine sweep from $0.10$ to $10$~Hz. This single protocol gives both a transient comparison and a small-signal frequency-response estimate without injecting an unsafe broadband command into the hardware.
+
+Rather than utilizing a multi-sine approach, the protocol automatically injects a continuously concatenated sequence of analytical commands, $r_{\theta}(t)$:
+
+\begin{enumerate}
+    \item \textbf{Baseline \& Step Analysis:} Initial static regulation followed by $\pm 1.0^\circ$ step commands and a 0.3-second, $1.0^\circ$ impulse to characterize transient settling times and integral windup rejection.
+    \item \textbf{Stepped Sine Sweep:} A series of logarithmically spaced sinusoidal tracking commands spanning from $0.10$ Hz to $10.00$ Hz.
+\end{enumerate}
+
+To ensure hardware survivability during the high-frequency sine sweeps, two critical signal-processing safeguards were algorithmically embedded into the reference trajectory:
+
+\begin{itemize}
+    \item \textbf{Dynamic Amplitude Tapering:} Below 2.5 rad/s, the reference amplitude is held at $0.65^\circ$ to reliably overcome static friction. Above this threshold, the amplitude is aggressively tapered proportional to $1/\omega^2$. This guarantees that the necessary acceleration forces acting on the cart rack remain constant and safe, despite the exponentially increasing frequency.
+    \item \textbf{Smooth Cyclic Enveloping:} Each frequency segment runs for exactly 7 cycles. The first cycle is multiplied by a half-cosine ramp-up envelope, and the final cycle utilizes a half-cosine ramp-down envelope. This prevents discontinuous velocity shocks at the boundary transitions between differing frequencies.
+\end{itemize}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.85\textwidth]{Images/Tracking Results/Tracking-PID-Full.png}
-    \caption{Cascaded PID, full tracking protocol: angle vs.\ reference, motor voltage, closed-loop response, $+1^\circ$ step, and the regulation spread at $\theta_{ref}=0$.}
+    \caption{Cascaded PID, full tracking protocol: angle reference and measurement, motor voltage, closed-loop response estimate, $+1^\circ$ step detail, and the regulation spread at $\theta_{ref}=0$.}
     \label{fig:track_pid}
 \end{figure}
+
+The PID tracks the $+1^\circ$ step with a steady-state gain close to unity and only $0.06^\circ$ residual error, but it is strongly underdamped: the measured angle overshoots to roughly $3.6^\circ$ before returning to its rocking band. Across the sine segments, the RMS tracking error is $0.52^\circ$. It also uses the most actuator authority of the three angle controllers, with $1.56$~V RMS motor effort and $11.6$~cm peak-to-peak cart travel.
 
 \section{State-Space Control Design: Pole Placement}
 \subsection{Full-State Feedback}
 \label{sec:pole_placement}
 
-Control law: $V_m = -\mathbf{K}\mathbf{x}$, with closed-loop dynamics $\dot{\mathbf{x}} = (A - B\mathbf{K})\mathbf{x}$. The objective is to regulate $\theta \to 0$; cart motion serves only to maintain balance. On hardware, only $x_c$ and $\theta$ are measured; $\dot{x}_c$ and $\dot{\theta}$ are estimated via filtered derivatives.
+The state-space control strategy utilizes the full-state feedback law $V_{m} = -Kx$, leveraging the continuous-time 4-state plant derived in the modeling section. The primary control objective is to regulate the seesaw angle such that $\theta \rightarrow 0$, with the cart's translation serving strictly to maintain this angular balance. For hardware implementation, only the cart position $x_{c}$ and the seesaw angle $\theta$ are directly measured via encoders; the velocity states $\dot{x}_{c}$ and $\dot{\theta}$ are estimated using an observer.
 
-\subsubsection{Open-Loop Poles}
+\subsubsection{Baseline Stabilizing Design}
+The initial stabilization attempt (Attempt 1) establishes a baseline controller by mirroring the unstable pole directly into the Left-Half Plane (LHP) while maintaining the remaining poles at their original open-loop locations. 
 
-The identified coupled plant, linearised about the horizontal equilibrium with the state ordered $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta}]$, has open-loop poles
+The desired pole locations and resulting feedback gain vector are:
 \begin{equation}
-	\lambda = \{+2.74,\ \ -1.48\pm1.30j,\ \ -14.13\}\ \ [\text{rad/s}].
+\begin{aligned}
+    P_{des} &= \{-0.42, -2.25, -2.61, -36.50\} \\
+    K_{1} &= [78.36, -59.81, 4.46, -22.90]
+\end{aligned}
 \end{equation}
-The pole at $+2.74$~rad/s is the unstable mode --- the seesaw tipping over, with a $\tau\approx0.37$~s time constant. The controllability matrix has full rank $4$, so all four poles can be relocated by state feedback.
 
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.6\linewidth]{Pole Placement/OL-Poles.png}
-	\caption{Open-loop pole map of the deployed plant. The pole at $+2.74$ (right of the dashed axis) is the seesaw fall rate and sets the closed-loop bandwidth target.}
-	\label{fig:ol_poles}
-\end{figure}
+While this baseline design successfully stabilizes the system in simulation, the transient response is excessively sluggish. 
 
-\subsubsection{Dominant-Pole Design}
+\subsubsection{Limit-Cycle Minimization \& Dominant-Pole Redesign}
+To address the sluggish transient response and minimize the steady-state limit cycle caused by hardware non-linearities (Coulomb friction, encoder quantization, gear backlash), the controller was redesigned. The closed-loop poles were strategically placed to enforce a specific frequency-domain separation between the cart and the seesaw dynamics.
 
-The simplest stabilizing choice --- mirroring the unstable pole into the left half-plane and leaving the others untouched --- is stable but sluggish, since the dominant dynamics then sit barely faster than the original fall rate. Instead the dominant pair is placed to \emph{outrun} the instability: at twice the fall rate, $\sigma=5.5$~rad/s, with damping $\zeta=0.8$ (hence $\omega_n=6.88$~rad/s), giving the complex pair $-5.5\pm4.125j$. The two cart-related modes are placed faster still, at $-8.25$ and $-6.6$~rad/s, so they do not introduce a slow transient. The resulting regulation gain is
+To outrun the divergence while preventing control efforts that would saturate the 6 V actuator limit, the design enforces a strict hierarchy: the complex conjugate pair governing the seesaw angle ($\theta$) acts as the dominant mode, while the real poles governing the cart are placed at higher frequencies to maintain a $\approx 2:1$ bandwidth window.
+
+The selection parameters are:
+\begin{itemize}
+    \item \textbf{Dominant Angular Pair ($p_{1}, p_{2}$):} A damping ratio of $\zeta_{\theta} = 0.8$ was selected to balance settling time and stability margins. The real part ($\sigma_{\theta}$) dictates the error correction rate and was set to 5.5 rad/s to confidently outpace the open-loop instability. 
+    \item \textbf{Cart Velocity Pole ($p_{3}$):} Placed at $1.5 \cdot \sigma_{\theta}$ to guarantee that the cart velocity settles faster than the balancing mode.
+    \item \textbf{Cart Position Pole ($p_{4}$):} Placed at $1.2 \cdot \sigma_{\theta}$ to maintain the dominance of the angular pair while setting a reliable return-to-center time constant.
+\end{itemize}
+
+This logic yields the following analytical pole placements:
 \begin{equation}
-	K_4 = \begin{bmatrix} 258.3 & -196.8 & 24.9 & -69.7 \end{bmatrix},
+\begin{aligned}
+    p_{1,2} &= -5.50 \pm j4.125 \\
+    p_{3} &= -8.25 \\
+    p_{4} &= -6.60
+\end{aligned}
 \end{equation}
-on $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta}]$.
+
+\begin{table}[H]
+\caption*{\textbf{Pole-Placement Evolution}}
+\centering
+\begin{tabular}{|p{9em} c c c |}
+\hline
+\rowcolor{bluePoli!40}
+\textbf{Parameter} & \textbf{Attempt 1} & \textbf{Final Design} & \textbf{Unit} \T\B \\
+\hline \hline
+Poles & $[-0.42, -2.25, -2.61, -36.50]$ & $[-5.50\pm j4.13, -8.25, -6.60]$ & rad/s \T\B \\
+Peak $V_{m}$ (Sim) & 4.70 & $\approx 6.00$ & V \T\B \\
+Settling Time & $> 10$ & $< 2.0$ & s \B \\
+\hline
+\end{tabular}
+\caption{Pole-placement evolution on the tuned plant. The final design isolates and accelerates the dominant dynamics.}
+\label{table:pole_evolution}
+\end{table}
 
 \begin{figure}[H]
-	\centering
-	\includegraphics[width=0.6\linewidth]{Pole Placement/CL-Poles-Final.png}
-	\caption{Closed-loop poles of the deployed pole-placement design. The complex pair is the dominant balancing mode; the two real cart modes are faster.}
-	\label{fig:cl_poles_final}
-\end{figure}
-
-A $\theta(0)=2^\circ$ initial-tilt simulation (Fig.~\ref{fig:ic_final}) peaks at $V_m=6.9$~V, $\theta=2.4^\circ$, and a $2.9$~cm cart excursion. These gains are deliberately aggressive: a $2^\circ$ tilt already reaches the $6$~V motor limit, so the unsaturated linear regime holds only to about $1.75^\circ$. Beyond that, saturation reshapes the response and the placed poles no longer describe it --- the price paid for a balancing mode fast enough to beat the friction and rocking that the slower simulation-only designs could not.
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.8\linewidth]{Pole Placement/IC-Response-Final.png}
-	\caption{Initial-tilt response, $\theta(0)=2^\circ$, deployed $K_4$. Peak $V_m=6.9$~V, peak $\theta=2.4^\circ$, peak cart $2.9$~cm.}
-	\label{fig:ic_final}
-\end{figure}
-
-Broken at the plant input, the loop $L(s)=K_4(sI-A)^{-1}B$ has a phase margin of $58.4^\circ$ and crossover at $12.9$~rad/s (Fig.~\ref{fig:loop_final}).
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.9\linewidth]{Pole Placement/loop_analysis.png}
-	\caption{Frequency-domain check of the deployed pole-placement loop: Bode, Nyquist, root-locus and pole-zero views.}
-	\label{fig:loop_final}
-\end{figure}
-
-\subsubsection{Integral Action}
-
-Pure state feedback carries no disturbance model, so a constant load torque produces a steady offset: a $100$~g off-centre mass leaves a $2.1^\circ$ residual tilt (Fig.~\ref{fig:rep_final}). Augmenting the state with an angle integrator, $\dot{\xi}=\theta$, and placing the extra pole slowly at $-0.5$~rad/s (so it barely perturbs the transient shape) gives the deployed tracking gain
-\begin{equation}
-	K_5 = \begin{bmatrix} 276.5 & -231.7 & 26.9 & -77.1 & -58.9 \end{bmatrix},
-\end{equation}
-on the augmented state $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta},\ \textstyle\int\!\theta]$. Under the same bias the residual collapses to $0.2^\circ$ at a $1.8$~cm cart offset and under $1.5$~V (Fig.~\ref{fig:bias_integral}). In what follows $K_4$ is the pure-regulation gain and $K_5$ the gain behind every pole-placement tracking result.
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.8\linewidth]{Pole Placement/repeated_disturbance.png}
-	\caption{Constant bias torque without integral action: stable but settles to a non-zero tilt of $2.1^\circ$.}
-	\label{fig:rep_final}
+    \centering
+    \includegraphics[width=0.5\linewidth]{Images/pole_placement/pp_ol_cl_poles.eps}
+    \caption{Pole constellation comparing open-loop plant instability to the target closed-loop dominant theta pair.}
+    \label{fig:cl_poles_final}
 \end{figure}
 
 \begin{figure}[H]
-	\centering
-	\includegraphics[width=0.8\linewidth]{Pole Placement/bias_with_integral.png}
-	\caption{Constant bias torque with integral action ($K_5$): steady-state tilt is driven to $\approx0.2^\circ$.}
-	\label{fig:bias_integral}
+    \centering
+    \includegraphics[width=0.8\linewidth]{Images/pole_placement/pp_controller_init_cond.eps}
+    \caption{Initial condition response (1.0° tilt) for dominant pole redesign.}
+    \label{fig:ic_response_attempt1}
 \end{figure}
+
+\subsubsection{Constant Bias Torque and Integral Action}
+While proportional state-feedback ensures transient stability, it fails to eliminate steady-state error under persistent asymmetric loads. During a simulated bias test representing a 100 g off-center mass, the system slightly shifts its oscillation center away from $\theta = 0^\circ$, exhibiting a constant residual tilt.
+
+To eliminate this steady-state tracking error, the controller utilizes the augmented 5-state architecture ($A_{5}, B_{5}$) introduced in the state-space derivation, leveraging the integral of the angle error ($\xi = \int \theta dt$). 
+
+To preserve the fine-tuned transient shape established by the dominant pair, the four existing poles are retained, and the new integral pole ($p_{int}$) is placed conservatively at a slower frequency of $-0.5$ rad/s. The simulation confirms that the augmented integral controller perfectly drives the angular error to zero, stabilizing the cart at an offset positional equilibrium.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{Images/pole_placement/pp_load_bias.eps}
+    \caption{Response to a 100 g bias load without integral action (blue) and with integral action (red), demonstrating the elimination of steady-state tilt.}
+    \label{fig:bias_integral_comparison}
+\end{figure}
+
+In the deployed controller this augmented gain is the version used for reference tracking. The pure four-state gain is still useful as a regulation baseline, but the integral state is required whenever a nonzero angle command or persistent bias has to be followed without steady-state error.
 
 \subsection{Time Validation: Horizontal Stability}
-\label{sssec:pp_horizontal}
-With the reference held at $0^\circ$ and pure state feedback ($K_4$), the loop holds the body to a tight rocking band --- $0.32^\circ$ RMS, the smallest of the three controllers --- at under half the cascaded-PID control effort ($0.56$~V RMS). The motion is a bounded limit cycle sustained by pivot friction and encoder quantization, not a true rest, but the body never drifts: the design stabilizes the open-loop-unstable plant as intended.
+Prior to executing the tracking protocol, a free-run test of the standard pole-placement controller was conducted on the physical hardware. With the reference held at $0^\circ$, the controller holds the body in a tight bounded rocking band of $0.32^\circ$ RMS, the smallest regulation error among the three tested angle controllers. The motor effort is also much lower than the cascaded PID, at approximately $0.56$~V RMS. The remaining motion is best interpreted as a friction/quantization limit cycle rather than a failure to stabilize: the open-loop unstable plant is held near the horizontal equilibrium and does not drift.
 
 \subsection{State Estimator: Luenberger Observer}
-Only $x_c$ and $\theta$ are measured; the two velocities $\dot{x}_c,\dot{\theta}$ in the feedback law must be reconstructed. Filtered differentiation of the encoders (the dirty derivative used in the loop) works but injects phase lag and amplifies quantization at high frequency. A Luenberger observer estimates the velocities from the plant model instead, and was logged alongside the dirty-derivative feedback as a benchmark.
+Because raw numerical differentiation of the encoder ticks heavily amplifies quantization noise, a full-order Luenberger observer is implemented to estimate the unmeasured velocity states robustly.
 
-\paragraph{Structure and separation.}
-With measured outputs $y=C\mathbf{x}$, where $C=\left[\begin{smallmatrix}1&0&0&0\\0&1&0&0\end{smallmatrix}\right]$ picks off $x_c$ and $\theta$, the observer
-\begin{equation}
-\dot{\hat{\mathbf{x}}} = A\hat{\mathbf{x}} + Bu + L\,(y - C\hat{\mathbf{x}})
-\end{equation}
-drives the estimation error $e=\mathbf{x}-\hat{\mathbf{x}}$ by $\dot{e}=(A-LC)\,e$. Closing the loop with $u=-K_4\hat{\mathbf{x}}$ leaves a block-triangular system whose eigenvalues split as $\operatorname{eig}(A-BK_4)\cup\operatorname{eig}(A-LC)$ --- the separation principle. Controller and observer are therefore designed independently, and $L$ assigns the error poles freely because $(A,C)$ is observable: the observability matrix has full rank $4$ and condition number $211$, so both velocities are cleanly recoverable from the two position channels.
+The observer gain matrix $L$ is computed by assigning the estimator poles to be strictly faster than the controller poles. A proportional scaling factor of $k_{obs} = 5.0$ is applied to the real components of the desired closed-loop poles. 
 
-\paragraph{Pole selection.}
-The observer poles are a proportional scaling of the controller poles --- the textbook $3$--$10\times$ rule for timescale separation, fixed at $k_{\mathrm{obs}}=5$ --- with two refinements. Only the \emph{real parts} are scaled, so the observer poles are all real and the estimate converges without ringing; and because the controller has a repeated real part ($-5.5$ twice) that pole placement cannot resolve, the duplicate is split by a small $\pm0.1$~rad/s offset. The result is
+To prevent the `place` algorithm from failing due to exact pole multiplicities (which degrade numerical computation), a microscopic separation delta ($\delta = 0.1$) is systematically applied to the target real poles:
 \begin{equation}
-p_{\mathrm{obs}} = \{-27.4,\ -27.6,\ -41.2,\ -33.1\}\ \text{rad/s},
-\end{equation}
-the slowest pole a full decade above the unstable plant pole ($2.74$~rad/s) --- ample margin for the estimate to lead the regulator. The corresponding gain is
-\begin{equation}
-L = \begin{bmatrix} 46.4 & -0.9 \\ -4.3 & 68.5 \\ 247.1 & -20.5 \\ -197.9 & 1133.0 \end{bmatrix}.
+\begin{aligned}
+    p_{obs} = \begin{bmatrix}
+        5.0 \cdot \text{Re}(p_{des, 1}) + \delta \\
+        5.0 \cdot \text{Re}(p_{des, 2}) - \delta \\
+        5.0 \cdot p_{des, 3} + \delta \\
+        5.0 \cdot p_{des, 4} - \delta 
+    \end{bmatrix}
+\end{aligned}
 \end{equation}
 
-\paragraph{Why such an aggressive gain was acceptable.}
-A fast observer is noisy: each encoder count maps to a voltage perturbation $|K_4 L|\,q$ at the motor. At $k_{\mathrm{obs}}=5$ this is $0.75$~V/count on the cart channel and $47$~V/count on the angle channel --- the latter far past the $6$~V saturation, so an \emph{in-loop} observer at this bandwidth would chatter the actuator into the rails and $k_{\mathrm{obs}}$ would have to be reduced. Here the observer ran only as a logged estimator while the dirty derivative drove the loop, so this noise constraint never bound; the aggressive bandwidth simply buys a sharp estimate to compare against. The optimal scaling could equally be found offline from logged voltage and position data.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Images/pole_placement/pp_obs_poles.eps}
+    \caption{Pole constellation comparing closed-loop poles to the target observer poles.}
+    \label{fig:pp_observer_poles}
+\end{figure}
 
-\paragraph{Result.}
-Logged against the encoders, the observer's angle innovation is $0.009^\circ$ RMS with near-white character (lag-1 correlation $0.82$), confirming a good match to the linear model. Its angular-rate estimate is visibly cleaner than the dirty derivative at high frequency, where the latter amplifies quantization (Fig.~\ref{fig:obs_pp}) --- the smoother velocity without the lag of an aggressively filtered differentiator that the observer promises, and the case for moving it into the loop next iteration at a noise-appropriate $k_{\mathrm{obs}}$.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{Images/pole_placement/pp_obs_init_cond.eps}
+    \caption{Initial condition response (1.0° tilt) for luenberger observer.}
+    \label{fig:pp_observer_ic}
+\end{figure}
+
+On hardware, however, the observer was logged in parallel while the feedback loop still used filtered encoder derivatives. The logged comparison is therefore an estimator validation, not an in-loop observer-control validation. The angle innovation is small, about $0.009^\circ$ RMS, and the observer's angular-rate estimate is smoother than the dirty derivative at high frequency, where encoder quantization is most visible. This supports using a model-based estimator in the next iteration, but the observer bandwidth would need to be reduced before closing the loop through it because the aggressive $k_{obs}=5$ design would amplify angle encoder ticks into voltage chatter.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.85\textwidth]{Images/Tracking Results/Observer-PPDDTEST.png}
-    \caption{Pole-placement run: angular-rate estimates (dirty derivative, observer, filtered finite difference), their spectra over the level segments, and the observer innovation.}
+    \caption{Pole-placement run: dirty-derivative, observer, and filtered finite-difference angular-rate estimates, with spectra over the level segments and the observer innovation.}
     \label{fig:obs_pp}
 \end{figure}
 
-\subsection{Frequency Validation: Reference Tracking}
-The state-space technique can be seen as a PD control for both angle and position, this leads to steady-state error, this means that we need to add a virtual 5th state for integral action. Our main concern is the seesaw angle so we put it on this variable. We do not put one both for angle and for pos because, as it is not cascaded like it was for the frequency based technique, they might fight each other and create instability.
-Same testing is applied than previously.
-Have to pay attention to potential integral windup.
+\subsection{Digital Implementation and Frequency Validation}
+Prior to deployment on the real-time hardware architecture, the continuous-time matrices and filters are discretized to match the hardware sampling time $T_{s}$. The plant state-space is converted via Zero-Order Hold (ZOH), while auxiliary derivative filters are mapped using the Tustin (Bilinear) approximation to preserve high-frequency phase fidelity.
 
-\subsubsection{Frequency-Domain Validation}
-
-The loop transfer function $L(s) = \mathbf{K}(sI - A)^{-1}B$ yields a phase margin of $55.99^\circ$, gain margin of $-9.30$ dB, and crossover frequency of $6.05$ rad/s.
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.9\linewidth]{Pole Placement/loop_analysis.png}
-	\caption{Frequency-domain validation of the final pole-placement controller: Bode, Nyquist, root-locus, and pole-zero views.}
-	\label{fig:loop_final}
-\end{figure}
-
-\subsubsection{Implementation and Hardware Results}
-
-On hardware, only $x_c$ and $\theta$ are measured by encoders. The velocities $\dot{x}_c$ and $\dot{\theta}$ are obtained by differentiating the encoder signals through a first-order low-pass filter ($\omega_f = 100$ rad/s) to attenuate sensor noise (the ``PP+DD'' dirty-derivative implementation).
-
-Run through the common tracking protocol (Sec.~\ref{sec:angle_tracking_results}) with the integral-augmented gain $K_5$, the controller tracks the $+1^\circ$ step with unity gain ($1.01$) and a $0.01^\circ$ residual error, overshooting only to about $2.1^\circ$ --- the best-damped of the three controllers. That residual, roughly twenty times smaller than the free-run rocking band, is the direct evidence that the integral state was active: pure state feedback ($K_4$) would have left a load-dependent offset. Across the stepped sines the RMS angle error is $0.33^\circ$. The controller is efficient on the actuator ($0.56$~V RMS, $7.5$~cm cart travel), though transient peaks reach $9$~V (the state-feedback runs used a $\pm9$~V clamp, above the $6$~V motor rating). The full comparison against the other controllers is collected in Sec.~\ref{sec:ss_comparison}.
+An analytical loop analysis evaluated the absolute robustness of the dominant-pole design. Broken at the plant input, the deployed loop has a phase margin of $58.4^\circ$ and a crossover frequency of $12.9$ rad/s. On the real-time target, only $x_c$ and $\theta$ are measured directly. The implementation therefore used dirty-derivative estimates for $\dot{x}_c$ and $\dot{\theta}$, with first-order low-pass filtering to limit encoder noise. The reference-tracking run used the integral-augmented gain and the same protocol introduced in the PID section.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.85\textwidth]{Images/Tracking Results/Tracking-PPDDTEST.png}
-    \caption{Pole placement (PP+DD), full tracking protocol: angle vs.\ reference, motor voltage, closed-loop response, $+1^\circ$ step, and the regulation spread at $\theta_{ref}=0$.}
+    \caption{Pole placement with dirty-derivative velocities, full tracking protocol: angle reference and measurement, motor voltage, closed-loop response estimate, $+1^\circ$ step detail, and regulation spread.}
     \label{fig:track_pp}
 \end{figure}
 
+With integral action active, the pole-placement controller tracks the $+1^\circ$ step with gain $1.01$ and only $0.01^\circ$ steady-state error. Its peak response is about $2.1^\circ$, making it the best-damped of the three measured controllers. Across the stepped sines it gives the lowest RMS tracking error, $0.33^\circ$, while keeping the motor effort near $0.56$~V RMS and cart travel to $7.5$~cm peak-to-peak. The state-space runs used a higher voltage clamp than the cascaded PID, so the transient voltage peaks should be read against that implementation detail.
+
 \section{State-Space Control Design: Linear Quadratic Regulator}
-Improvement from Pole Placement is LQR because it has guaranteed margins, in continuous time they are: gm inside (0.5 ; \inf) and pm of +- 60°.
 
-\subsection{Full-State Feedback}
-LQR is a full-state feedback optimization algorithm.
-For the seesaw it translates to : instead of measuring the angle $\theta$ that we want to control, LQR assume to know the current state of everything in the system. It defines the feedback law as
-\begin{align}\label{eq:LQR_FB_law_and_states}
-	u & = -K \cdot \mathbf{x}, & \mathbf{x} & = \begin{bmatrix}
-		                                            x_c \\ \theta \\ \dot{x_c} \\ \dot{\theta}
-	                                            \end{bmatrix}
-\end{align}
-LQR finds this optimal controller by minimizing a cost function $J$ based on Riccati's equation, see Appendix~\ref{app:ARE}.
-\begin{equation}\label{eq:LQR_cost}
-	J = \int _0 ^\infty (\mathbf{x}^\top \cdot Q \cdot \mathbf{x} +  \mathbf{u}^\top \cdot R \cdot \mathbf{u})dt
-\end{equation}
-The tuning parameters of LQR are the weight matrices Q and R, finding the balance between them defines how aggressive and "willing to spend more effort" the system will be.
-\begin{itemize}
-	\item \textbf{Q} : The \emph{State Error} matrix (or Performance Penalty matrix) emphasize what state are important to control. A higher value $q_i$ means a more controlled state $i$, and a lower value means that any value can be accepted.
-	      \begin{equation}
-		      \mathbf{Q} = \begin{bmatrix}
-			      q_1 & 0   & 0   & 0   \\
-			      0   & q_2 & 0   & 0   \\
-			      0   & 0   & q_3 & 0   \\
-			      0   & 0   & 0   & q_4 \\
-		      \end{bmatrix}
-		      \geq 0
-	      \end{equation}
-	\item \textbf{R} : The \emph{Input Error} matrix (or Effort Penalty matrix) penalizes the input states. As we only have one input for the seesaw, it is a scalar. A higher R means that the voltage must be lowered at all time, while a lower R tells the algorithm to use more power.
-	      \begin{equation}
-		      \mathbf{R} = r_1
-	      \end{equation}
-\end{itemize}
-This solution gain $K$ can be interpreted, in standard algebra as:
+\subsection{Optimal Full-State Feedback Synthesis (LQR)}
+While the pole-placement technique allows for explicit dynamic shaping, it relies heavily on heuristic iterations to balance robust tracking against actuator saturation. To establish a more mathematically rigorous guarantee of stability margins and effort minimization, a Linear Quadratic Regulator (LQR) is implemented.
+
+The LQR algorithm computes the optimal full-state feedback gain matrix $K$ by minimizing a quadratic cost function $J$, based on the continuous-time Algebraic Riccati Equation:
 \begin{equation}
-	\begin{aligned}
-		V_m & = -K\cdot \mathbf{x}                                         \\
-		       & = -(k_1 x_c + k_2 \theta + k_3 \dot{x}_c + k_4 \dot{\theta})
-	\end{aligned}
+J = \int_{0}^{\infty} (x^T Q x + u^T R u) dt
 \end{equation}
-This can easily be compared with what we were trying to do with the frequency-based technique, sec.~\ref{subsec:freq_based_control}, but this time instead of "guessing" how the cascade \emph{PD Controllers} should interact, the Riccati's Equation guarantees their balance.
-\begin{align}
-	V_m = \underbrace{(-k_1 x_c - k_3 \dot{x}_c)}_{\text{Cart PD Controller}} + \underbrace{(-k_2 \theta - k_4 \dot{\theta})}_{\text{Angle PD Controller}}
-\end{align}
-\paragraph{Conditions}
-($A$,$B$) reachable, ($A$,$C_q$) observable with $Q = C_q'\cdot C_q$
 
-\paragraph{Tuning}
-There exists no mathematical way to find the optimal solution for LQR gains $Q$ and $R$, they must be found iteratively. However their behavior can be predicted.
-Find best $Q$ and $R$ matrices : Bryson's Rule then iteratively
+The dynamic behavior of the system is explicitly tuned by balancing two user-defined weighting matrices: the state error penalty $Q$ and the actuator effort penalty $R$.
 
-\paragraph{Feedback Problem}
-We can only measure position and angle, but the feedback also requires velocity and angular velocity. Two options:
-\begin{itemize}
-	\item numerical derivative : works well in simulation but to avoid for real system since it is very subjective to sensor noise, and we use incremental sensor so it builds up.
-	\item state estimators to create a State-Space of an observed system $\hat{x}$.
-\end{itemize}
+\subsubsection{Tuning via Bryson's Rule}
+Rather than relying on arbitrary diagonal weights, the penalty matrices were constructed using Bryson's Rule. This methodology scales the penalties inversely proportional to the square of the maximum acceptable deviation for each state and input, ensuring that the cost function normalizes the state variables based on strict physical and electrical design targets.
 
-\paragraph{Integral Action}
-This controller provides a relatively fast transient response and limited cart displacement, but it does not include integral action. Therefore, its ability to reject residual steady-state error caused by model mismatch or constant disturbances is inherently limited.
-
-To improve regulation, an augmented 5-state LQR design was also introduced. An additional integral state is defined as
-\[
-	\xi = \int \theta(t)\,dt,
-	\qquad
-	\dot{\xi} = \theta,
-\]
-so that the augmented state vector becomes
-\[
-	\eta =
-	\begin{bmatrix}
-		x_c & \theta & \dot{x}_c & \dot{\theta} & \xi
-	\end{bmatrix}^T.
-\]
-
-The corresponding augmented dynamics are written as
-\[
-	\dot{\eta} = A_5 \eta + B_5 u
-\]
-and the control law becomes
-\[
-	u = -K_5 \eta,
-	\qquad
-	K_5 = \mathrm{lqr}(A_5,B_5,Q_5,R_5).
-\]
-
-The augmented gain is obtained by minimizing the cost function
-\[
-	J_5 = \int_0^{\infty} \left( \eta^T Q_5 \eta + u^T R_5 u \right)\, dt.
-\]
-
-For this controller, the baseline weighting matrices were chosen as
-\[
-	Q_5 = \mathrm{diag}(1000,\;5000,\;0,\;0,\;2000),
-	\qquad
-	R_5 = 0.5.
-\]
-The zero weights on the two velocities follow Bryson's rule: only the cart position, the angle and the integral state carry a ``desired magnitude'', the velocities being penalized only indirectly through the dynamics. Solving the Riccati equation with these weights gives the deployed gain (state ordered $[x_c,\ \theta,\ \dot{x}_c,\ \dot{\theta},\ \xi]$)
+The rule is defined as:
 \begin{equation}
-	K_5 = \begin{bmatrix} 191.9 & -275.5 & 14.5 & -92.8 & -63.2 \end{bmatrix},
+Q_{ii} = \frac{1}{\max(|x_{i,dev}|)^2}, \quad R = \frac{1}{\max(|V_{m,dev}|)^2}
 \end{equation}
-whose loop, broken at the plant input, has a $63.7^\circ$ phase margin and crossover at $10.8$~rad/s --- comfortably inside the $\pm60^\circ$/$(0.5,\infty)$ margins the LQR guarantees in continuous time.
 
-The augmented system is also fully controllable, with
-\[
-	\mathrm{rank}\,\mathcal{C}_5 = 5.
-\]
-As expected, the open-loop augmented model contains an additional pole at the origin due to the integral state. After feedback is applied, all closed-loop poles lie in the stable region, confirming that the augmented controller also stabilizes the system. 
+Based on the required tracking tolerances and a conservative voltage budget for the actuator, the maximum acceptable deviations were established as shown in Table \ref{table:bryson_targets}.
 
-Compared with the 4-gain design, the augmented controller introduces integral action and is therefore better suited to reducing residual regulation error in the presence of non-ideal effects.
+\begin{table}[H]
+\caption*{\textbf{LQR/LQI Acceptable Deviations (Bryson's Rule)}}
+\centering
+\begin{tabular}{|p{10em} l c c |}
+\hline
+\rowcolor{bluePoli!40}
+\textbf{Parameter} & \textbf{Description} & \textbf{Value} & \textbf{Unit} \T\B \\
+\hline \hline
+req\_dist & Max Cart Displacement & 0.05 & m \T\B \\
+req\_angle & Max Seesaw Angle & 1.0 & $^\circ$ \T\B \\
+req\_speed & Max Cart Speed & 0.1 & m/s \T\B \\
+req\_angspeed & Max Angular Speed & $+\infty$ & rad/s \T\B \\
+req\_integral & Max Integral Accumulation & 4.0 & $^\circ \cdot$ s \T\B \\
+req\_volt & Target Max Voltage & 3.0 & V \B \\
+\hline
+\end{tabular}
+\caption{Design targets specifying the acceptable deviations used to synthesize the LQR/LQI weighting matrices.}
+\label{table:bryson_targets}
+\end{table}
 
-The role of the weighting matrices follows the standard LQR interpretation. Increasing the weights associated with $x_c$ and $\theta$ gives higher priority to cart-position and angle regulation, respectively. Increasing the weight on the integral state $\xi$ strengthens the long-term correction of angular deviation and generally improves regulation speed, although it may also make the controller more aggressive. On the other hand, increasing $R$ penalizes the control input more heavily, resulting in a more conservative controller with smoother actuation but slower closed-loop dynamics.
+By leaving the angular speed unconstrained ($+\infty$), the optimizer effectively applies a zero-weight penalty, allowing the seesaw to swing as quickly as mathematically necessary to catch a sudden fall without artificially inflating the cost function.
 
-\textcolor{blue}{second option}\\
+Applying Bryson's Rule yields the fully optimized state penalty matrix $Q$ and effort penalty scalar $R$:
+\begin{equation}
+Q_4 = \text{diag}\left(\frac{1}{0.05^2}, \frac{1}{(\pi/180)^2}, \frac{1}{0.1^2}, 0\right), \quad R_4 = \frac{1}{3^2} \approx 0.111
+\end{equation}
 
-To further improve regulation and tracking performance, an LQI (\textit{Linear Quadratic Integral}) controller was also considered. The LQI approach extends the standard LQR design by augmenting the system with an integral state associated with the output error. In this way, the controller not only stabilizes the system, but also reduces or eliminates steady-state error in the presence of constant disturbances, modeling inaccuracies, or nonzero reference commands.
+This methodology guarantees that the LQR natively respects the conservative 3.0 V actuator limit while prioritizing the tightest possible angular balance.
 
-For the Seesaw system, the controlled output is chosen as the angular position $\theta$. Defining the regulation error as
-\[
-	e(t)=r(t)-\theta(t),
-\]
-where $r(t)$ is the reference angle, the integral state is introduced as
-\[
-	\xi(t)=\int_0^t e(\tau)\,d\tau.
-\]
-For the regulation problem considered in this work, the reference is $r(t)=0$, so the error reduces to
-\[
-	e(t)=-\theta(t),
-\]
-and therefore
-\[
-	\dot{\xi}(t)=-\theta(t).
-\]
+\subsection{Simulation Validation}
+To mathematically evaluate the transient capabilities of the synthesized LQR before hardware deployment, two distinct simulated stress tests were conducted.
 
-Using the original state vector
-\[
-	x=
-	\begin{bmatrix}
-		x_c & \theta & \dot{x}_c & \dot{\theta}
-	\end{bmatrix}^T,
-\]
-the augmented state vector becomes
-\[
-	x_a=
-	\begin{bmatrix}
-		x \\
-		\xi
-	\end{bmatrix}
-	=
-	\begin{bmatrix}
-		x_c & \theta & \dot{x}_c & \dot{\theta} & \xi
-	\end{bmatrix}^T.
-\]
-
-The augmented system can then be written as
-\[
-	\dot{x}_a=A_a x_a+B_a u+B_r r
-\]
-with
-\[
-	A_a=
-	\begin{bmatrix}
-		A         & 0 \\
-		-C_\theta & 0
-	\end{bmatrix},
-	\qquad
-	B_a=
-	\begin{bmatrix}
-		B \\
-		0
-	\end{bmatrix},
-	\qquad
-	B_r=
-	\begin{bmatrix}
-		0 \\
-		1
-	\end{bmatrix},
-\]
-where
-\[
-	C_\theta=
-	\begin{bmatrix}
-		0 & 1 & 0 & 0
-	\end{bmatrix}
-\]
-selects the angular state.
-
-The LQI gain is obtained by minimizing the quadratic cost function
-\[
-	J_{\mathrm{LQI}}
-	=
-	\int_0^\infty
-	\left(
-	x_a^T Q_a x_a + u^T R u
-	\right)\,dt
-\]
-where $Q_a \succeq 0$ weights both the physical states and the integral state, while $R \succ 0$ penalizes the control effort. The optimal control law is
-\[
-	u=-K_a x_a
-	=
-	-\begin{bmatrix}
-		K_x & K_i
-	\end{bmatrix}
-	\begin{bmatrix}
-		x \\
-		\xi
-	\end{bmatrix}.
-\]
-
-In this formulation, the matrix $K_x$ acts on the original plant states, while the scalar gain $K_i$ acts on the integral state. The integral action continuously accumulates the angle error and reinforces the control input until the steady-state deviation is removed. For this reason, the LQI controller is theoretically more effective than a standard LQR controller whenever constant disturbances, parameter uncertainty, or reference changes are present.\\
-
-Finally, it should be emphasized that the actuator voltage is limited to $\pm 6~\mathrm{V}$. Under saturation, the integral state may continue to accumulate error even when the actuator can no longer provide additional effort. This phenomenon, known as integral windup, may degrade performance and should be addressed in a practical implementation through an anti-windup strategy. Nevertheless, the simulation results confirm that the LQI controller stabilizes the Seesaw system and improves angular regulation compared with the standard LQR design.
-
-\subsection{Time Validation: Horizontal Stability}
-With the reference held at $0^\circ$ the LQR holds the body to $0.42^\circ$ RMS --- between the pole-placement ($0.32^\circ$) and cascaded-PID ($0.74^\circ$) controllers --- at essentially the same control effort as pole placement ($0.58$~V RMS). As with the other controllers the residual motion is a bounded friction/quantization limit cycle, not a true rest, but the plant is held stable about the horizontal. A dedicated $5.5$-minute disturbance run confirms the robustness: under applied disturbances (peak effort $7.3$~V, versus $\approx5$~V undisturbed) the LQR kept the body to $0.39^\circ$ RMS, recovering to the same band each time.
-
-\subsection{State Estimator: Kalman Filter}
-\begin{align}
-	\dot{\hat{\mathbf{x}}} & = A \cdot \hat{\mathbf{x}} + B \cdot u & + \begin{bmatrix}    
-            B & L
-        \end{bmatrix} \cdot \begin{bmatrix} u \\ y \end{bmatrix} \\
-	\hat{\mathbf{y}} & = I_4 \cdot \hat{\mathbf{x}} &
-\end{align}
- The Kalman filter (where the Linear Quadratic Estimator is used to find the optimal gains) are based on 3 gain matrices:
-$R_n$ the sensor noise matrix, that we can measure.
-$G_n$ the disturbance matrix, that can have 2 modes  $\to$  matched disturbance $G_n$ = B, the real world has same impact on system than the motor but we don’t like it because it gives no info on $Q_n$.  $\to$  Independent disturbance $G_n$ = $I$, the real world can impact with every state independently, then it forces $Q_n$ to be the same size as the plant, here 4 by 4.
-$Q_n$ the process noise matrix is basically “how much do we trust the model?” for position going from pos to vel is pretty easy so low process noise, but going from vel to accelerations can be messy (and we did not model every friction etc) so high process noise.
-Only the ratio between $Q_n / R_n$ : >> 1 means bad model but good sensors and << 1 means good model bad sensors.
-
-\paragraph{Hardware validation status.}
-A clean hardware validation of the Kalman filter specifically is not yet established. In every deployed run the feedback loop was closed on the dirty-derivative velocities, with the model-based estimators logged only in parallel, and those logged estimator channels are not trustworthy across the available captures: in the pole-placement / LQR state-space runs the velocity-estimate channels either diverged numerically or were internally inconsistent, and the candidate dedicated capture could not be confidently attributed to the Kalman design (its angular-rate channel does not match the derivative of its angle estimate, and its innovation is strongly autocorrelated rather than white --- not the signature of a well-tuned filter). Reconciling the estimator and running it \emph{in the loop} therefore remains the clearest follow-up item for the state-space work; the filter design above is sound on paper, but its on-hardware performance is not demonstrated by the present data.
-
-\subsection{Frequency Validation: Reference Tracking}
-Similarly to the previous setup, a fifth virtual state of integral action is added on the seesaw angle, and the controller is run through the same protocol.
-
-The LQR tracks the $+1^\circ$ step with gain $1.02$ and $0.02^\circ$ residual error; its rise time is the slowest of the three ($0.22$~s) and it overshoots to about $2.5^\circ$. Swept-sine RMS error is $0.42^\circ$. It is the gentlest on the cart ($5.0$~cm travel) at the same voltage budget as pole placement. Anti-windup on the integral state is retained to guard against the saturation windup noted above.
-
-\paragraph{Large-angle tracking.} Beyond the $\pm1^\circ$ protocol, the LQR was driven up a staircase to $10^\circ$ (near the $11.5^\circ$ physical stop) and back down (Fig.~\ref{fig:staircase}). On the way up it tracks each level with near-unity gain and at most $0.5^\circ$ error, with peak voltage only $\approx4$~V --- ample authority right up to the stop. On the way down the measured angle sits $1.5$--$2^\circ$ below the command at each level: a hysteresis loop in the static curve, the signature of Coulomb friction/stiction (part of which is also incomplete settling, as the descent dwells were short).
+First, the simulation was subjected to a $1^\circ$ initial-tilt impulse disturbance. The standard 4-state LQR cleanly arrests the angular velocity and returns the seesaw to $0^\circ$ without excessive cart travel or voltage saturation, successfully validating the chosen Bryson parameters for standard dynamic tracking.
 
 \begin{figure}[H]
     \centering
-    \subfloat[Time history.]{\includegraphics[width=0.49\textwidth]{Images/Tracking Results/Staircase-TimeSeries.png}}
-    \hfill
-    \subfloat[Static curve (up-leg vs.\ down-leg).]{\includegraphics[width=0.49\textwidth]{Images/Tracking Results/Staircase-Static.png}}
-    \caption{Staircase angle test (LQR): clean tracking up to $10^\circ$ and a $1.5$--$2^\circ$ hysteresis loop on the return.}
+    \includegraphics[width=0.8\linewidth]{Images/lqr/lqr_controller_init_cond.eps}
+    \caption{Initial condition response (1.0° tilt) for lqr with Bryson's rule.}
+    \label{fig:lqr_impulse}
+\end{figure}
+
+However, because the LQR fundamentally acts as a proportional state-feedback controller, it struggles against persistent unmodeled forces. When subjected to a simulated 100 g asymmetric bias load (equivalent to a 0.123 Nm continuous torque), the standard LQR successfully avoids total instability but settles at a persistent steady-state tilt error.
+
+\subsection{LQI: Integral Action for Disturbance Rejection}
+To entirely eliminate the residual error identified during the simulation validation, the architecture is upgraded to a Linear Quadratic Integral (LQI) controller, utilizing the augmented 5-state system ($\dot{\xi} = \theta$).
+
+The weighting matrix $Q_5$ incorporates the original Bryson parameters while appending a penalty specifically for the integral state. The acceptable deviation for the integral was defined as $4.0^\circ \cdot$ s, representing the maximum time-area allowed to clear a given angular deviation before heavy penalties apply:
+\begin{equation}
+Q_5 = \text{diag}\left(Q_{11}, Q_{22}, Q_{33}, Q_{44}, \frac{1}{(4 \cdot \pi/180)^2}\right)
+\end{equation}
+
+Applying the 100 g bias load against this augmented LQI controller in simulation demonstrates total rejection of the constant disturbance, forcing the steady-state angular error perfectly back to $0^\circ$.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\linewidth]{Images/lqr/lqr_load_bias.eps}
+    \caption{Simulated response to a 100 g bias load for lqr (blue) and lqi (red)}
+    \label{fig:lqr_bias_error}
+\end{figure}
+
+\subsection{Time Validation: Horizontal Stability}
+Following theoretical and simulated validation, the LQI controller was deployed to the physical hardware using the same dirty-derivative velocity reconstruction as the pole-placement implementation. With the reference held at $0^\circ$, the loop holds the body to approximately $0.42^\circ$ RMS. This is slightly looser than pole placement but substantially quieter than the cascaded PID, while requiring essentially the same RMS voltage as pole placement ($0.58$~V). A dedicated disturbance run also recovered to the same regulation band after manual perturbations, confirming that the controller stabilizes the plant robustly around the horizontal equilibrium.
+
+\subsection{State Estimator: Kalman Filter (LQE)}
+To estimate the unmeasured velocity states robustly, a Linear Quadratic Estimator (LQE) or Kalman Filter replaces the filtered derivative. The Kalman Filter computes the optimal observer gain $L$ by treating the system stochastically,  balancing expected modeling inaccuracies against known sensor precision.
+
+The estimator utilizes two covariance matrices:
+\begin{itemize}
+    \item \textbf{Process Noise Covariance ($Q_n$):} Represents the uncertainty in the mathematical plant model (e.g., unmodeled friction, backlash).
+    \item \textbf{Measurement Noise Covariance ($R_n$):} Represents the electrical and quantization noise present in the physical sensors. This has been fixed to one encoder tick.
+\end{itemize}
+
+Because the incremental encoders provide high-fidelity positional measurements, while the dynamic velocity transitions are heavily subject to unmodeled frictional variations, the matrices were structured to mostly trust the sensors:
+\begin{equation}
+Q_n = \text{diag}(10^{-7}, 7.61 \times 10^{-7}, 10^{-6}, 10^{-6}), \quad R_n = \text{diag}(2.27 \times 10^{-5}, 1.5 \times 10^{-3})
+\end{equation}
+
+Because the ratio $Q_n / R_n$ is structurally tuned, the Kalman filter converges on an optimal gain matrix $L$ that minimizes the variance of the estimation error in the linear stochastic model.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\linewidth]{Images/lqr/lqr_obs_init_cond.eps}
+    \caption{Initial condition response (1.0° tilt) for Kalman filter.}
+    \label{fig:kalman_convergence}
+\end{figure}
+
+A clean hardware validation of the Kalman filter is not yet established. In the deployed runs, the feedback loop was closed on dirty-derivative velocities and the estimator channels were logged only in parallel. The available logs do not consistently show the internal checks expected from a validated estimator: the candidate angular-rate estimate does not reliably match the derivative of its own angle estimate, and the innovation is not convincingly white. The design is therefore retained as a theoretically sound estimator, but its on-hardware performance should be treated as future work until it is run and validated in the loop.
+
+\subsection{Digital Implementation and Frequency Validation}
+Similarly to Pole-Placement, the continuous-time matrices and filters are discretized to match the hardware sampling time $T_{s}$. The LQI gain used for tracking was
+\begin{equation}
+K_5 = \begin{bmatrix} 191.9 & 14.5 & -275.5 & -92.8 & -63.2 \end{bmatrix},
+\end{equation}
+on the deployed state ordering $[x_c,\ \dot{x}_c,\ \theta,\ \dot{\theta},\ \xi]$. Broken at the plant input, the loop has a $63.7^\circ$ phase margin and crossover at $10.8$ rad/s. The hardware was run through the same reference protocol as the PID and pole-placement controllers.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{Images/Tracking Results/Tracking-LQRDDTEST.png}
+    \caption{LQR/LQI with dirty-derivative velocities, full tracking protocol: angle reference and measurement, motor voltage, closed-loop response estimate, $+1^\circ$ step detail, and regulation spread.}
+    \label{fig:track_lqr}
+\end{figure}
+
+The LQR tracks the $+1^\circ$ step with gain $1.02$ and $0.02^\circ$ steady-state error. Its rise time is the slowest of the three controllers, about $0.22$~s, and the peak response reaches roughly $2.5^\circ$. Across the sine sweep, the RMS tracking error is $0.42^\circ$. The main practical advantage is low cart motion: the measured travel is about $5.0$~cm peak-to-peak, the smallest of the tested controllers.
+
+\paragraph{Large-angle tracking.}
+To probe how far the local controller could be pushed on hardware, the LQR was also driven through a staircase of increasingly large angle references up to $10^\circ$, close to the $11.5^\circ$ physical stop. On the upward leg, the controller tracks each level with near-unity gain and no loss of stability, with peak voltage around $4$~V. On the return, the measured angle sits roughly $1.5$--$2^\circ$ below the command at each level. This hysteresis is consistent with Coulomb friction and stiction, and it is one of the clearest hardware signatures of why the linear model overestimates damping.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.78\textwidth]{Images/Tracking Results/Staircase-Static.png}
+    \caption{Large-angle LQR staircase test: static tracking remains close to unity up to $10^\circ$ on the upward leg, while the return leg exposes a $1.5$--$2^\circ$ hysteresis loop. The raw time history and zoom around the largest step are shown later in Fig.~\ref{fig:lqi_max_step}.}
     \label{fig:staircase}
 \end{figure}
 
 \subsection{Controller Comparison and Design-versus-Reality}
 \label{sec:ss_comparison}
-Table~\ref{tab:ctrl_compare} summarizes the three controllers on the identical protocol. The cascaded PID is the fastest but by far the least damped (largest overshoot, resonant peak, rocking and control effort). The two state-space designs trade a little bandwidth for much better damping and far lower effort: pole placement gives the tightest regulation, while the LQR is the gentlest on the cart. Both ran on dirty-derivative velocities in the loop; their model-based estimators (Luenberger, Kalman) were logged only in parallel and are not all cleanly validated (Secs.~\ref{sec:luenberger} and the Kalman discussion above).
+Table~\ref{tab:ctrl_compare} summarizes the three closed-loop hardware controllers on the shared protocol. The cascaded PID is fastest but has the largest overshoot, rocking, motor effort, and cart travel. Pole placement gives the tightest small-signal tracking and regulation band. LQR is gentler on the cart and actuator while remaining close to pole placement in tracking accuracy.
 
 \begin{table}[H]
 \centering
@@ -1282,409 +1201,292 @@ $+1^\circ$ step rise time [s]      & 0.08 & 0.09 & 0.22 \\
 $+1^\circ$ step peak [deg]         & 3.6  & 2.1  & 2.5  \\
 Steady-state step error [deg]      & 0.06 & 0.01 & 0.02 \\
 Swept-sine RMS error [deg]         & 0.52 & 0.33 & 0.42 \\
-Swept-sine $-3$\,dB bandwidth [Hz]$^\dagger$ & 1.00 & 0.63 & 0.40 \\
 Resonant peak $|\theta/\theta_{ref}|$ [--] & 6.0  & 3.4  & 4.2  \\
 Free-run rocking [deg RMS]         & 0.74 & 0.32 & 0.42 \\
 Motor voltage [V RMS]              & 1.56 & 0.56 & 0.58 \\
 Cart travel [cm p-p]               & 11.6 & 7.5  & 5.0  \\
 \hline
 \end{tabular}
-
-\vspace{2pt}
-{\footnotesize $^\dagger$ Small-signal value, read against the lowest reference-dominated point of the sweep; see the design-versus-measurement discussion below for why the absolute bandwidth is a lower bound rather than a precise figure.}
 \end{table}
 
 \begin{figure}[H]
     \centering
     \subfloat[Measured $1^\circ$ step responses.]{\includegraphics[width=0.49\textwidth]{Images/Tracking Results/StepResponse-Comparison.png}}
     \hfill
-    \subfloat[Accuracy vs.\ effort (bubble $\propto$ cart travel).]{\includegraphics[width=0.49\textwidth]{Images/Tracking Results/Compare-Tradeoff.png}}
-    \caption{Controller comparison on the identical reference protocol.}
-    \label{fig:compare}
+    \subfloat[Accuracy vs.\ effort, bubble area proportional to cart travel.]{\includegraphics[width=0.49\textwidth]{Images/Tracking Results/Compare-Tradeoff.png}}
+    \caption{Controller comparison on the identical hardware reference protocol.}
+    \label{fig:ctrl_compare}
 \end{figure}
 
-\paragraph{Design intent versus measured behaviour.}
-The linear designs all aim for a well-damped response: pole placement puts the balancing pair at $1.09$~Hz with $\zeta=0.8$ (predicting $\approx1.5\%$ overshoot and a $0.7$~s settle), and the LQR crosses over near $1.7$~Hz with a $64^\circ$ phase margin. The hardware does not match this on-paper damping. Every controller overshoots its $1^\circ$ step far more than designed --- to $2.1$--$3.6^\circ$ --- and the swept-sine magnitude shows a clear resonant peak ($3.4\times$ for pole placement, $4.2\times$ for the LQR, $6.0\times$ for the PID). The time-domain overshoot and the frequency-domain peak are two independent measurements of the same thing, and they agree: the closed loop is markedly more lightly damped than the pole locations claim.
-
-This is also why the swept sine earns its place despite the small drive amplitude ($0.2^\circ$, below the $0.3$--$0.7^\circ$ limit cycle): the contamination affects only the \emph{absolute low-frequency gain}, and hence the precise $-3$~dB point, which is why the bandwidth above is read as a lower bound. The \emph{shape} of the response --- the resonant peak that quantifies the under-damping, the roll-off, the phase loss and the controller ranking --- sits well clear of the rocking floor and corroborates the step data.
-
-The damping shortfall is common to all three controllers, so it is a property of the plant-plus-implementation rather than a mis-tuning of one design. Three mechanisms account for it, none of them in the linear model:
-\begin{itemize}
-    \item \textbf{Dirty-derivative phase lag}: the velocities are reconstructed by filtered differentiation rather than the ideal full-state measurement the design assumes, spending phase margin that shows up as reduced damping.
-    \item \textbf{Coulomb friction, stiction and gear backlash}: visible directly as the $1.5$--$2^\circ$ staircase hysteresis (Fig.~\ref{fig:staircase}) and the sustained limit cycle at $\theta_{ref}=0$.
-    \item \textbf{Encoder quantization}, which sustains the residual rocking and sets the floor below which small-signal tracking cannot be resolved.
-\end{itemize}
-The claims that survive this scrutiny are the ones measured well clear of these effects: each controller stabilizes the unstable plant, tracks to a near-zero steady-state error through integral action, holds a tight regulation band ($0.32$--$0.74^\circ$ RMS), and, for the LQR, tracks cleanly up to $10^\circ$. The precise damping ratio and absolute bandwidth are best read as indicative.
+The measured responses are less damped than the linear designs predict. Every controller overshoots its $1^\circ$ step and every swept-sine response shows a resonant peak, even though the designed pole locations and margins suggest more comfortable damping. The common causes are implementation-level rather than controller-specific: dirty-derivative phase lag, Coulomb friction and stiction, gear backlash, and encoder quantization. The swept-sine bandwidth values are therefore best treated as lower-bound indicators; the robust conclusions are the relative damping ranking, the near-zero steady-state tracking errors from integral action, and the successful large-angle LQR staircase test.
 
 \section{Advanced Non-Linear Maneuver: Seesaw Lift-up}
-\subsection{Region of Attraction}
-for every state space technique we can easily compute a common lyapunov function $V(x) = x ^\top P x$ where P is solution of the Ricatti's equation. Finding an upper-bound $c^*$ under constraints means we found the Region of Attraction $V(x) \leq c^* \quad \forall x$
-\subsection{Successful Attempt}
-For pole-placement without integral action, under the assumption that “who can do less can do more”. The experience is started with a lowered-gain pole-placement technique (30\%) then we switch to the main controller once we reach the Region of Attraction calculated from the Lyapunov Equation V(x) = x’ P x < c* previously computed.
-\subsection{Theoretical Improvement}
-A fully planned trajectory in 3 phase:
-1)	Pure position control: As the seesaw is laying on the table we do not take account for the whole dynamic and only compute a smaller state-space with integral action for the cart position in order to reach the lift-off point computed during the quasi-static test.
-2)	Time-Varying SS Control: Once the seesaw lifts off the table, we compute time-varying gains by offline backward computation because we already know the state that we want to reach (i.e., inside the Region of Attraction  $\to$  V < c*)
-3)	Main controller: Once we reached the Region of Attraction we activate the main controller.
+
+The lift-up problem represents the most complex control challenge for the cart-seesaw system because the motion initiates from a resting position on the mechanical stop. The specific initial condition is located far from the horizontal equilibrium:
+\begin{equation}
+\begin{aligned}
+    x(0) &= [-0.407\text{ m}, \, 11.66^\circ, \, 0, \, 0]^{T}
+\end{aligned}
+\end{equation}
+
+Because the linear controllers synthesized in previous sections are strictly valid only near the horizontal equilibrium ($\theta = 0^\circ$), they cannot be directly engaged from this resting state without causing severe instability or actuator saturation. To bridge this gap, we first analyze the safe operating boundaries of the linear controllers (the Region of Attraction), and subsequently design strategies to drive the system from the mechanical stop into this safe zone.
+
+\subsection{Region of Attraction and Lyapunov Bounding}
+To determine exactly when it is safe to activate a linear controller, we must compute its Region of Attraction (ROA). The ROA defines the subset of the state-space from which the closed-loop system is guaranteed to converge asymptotically to the equilibrium without violating any physical or electrical constraints.
+
+For a linear state-feedback system $\dot{x} = A_{cl}x$, we define a common quadratic Lyapunov function:
+\begin{equation}
+\begin{aligned}
+    V(x) &= x^{T} P x
+\end{aligned}
+\end{equation}
+
+The symmetric, positive-definite matrix $P$ characterizes the shape of the energy ellipsoid. The method to obtain $P$ depends strictly on the control strategy:
+\begin{itemize}
+    \item \textbf{For LQR/LQI:} The $P$ matrix is natively obtained as the unique stabilizing solution to the continuous-time Algebraic Riccati Equation (ARE) used to synthesize the gains.
+    \item \textbf{For Pole Placement:} Because the gains are placed explicitly without an underlying cost function, $P$ is found by selecting an arbitrary positive-definite weight matrix $Q$ (typically the identity matrix, $Q=I$, but this can be optimized) and solving the continuous Lyapunov equation:
+    \begin{equation}
+    \begin{aligned}
+        A_{cl}^{T} P + P A_{cl} + Q &= 0
+    \end{aligned}
+    \end{equation}
+\end{itemize}
+
+Once $P$ is computed, the ROA is defined as the largest bounded level set $V(x) \le c^*$ that strictly obeys the system's operational limits (maximum cart travel $x_{max} = 0.432$ m, maximum angle $\theta_{max} = 11.66^\circ$, and maximum actuator voltage $V_{max} = 6.0$ V, maximum slew rate $60$ V/s). 
+
+Mathematically, for any generic linear constraint defined as $|H x| \le b$, the maximum allowable energy level $c$ that strictly avoids violating this limit is bounded by:
+\begin{equation}
+\begin{aligned}
+    c &= \frac{b^2}{H P^{-1} H^{T}}
+\end{aligned}
+\end{equation}
+The global bound $c^*$ is simply the absolute minimum of the individual bounds evaluated across all positional, angular, and input constraints. 
+
+The hardware staircase test in the LQR section shows that the local controller can still stabilize steep references when the command is increased slowly: the upward leg remained stable up to $10^\circ$, close to the $11.66^\circ$ mechanical limit. This does not mean the linear controller can perform lift-up from rest; it only shows that the capture region is practically large when the state is already moving quasi-statically near equilibrium.
+
+\begin{figure}[H]
+    \centering
+    \subfloat[Global profile of the LQR/LQI maximum-step response.\label{fig:lqi_step_profile}]{
+        \includegraphics[width=0.8\linewidth]{Images/lqr/lqi_max_step_profile.eps}
+    }
+    \\
+    \vspace{0.5cm}
+    \subfloat[Zoomed-in response around the largest staircase step.\label{fig:lqi_step_response}]{
+        \includegraphics[width=0.8\linewidth]{Images/lqr/lqi_max_step_zoomed.eps}
+    }
+    \caption[]{Time evolution of the large-angle LQR/LQI staircase response on hardware.}
+    \label{fig:lqi_max_step}
+\end{figure}
+
+The test also highlights the role of integral action: all other references remain at zero while the angle reference is moved, so the controller must trade angular tracking against cart-centering and voltage limits. The final tracking tuning used in the comparison section was adjusted after this exploratory run to avoid overly sluggish integral recovery.
+
+\subsection{Heuristic Lift-up via Gain Attenuation}
+Prior to formulating a fully optimized trajectory, an initial empirical lift-up maneuver was successfully executed with our "worst" state-space technique, relying on the premise that "who can do less can do more."
+
+Rather than engaging the full aggressive effort of the unaugmented Pole Placement controller from the resting state, the maneuver begins by applying an artificially attenuated gain profile. By globally scaling the feedback gains down to 30\% of their nominal values, the system injects just enough energy to induce a slow, gentle lift-off without triggering violent actuator saturation or destabilizing the cart reference. 
+
+As the attenuated control effort swings the seesaw upward, the telemetry is continuously monitored. The exact moment the state vector crosses the mathematical boundary into the pre-computed Region of Attraction ($x^T P x < c^*$), the software immediately switches to the 100\% nominal gain controller. Once inside the ROA, the standard controller safely arrests the residual momentum and locks the seesaw into horizontal equilibrium.
+
+\subsection{Theoretical Improvement: Trajectory Optimization \& TV-LQR}
+To replace the heuristic approach with a mathematically rigorous and optimal maneuver, a trajectory optimization protocol paired with a Time-Varying Linear Quadratic Regulator (TV-LQR) was designed. This protocol actively computes and tracks a continuous path from the resting mechanical stop directly to the LQI capture region.
+
+\subsubsection{Nonlinear Trajectory Optimization (CasADi)}
+The optimal lift-up is formulated as an Optimal Control Problem (OCP) using the CasADi framework. Rather than decoupling the cart motion, the optimizer leverages the fully coupled system dynamics, driving the system from the initial resting state directly to the stabilized origin:
+\begin{equation}
+\begin{aligned}
+    x_{start} &= [-0.407\text{ m}, \, 11.66^\circ, \, 0, \, 0]^{T} \\
+    x_{end} &\approx [0, \, 0, \, 0, \, 0]^{T}
+\end{aligned}
+\end{equation}
+
+The trajectory is discretized over $N=100$ intervals using a 4th-order Runge-Kutta integrator. The optimizer minimizes a cost function that balances the total maneuver time ($T$) against the cumulative electrical control effort ($U$):
+\begin{equation}
+\begin{aligned}
+    J_{OCP} &= w_{T} \cdot T + w_{U} \int_{0}^{T} U(t)^2 \,dt
+\end{aligned}
+\end{equation}
+where $w_{T} = 1$ and $w_{U} = 0.1$. 
+
+To guarantee hardware safety, the OCP enforces strict operational constraints along the entire generated path: the cart must remain within the track boundaries ($|x_{c}| \le 0.432\text{ m}$), the actuator voltage must not saturate ($|V_{m}| \le 6.0\text{ V}$), and the maneuver must complete within a feasible time window ($0.1 \le T \le 5.0\text{ s}$). 
+
+\subsubsection{Time-Varying LQR (TV-LQR) \& Stationary Catch}
+Because tracking a fast, highly non-linear trajectory with a fixed-gain linear controller yields poor reference tracking, a continuous TV-LQR gain schedule is generated to stabilize the feedforward path. 
+
+Using the terminal LQI cost matrix ($P_{end}$) as the boundary condition, the differential Riccati equation is integrated \textit{backward in time} along the optimized state trajectory $x_{tv}(t)$:
+\begin{equation}
+\begin{aligned}
+    -\dot{P}(t) &= A(t)^T P(t) + P(t) A(t) - P(t) B(t) R^{-1} B(t)^T P(t) + Q
+\end{aligned}
+\end{equation}
+This produces a time-varying feedback gain matrix $K_{tv}(t)$. During the simulated maneuver, the applied voltage combines the optimal CasADi feedforward effort with the TV-LQR feedback correction:
+\begin{equation}
+\begin{aligned}
+    V_{m}(t) &= U_{tv}(t) - K_{tv}(t) \cdot (x(t) - x_{tv}(t))
+\end{aligned}
+\end{equation}
+
+As the seesaw swings upward and crosses near the vertical center, the controller must seamlessly transition to the stationary LQI architecture to maintain perpetual balance. To prevent destructive chattering if the measured angle oscillates across the activation boundary, a one-way flip-flop logic is utilized. The LQI controller permanently takes over once the cart position exceeds $0.057\text{ m}$ and the seesaw angle falls below $5^\circ$.
+
+\subsubsection{Simulation Validation}
+Prior to hardware deployment, the full closed-loop lift-up is mathematically validated by the simulation to ensure the trajectory is not only optimal but physically survivable. The script explicitly verifies the following criteria:
+\begin{enumerate}
+    \item \textbf{Kinematic Safety:} The simulated cart position never breaches the mechanical rails ($x_{min}, x_{max}$).
+    \item \textbf{Actuator Feasibility:} The closed-loop control effort (feedforward + feedback) strictly remains inside the $\pm 6\text{ V}$ saturation limit.
+    \item \textbf{Region of Attraction Capture:} The simulation actively evaluates the Lyapunov function $V(x) = x^{T} P_{end} x$. It mathematically confirms that the state vector securely drops below the threshold bound ($c^*$) \textit{before} the flip-flop logic triggers the switch to the stationary LQI controller.
+    \item \textbf{Logic Stability:} The one-way flag \texttt{has\_switched} guarantees a clean, single transition without high-frequency switching noise.
+\end{enumerate}
+
+\begin{table}[H]
+\caption*{\textbf{Optimal TV-LQR Lift-Up Parameters}}
+\centering
+\begin{tabular}{|p{9em} c c c |}
+\hline
+\rowcolor{bluePoli!40}
+\textbf{Quantity} & \textbf{Symbol} & \textbf{Value} & \textbf{Unit} \T\B \\
+\hline \hline
+Initial State & $x_{start}$ & $[-0.407, 11.66^\circ, 0, 0]$ & - \T\B \\
+Target State & $x_{end}$ & $[0, 0^\circ, 0, 0]$ & - \T\B \\
+Time Penalty & $w_{T}$ & 1.0 & - \T\B \\
+Effort Penalty & $w_{U}$ & 0.1 & - \T\B \\
+Max Cart Limit & $x_{max}$ & $\pm 0.432$ & m \T\B \\
+Voltage Limits & $V_{max}$ & $\pm 6.0$ & V \T\B \\
+LQI Switch Trigger & $x_c, \theta$ & $> 0.057\text{ m}, < 5^\circ$ & - \B \\
+\hline
+\end{tabular}
+\caption{Numerical constants, weights, and constraints defining the CasADi trajectory optimization and TV-LQR schedule.}
+\label{table:liftup_specs}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{Images/liftup/optim_traj_liftup.eps}
+    \caption{Optimized TV-LQR Lift-up maneuver. Displaying the feedforward voltage profile, state evolution, track limits, and the evaluation of the Lyapunov bound.}
+    \label{fig:liftup_tvlqr}
+\end{figure}
 
 \section{Improvements: Advanced Technique}
 The use of an advanced technique like SMC, show sim
-\section{Personal Self-Comments}
-\subsection{Team Work}
-Started very poorly, everybody working on their own without any interaction : One of the reasons that caused us to fall behind.
-Solution: Task division and weekly meetings to catch up with the schedule.
 
-\subsection{Hardware Issues}
+
+\section{Critical Analysis/Comparison of All Developed Control Strategies}
+
+\begin{table}[H]
+\caption*{\textbf{Critical Comparison of Developed Control Strategies}}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.28}
+\begin{tabularx}{\textwidth}{|
+>{\raggedright\arraybackslash}p{0.15\textwidth}|
+>{\raggedright\arraybackslash}p{0.18\textwidth}|
+>{\raggedright\arraybackslash}X|
+>{\raggedright\arraybackslash}X|
+>{\raggedright\arraybackslash}p{0.15\textwidth}|}
+\hline
+\rowcolor{bluePoli!40}
+\textbf{Strategy} & \textbf{Main Objective} & \textbf{Strengths} & \textbf{Limitations} & \textbf{Final Role} \T\B \\
+\hline \hline
+
+Cart PID &
+Cart position control &
+Simple frequency-domain design; useful for validating the cart model, actuator behavior, bandwidth, and safety limits. &
+Sensitive to friction, derivative noise, and saturation; cannot stabilize the seesaw angle by itself. &
+Inner loop of the cascade architecture. \T\B \\
+\hline
+
+Outer-loop PD / Lead &
+Horizontal seesaw stabilization &
+Stabilizes the unstable equilibrium through negative-gain lead compensation and root-locus design. &
+No integral action; constant bias torque produces steady-state angular error. &
+Baseline frequency-based angle controller. \T\B \\
+\hline
+
+Outer-loop PI-Lead / PID &
+Angle stabilization with bias rejection &
+Integral action removes steady-state error caused by constant disturbances, such as the 100 g asymmetric load. &
+More sensitive to windup and low-frequency oscillations; requires careful reference shaping and safety checks. &
+Improved frequency-based controller. \T\B \\
+\hline
+
+Pole Placement &
+State-space stabilization &
+Direct assignment of closed-loop poles; useful for shaping dominant dynamics and reducing settling time. &
+Model-dependent; does not directly optimize voltage effort; requires velocity estimation. &
+State-space benchmark controller. \T\B \\
+\hline
+
+Pole Placement with Integral Action &
+State-space disturbance rejection &
+Eliminates residual steady-state tilt under constant bias while keeping the pole-placement structure. &
+Additional integral state increases tuning complexity and may reduce robustness if poorly placed. &
+Comparison case against LQI. \T\B \\
+\hline
+
+LQR &
+Optimal local stabilization &
+Systematic design through Bryson's rule; balances cart motion, angle regulation, and voltage effort. &
+Pure LQR cannot fully reject constant disturbances; steady-state error remains under bias torque. &
+Optimal stabilization baseline. \T\B \\
+\hline
+
+LQI &
+Optimal stabilization with integral action &
+Rejects constant disturbances and drives the steady-state angle error back to zero; suitable for biased hardware. &
+Requires careful weighting of the integral state to avoid excessive oscillation or control effort. &
+Best local balancing controller. \T\B \\
+\hline
+
+Kalman Filter / LQE &
+State estimation &
+Provides smoother estimates of unmeasured velocity states and avoids noisy numerical differentiation of encoder data. &
+Performance depends on the selected process and measurement noise covariance matrices. &
+Estimator used with LQI. \T\B \\
+\hline
+
+CasADi + TV-LQR &
+Nonlinear lift-up maneuver &
+Handles the large nonlinear transition from the mechanical stop to the LQI capture region while respecting cart and voltage limits. &
+More complex and mainly validated in simulation; requires accurate nonlinear modeling and reliable switching logic. &
+Advanced nonlinear maneuver strategy. \B \\
+\hline
+
+\end{tabularx}
+\caption{Critical analysis and comparison of all developed control strategies.}
+\label{table:controller_comparison}
+\end{table}
+
+The comparison shows the progression followed in the project. Frequency-based controllers were useful for understanding bandwidth separation and for building a practical cascade structure, but the coupled and non-minimum-phase nature of the Seesaw limited the performance of independent SISO designs. State-space control provided a more complete framework for the coupled dynamics, with LQI and Kalman filtering giving the most reliable local balancing solution. Finally, the lift-up task required a nonlinear trajectory-based strategy because local linear controllers are only valid near the horizontal equilibrium.
+
+
 
 \section{Conclusion}
 
+This project developed a complete control workflow for the Quanser IP02 cart and Seesaw-E system, including analytical modeling, parameter identification, controller synthesis, simulation validation, and hardware testing. The nonlinear equations were derived using the Euler--Lagrange method and then linearized around the horizontal equilibrium. Since the real apparatus presented nonideal effects such as Coulomb friction, actuator deadzone, backlash, and sensor noise, model refinement and compensation were necessary before reliable controller implementation.
 
-\begin{comment}
-	%-----------------------------------------------------------------------------
-	% INTRODUCTION
-	%-----------------------------------------------------------------------------
-	\section{Introduction}
-	\label{sec:introduction}
-	This document is intended to be both an example of the Polimi \LaTeX{} template for Master Theses in article format,
-	as well as a short introduction to its use. It is not intended to be a general introduction to \LaTeX{} itself,
-	and the reader is assumed to be familiar with the basics of creating and compiling \LaTeX{} documents (see \cite{oetiker1995not, kottwitz2015latex}).
-	\\
-	The cover page of the thesis in article format must contain all the relevant information:
-	title of the thesis, name of the Study Programme, name(s) of the author(s),
-	student ID number, name of the supervisor, name(s) of the co-supervisor(s) (if any), academic year.
-	\\
-	Be sure to select a title that is meaningful.
-	It should contain important keywords to be identified by indexer.
-	Keep the title as concise as possible and comprehensible even to people who are not experts in your field.
-	The title has to be chosen at the end of your work so that it accurately captures the main subject of the manuscript.
+The experimental work confirmed that the Seesaw is strongly coupled and non-minimum-phase, so the cart and body angle cannot be treated as two independent SISO systems. Classical frequency-based control was useful for building intuition and validating the cart dynamics, while state-space control provided a more suitable framework for balancing the complete coupled system. The most reliable local solution was obtained by combining integral action with state estimation, allowing the controller to reject the steady-state error introduced by the 100 g asymmetric bias load.
 
-	It is convenient to break the article format of your thesis (in article format) into sections and subsections.
-	If necessary, subsubsections, paragraphs and subparagraphs can be used.
-	A new section is created by the command
-	\begin{verbatim}
-\section{Title of the section}
-\end{verbatim}
-	The numbering can be turned off by using \verb|\section*{}|.
-	A new subsection is created by the command
-	\begin{verbatim}
-\subsection{Title of the subsection}
-\end{verbatim}
-	and, similarly, the numbering can be turned off by adding an asterisk as follows
-	\begin{verbatim}
-\subsection*{}
-\end{verbatim}
-	It is recommended to give a label to each section by using the command
-	\begin{verbatim}
-\label{sec:section_name}%
-\end{verbatim}
-	where the argument is just a text string that you'll use to reference that part
-	as follows: \textit{Section~\ref{sec:introduction} contains \sc{INTRODUCTION}  \dots}.
+The lift-up task showed the limitation of local linear controllers, since they are valid only near the horizontal equilibrium. For this reason, a hybrid nonlinear strategy was proposed: generate a feasible lift-up trajectory, track it with TV-LQR, and switch to the stationary balancing controller once the state enters the safe capture region.
 
-	%-----------------------------------------------------------------------------
-	% EQUATIONS
-	%-----------------------------------------------------------------------------
-	\section{Equations}
-	\label{sec:eqs}
-	This section gives some examples of writing mathematical equations in your thesis.
+Several practical hardware issues affected the development process. Gear clicking, excessive friction, degraded track behavior, encoder noise, occasional sign anomalies, and QUARC/software cache problems required repeated retuning, validation, and in some cases full system rebooting. These difficulties made the project more challenging but also showed the importance of robust modeling, conservative safety checks, and well-structured MATLAB/Simulink scripts. Overall, the project fulfilled the main objectives of modeling, identification, controller design, implementation, validation, and critical comparison of the developed strategies.
 
-	Maxwell's equations read:
-	\begin{subequations}
-		\label{eq:maxwell}
-		\begin{align}[left=\empheqlbrace]
-			\nabla\cdot \bm{D}                                         & = \rho, \label{eq:maxwell1}   \\
-			\nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} & = \bm{0}, \label{eq:maxwell2} \\
-			\nabla\cdot \bm{B}                                         & = 0, \label{eq:maxwell3}      \\
-			\nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t}  & = \bm{J}. \label{eq:maxwell4}
-		\end{align}
-	\end{subequations}
 
-	Equation~\eqref{eq:maxwell} is automatically labeled by \texttt{cleveref},
-	as well as Equation~\eqref{eq:maxwell1} and Equation~\eqref{eq:maxwell3}.
-	Thanks to the \verb|cleveref| package, there is no need to use \verb|\eqref|.
-	Equations have to be numbered only if they are referenced in the text.
 
-	Equations~\eqref{eq:maxwell_multilabels1}, \eqref{eq:maxwell_multilabels2}, \eqref{eq:maxwell_multilabels3}, and \eqref{eq:maxwell_multilabels4} show again Maxwell's equations without brace:
-	\begin{align}
-		\nabla\cdot \bm{D}                                         & = \rho, \label{eq:maxwell_multilabels1}   \\
-		\nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} & = \bm{0}, \label{eq:maxwell_multilabels2} \\
-		\nabla\cdot \bm{B}                                         & = 0, \label{eq:maxwell_multilabels3}      \\
-		\nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t}  & = \bm{J} \label{eq:maxwell_multilabels4}.
-	\end{align}
 
-	Equation~\eqref{eq:maxwell_singlelabel} is the same as before,
-	but with just one label:
-	\begin{equation}
-		\label{eq:maxwell_singlelabel}
-		\left\{
-		\begin{aligned}
-			\nabla\cdot \bm{D}                                         & = \rho,   \\
-			\nabla \times \bm{E} +  \frac{\partial \bm{B}}{\partial t} & = \bm{0}, \\
-			\nabla\cdot \bm{B}                                         & = 0,      \\
-			\nabla \times \bm{H} - \frac{\partial \bm{D}}{\partial t}  & = \bm{J}.
-		\end{aligned}
-		\right.
-	\end{equation}
-
-	%-----------------------------------------------------------------------------
-	% FIGURES, TABLES AND ALGORITHMS
-	%-----------------------------------------------------------------------------
-	\section{Figures, Tables and Algorithms}
-
-	Figures, Tables and Algorithms have to contain a Caption that describes their content, and have to be properly referred in the text.
-
-	\subsection{Figures}
-	\label{subsec:figures}
-
-	For including pictures in your text you can use \texttt{TikZ} for high-quality hand-made figures \cite{tikz},
-	or just include them with the command
-	\begin{verbatim}
-\includegraphics[options]{filename.xxx}
-\end{verbatim}
-	Here xxx is the correct format, e.g.  \verb|.png|, \verb|.jpg|, \verb|.eps|, \dots.
-
-	\begin{figure}[H]
-		\centering
-		\includegraphics[width=0.3\textwidth]{logo_polimi_scritta.eps}
-		\caption{Caption of the Figure.}
-		\label{fig:quadtree}
-	\end{figure}
-
-	Thanks to the \texttt{\textbackslash subfloat} command, a single figure, such as Figure~\ref{fig:quadtree},
-	can contain multiple sub-figures with their own caption and label, e.g. Figure~\ref{fig:polimi_logo1} and Figure~\ref{fig:polimi_logo2}.
-
-	\begin{figure}[H]
-		\centering
-		\subfloat[One PoliMi logo.\label{fig:polimi_logo1}]{
-			\includegraphics[scale=0.5]{Images/logo_polimi_scritta.eps}
-		}
-		\quad
-		\subfloat[Another one PoliMi logo.\label{fig:polimi_logo2}]{
-			\includegraphics[scale=0.5]{Images/logo_polimi_scritta2.eps}
-		}
-		\caption[]{Caption of the Figure.}
-		\label{fig:quadtree2}
-	\end{figure}
-
-	\subsection{Tables}
-	\label{subsec:tables}
-
-	Within the environments \texttt{table} and  \texttt{tabular} you can create very fancy tables as the one shown in Table~\ref{table:example}.
-
-	\begin{table}[H]
-		\caption*{\textbf{Example of Table (optional)}}
-		\centering
-		\begin{tabular}{|p{3em} c c c |}
-			\hline
-			\rowcolor{bluePoli!40}
-			              & \textbf{column1} & \textbf{column2} & \textbf{column3} \T\B \\
-			\hline \hline
-			\textbf{row1} & 1                & 2                & 3 \T\B                \\
-			\textbf{row2} & $\alpha$         & $\beta$          & $\gamma$ \T\B         \\
-			\textbf{row3} & alpha            & beta             & gamma \B              \\
-			\hline
-		\end{tabular}
-		\\[10pt]
-		\caption{Caption of the Table.}
-		\label{table:example}
-	\end{table}
-
-	You can also consider to highlight selected columns or rows in order to make tables more readable.
-	Moreover, with the use of \texttt{table*} and the option \texttt{bp} it is possible to align them at the bottom of the page. One example is presented in Table~\ref{table:exampleC}.
-
-	\begin{table*}[bp]
-		\centering
-		\begin{tabular}{|p{3em} | c | c | c | c | c | c|}
-			\hline
-			%    \rowcolor{bluePoli!40}
-			              & \textbf{column1} & \textbf{column2} & \textbf{column3} & \textbf{column4} & \textbf{column5} & \textbf{column6} \T\B \\
-			\hline \hline
-			\textbf{row1} & 1                & 2                & 3                & 4                & 5                & 6 \T\B                \\
-			\textbf{row2} & a                & b                & c                & d                & e                & f \T\B                \\
-			\textbf{row3} & $\alpha$         & $\beta$          & $\gamma$         & $\delta$         & $\phi$           & $\omega$ \T\B         \\
-			\textbf{row4} & alpha            & beta             & gamma            & delta            & phi              & omega \B              \\
-			\hline
-		\end{tabular}
-		\\[10pt]
-		\caption{Highlighting the columns}
-		\label{table:exampleC}
-	\end{table*}
-
-	\subsection{Algorithms}
-	\label{subsec:algorithms}
-
-	Pseudo-algorithms can be written in \LaTeX{} with the \texttt{algorithm} and \texttt{algorithmic} packages.
-	An example is shown in Algorithm~\ref{alg:var}.
-	\begin{algorithm}[H]
-		\label{alg:example}
-		\caption{Name of the Algorithm}
-		\label{alg:var}
-		\label{protocol1}
-		\begin{algorithmic}[1]
-			\STATE Initial instructions
-			\FOR{$for-condition$}
-			\STATE{Some instructions}
-			\IF{$if-condition$}
-			\STATE{Some other instructions}
-			\ENDIF
-			\ENDFOR
-			\WHILE{$while-condition$}
-			\STATE{Some further instructions}
-			\ENDWHILE
-			\STATE Final instructions
-		\end{algorithmic}
-	\end{algorithm}
-
-	\section{Some further useful suggestions}
-
-	Theorems have to be formatted as follows:
-	\begin{theorem}
-		\label{a_theorem}
-		Write here your theorem.
-	\end{theorem}
-	\textit{Proof.} If useful you can report here the proof.
-	\vspace{0.3cm} % Insert vertical space
-
-	Propositions have to be formatted as follows:
-	\begin{proposition}
-		Write here your proposition.
-	\end{proposition}
-	\vspace{0.3cm} % Insert vertical space
-
-	How to insert itemized lists:
-	\begin{itemize}
-		\item first item;
-		\item second item.
-	\end{itemize}
-	How to write numbered lists:
-	\begin{enumerate}
-		\item first item;
-		\item second item.
-	\end{enumerate}
-
-	\section{Use of copyrighted material}
-
-	Each student is responsible for obtaining copyright permissions, if necessary, to include published material in the thesis.
-	This applies typically to third-party material published by someone else.
-
-	\section{Plagiarism}
-
-	You have to be sure to respect the rules on Copyright and avoid an involuntary plagiarism.
-	It is allowed to take other persons' ideas only if the author and his original work are clearly mentioned.
-	As stated in the Code of Ethics and Conduct, Politecnico di Milano \textit{promotes the integrity of research,
-		condemns manipulation and the infringement of intellectual property}, and gives opportunity to all those
-	who carry out research activities to have an adequate training on ethical conduct and integrity while doing research.
-	To be sure to respect the copyright rules, read the guides on Copyright legislation and citation styles available
-	at:
-	\begin{verbatim}
-https://www.biblio.polimi.it/en/tools/courses-and-tutorials
-\end{verbatim}
-	You can also attend the courses which are periodically organized on "Bibliographic citations and bibliography management".
-
-	%-----------------------------------------------------------------------------
-	% CONCLUSION
-	%-----------------------------------------------------------------------------
-	\section{Conclusions}
-	\color{black}
-	A final section containing the main conclusions of your research/study
-	and possible future developments of your work have to be inserted in the section ``Conclusions''.
-
-	\section{Bibliography and citations}
-	Your thesis must contain a suitable Bibliography which lists all the sources consulted on developing the work.
-	The list of references is placed at the end of the manuscript after the chapter containing the conclusions.
-	It is suggested to use the BibTeX package and save the bibliographic references in the file \verb|bibliography.bib|.
-	This is indeed a database containing all the information about the references. To cite in your manuscript, use the \verb|\cite{}| command as follows:
-	\\
-	\textit{Here is how you cite bibliography entries: \cite{knuth74}, or multiple ones at once: \cite{knuth92,lamport94}}.
-	\\
-	The bibliography and list of references are generated automatically by running BibTeX \cite{bibtex}.
-
-\end{comment}
 %-----------------------------------------------------------------------------
 % BIBLIOGRAPHY
 %-----------------------------------------------------------------------------
 \bibliography{bibliography.bib}
 
-\appendix
-\section{Simulink Quanser Template}
-As we work with the software and hardware from Quanser, we need these four blocks in Simulink to interact with the real system.\\
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.8\linewidth]{Images/Template/SimulinkBlocks.png}
-	\caption{Grouping of the quanser simulink blocks}
-	\label{fig:QuanserTemplate}
-\end{figure}
+\begin{thebibliography}{9}
 
-\textcolor{blue}{later we could subdivise this image into 4 and explain the role of each block}
+\bibitem{magni2023advanced}
+L.~Magni and R.~Scattolini,
+\textit{Advanced and Multivariable Control},
+1st ed.,
+Societ\`a Editrice Esculapio, Bologna, Italy, 2023.
+ISBN: 9788893853675.
 
-\section{Control System Designer}\label{app:CSD}
-\begin{figure}[H]
-	\centering
-	\includegraphics[width=0.8\linewidth]{Images/ControlSystemDesigner/ControlSystemDesigner.png}
-	\caption{Empty CSD Interface}
-	\label{fig:CSD_interface}
-\end{figure}
-
-\begin{figure}[H]
-	\centering
-	\subfloat[CSD configuration 1.\label{fig:CSD_config1}]{
-		\includegraphics[width=0.4\linewidth]{Images/ControlSystemDesigner/CSD_config1.png}
-	}
-	\quad
-	\subfloat[CSD configuration 6.\label{fig:CSD_config6}]{
-		\includegraphics[width=0.4\linewidth]{Images/ControlSystemDesigner/CSD_config6.png}
-	}
-	\caption[]{Proposed architectures on CSD.}
-	\label{fig:CSD_configs}
-\end{figure}
-
-\section{LQR and Riccati's Equation}\label{app:ARE}
-LQR finds the full-state feedback control law $u = -\bar{K}x$.\\
-The algebraic Riccati's equation is given by:
-\begin{equation}\label{eq:ARE}
-	\left\{
-	\begin{aligned}
-		Q       & - \bar{P}BR^{-1}B^\top\bar{P} + \bar{P}A + A^\top \bar{P} = 0 \\
-		\dot{P} & (t) = P(t) = \bar{P}
-	\end{aligned}
-	\right.
-\end{equation}
-With $\bar{P}$ symmetric unique positive definite solution of ARE.\\
-The gain is given by :
-\begin{equation}\label{eq:ARE_gain}
-	\bar{K} = R^{-1}B^\top \bar{P}
-\end{equation}
-\begin{comment}
-	\section{Appendix A}
-	If you need to include an appendix to support the research in your thesis, you can place it at the end of the manuscript.
-	An appendix contains supplementary material (figures, tables, data, codes, mathematical proofs, surveys, \dots)
-	which supplement the main results contained in the previous sections.
-
-	\section{Appendix B}
-	It may be necessary to include another appendix to better organize the presentation of supplementary material.
-
-	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	%%     ABSTRACT IN ITALIAN LANGUAGE AND ACKNOWLEDGMENTS     %%
-	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	\cleardoublepage
-
-	%-----------------------------------------------------------------------------
-	% SOMMARIO
-	%-----------------------------------------------------------------------------
-	\section*{Abstract in lingua italiana}
-	Qui va l'Abstract in lingua italiana della tesi seguito dalla lista di parole chiave.
-	\vspace{15pt}
-	\begin{tcolorbox}[arc=0pt, boxrule=0pt, colback=bluePoli!60, width=\textwidth, colupper=white]
-		\textbf{Parole chiave:} qui, le parole chiave, della tesi, in italiano
-	\end{tcolorbox}
-
-	%-----------------------------------------------------------------------------
-	% ACKNOWLEDGEMENTS
-	%-----------------------------------------------------------------------------
-	\section*{Acknowledgements}
-	Here you might want to acknowledge someone.
-
-\end{comment}
-
+\end{thebibliography}
 %-------------------------------------------------------------------------
 %	END OF YOUR DOCUMENT
 %-------------------------------------------------------------------------

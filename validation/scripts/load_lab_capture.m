@@ -136,7 +136,7 @@ end
 function lbl = local_controller_label(base)
 b = upper(base);
 if contains(b,'PPDD'),            lbl = 'PP + dirty-deriv';
-elseif contains(b,'LQRDD'),       lbl = 'LQR + dirty-deriv';
+    elseif contains(b,'LQRDD'),       lbl = 'LQR + dirty-deriv';
 elseif strcmp(b,'PID_TEST_FULL'), lbl = 'Cascaded PID (full protocol)';
 elseif strcmp(b,'PID_STEP'),      lbl = 'Cascaded PID (step ref)';
 elseif strcmp(b,'PID'),           lbl = 'Cascaded PID (regulation)';
