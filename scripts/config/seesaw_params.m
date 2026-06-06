@@ -127,10 +127,10 @@ fprintf('  B_total = %.2f N*s/m (B_eq + B_emf)\n', B_total);
 % tf :  Gx(s) = X_c(s) / V_m(s)
 %             = alpha / (M_e * s^2 + B_tot * s)
 
-num_x = alpha_f;
+num_x = alpha_f * eta_m;
 den_x = [M_e, B_total, 0];
 
-Gx = minreal(alpha_f / (M_e*s + B_total) / s);
+Gx = minreal(alpha_f * eta_m/ (M_e*s + B_total) / s);
 fprintf('  [Phase 1] Gx(s) computed.\n');
 
 % Pre-computing to anticipate

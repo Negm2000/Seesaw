@@ -68,9 +68,9 @@ T_in = feedback(L_in, 1);   % Closed-Loop
 S_u_fb = C_in / (1 + L_in); % Feedback voltage sensitivity
 
 %% 6. SAVE
-save(fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat'), ...
-    'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in', ...
-    'C_in', 'L_in', 'T_in');
+%save(fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat'), ...
+%    'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in', ...
+%    'C_in', 'L_in', 'T_in');
 fprintf('\n  Tuned Inner Controller saved to: data/controller_inner_pid.mat\n');
 
 %% 4. BESSEL PRE-FILTER DESIGN
@@ -147,7 +147,7 @@ else
     data_dir = fullfile(SEESAW_ROOT, 'data', 'cartControl');
     if ~exist(data_dir, 'dir'), mkdir(data_dir); end
     
-    save(fullfile(data_dir, 'step_simulink.mat'), 'simulink_step', '-v7.3');
+    %save(fullfile(data_dir, 'step_simulink.mat'), 'simulink_step', '-v7.3');
     fprintf('>>> Saved to: /data/cartControl/step_simulink.mat\n');
     fprintf('>>> In Simulink, point your "From File" block to this file and run for 5.0 seconds.\n');
 end
@@ -248,8 +248,8 @@ if checks_passed
     data_dir = fullfile(SEESAW_ROOT, 'data', 'cartControl');
     if ~exist(data_dir, 'dir'), mkdir(data_dir); end
     
-    save(fullfile(data_dir, 'multisine_simulink.mat'), 'simulink_multisine_CL', '-v7.3');
-    save(fullfile(data_dir, 'multisine_params.mat'), 't_ms', 'x_ref_safe', 'w_vals', 'N_freq');
+    %save(fullfile(data_dir, 'multisine_simulink.mat'), 'simulink_multisine_CL', '-v7.3');
+    %save(fullfile(data_dir, 'multisine_params.mat'), 't_ms', 'x_ref_safe', 'w_vals', 'N_freq');
     
     fprintf('>>> Saved to: /data/cartControl/multisineL_simulink.mat\n');
     fprintf('>>> Run your Simulink model for %.1f seconds.\n', T_test);
@@ -258,17 +258,31 @@ else
     fprintf('Try increasing the taper_exponent (currently %.1f) to reduce high-frequency force.\n', taper_exponent);
 end
 
+fprintf('>>> Run your Simulink model for %.1f seconds.\n', T_test);
 % --- 9. Visualization ---
 figure('Name', 'Closed-Loop Multi-Sine Profile', 'Position', [150 150 900 600]);
 subplot(2,1,1);
-plot(t_ms, x_ref_safe*100, 'b', 'LineWidth', 1.2); hold on;
-plot(t_ms, x_pos_ms*100, 'r--', 'LineWidth', 1);
-ylabel('Position [cm]'); title('Command vs Predicted Position');
+plot(t_ms, x_ref_safe, 'b', 'LineWidth', 1.2); hold on;
+plot(t_ms, x_pos_ms, 'r--', 'LineWidth', 1);
+ylabel('Position [m]'); title('Command vs Predicted Position');
 legend('Reference ($x_{ref}$)', 'Predicted Output ($x_{pos}$)'); grid on;
 
 subplot(2,1,2);
-plot(t_ms, F_req_ms, 'k'); hold on;
-yline(F_clicking_limit, 'r--', 'Clicking Limit', 'LabelHorizontalAlignment', 'left');
-yline(-F_clicking_limit, 'r--');
-ylabel('Force [N]'); xlabel('Time [s]'); title('Predicted Rack Force');
-ylim([-F_clicking_limit*1.5, F_clicking_limit*1.5]); grid on;
+% Plot the compensated "real" hardware command (in red)
+plot(t_ms, v_total_ms, 'r--', 'LineWidth', 1, 'DisplayName', 'Hardware Command ($u_{real}$)');
+hold on;
+% Plot the ideal linear command (in blue)
+plot(t_ms, v_fb_ms, 'b-', 'LineWidth', 1.2, 'DisplayName', 'Linear Command ($u_{safe}$)');
+
+% Add threshold lines
+yline(V_sat, 'k-.', 'Hardware Peak Limit', 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
+yline(-V_sat, 'k-.', 'HandleVisibility', 'off');
+yline(V_nom, 'k--', 'Max Safe Limit', 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
+yline(-V_nom, 'k--', 'HandleVisibility', 'off');
+
+xlabel('Time [s]', 'Interpreter', 'latex');
+ylabel('Simulated Voltage [V]', 'Interpreter', 'latex');
+title('Schroeder-Phased Multi-Sine Input Vector', 'Interpreter', 'latex');
+grid on;
+legend('Location', 'northeast', 'Interpreter', 'latex');
+ylim([-V_sat*1.2, V_sat*1.2]);

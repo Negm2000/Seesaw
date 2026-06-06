@@ -189,15 +189,16 @@ figure('Name', 'Comparison Data', 'Position', [100 100 1000 700]);
 % --- Subplot 1: Voltage ---
 subplot(3,1,1);
 plot(t_hw, V_cmd_hw, 'k-'); 
-ylabel('$V_{cmd}$ [V]');
+ylabel('Input $V_{cmd}$ [V]');
 title('Step Input');
-ylim([-V_sat, V_sat]);
+ylim([0, V_nom]);
 grid on;
 
 % --- Subplot 2: Position ---
 subplot(3,1,2);
 plot(t_hw, xc_hw*100, 'k-', 'LineWidth', 2, 'DisplayName', 'Hardware'); 
 title('Cart Position'); 
+ylabel('Position $x_c$ [m]', 'Interpreter','latex')
 hold on;
 plot(t_hw, x_sim(best_params)*100, 'r-', 'LineWidth', 1.5, 'DisplayName', 'Optimized Model');
 plot(t_hw, x_sim(init_params)*100, 'b--', 'LineWidth', 1, 'DisplayName', 'Initial Model');
@@ -206,7 +207,7 @@ grid on;
 % --- Subplot 3: Velocity ---
 subplot(3,1,3);
 plot(tdot_hw, xcdot_hw*100, 'k-', 'LineWidth', 2, 'DisplayName', 'Hardware'); 
-ylabel('$\dot{x}_c$ [cm/s]');
+ylabel('Velocity $\dot{x}_c$ [m/s]', 'Interpreter', 'latex')
 title('Cart Velocity'); 
 hold on;
 plot(tdot_hw, v_sim(best_params)*100, 'r-', 'LineWidth', 1.5, 'DisplayName', 'Optimized Model');

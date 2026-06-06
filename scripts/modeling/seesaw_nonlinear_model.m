@@ -167,15 +167,13 @@ grid on
 hold on
 yline(ud_pos, 'r--', 'u_{d,pos}')
 yline(-ud_neg, 'm--', '-u_{d,neg}')
-xlabel('Time (s)')
-ylabel('Input u (V)')
+ylabel('Input $u$ [V]')
 title('Input Signal with Estimated Deadzone Levels')
 
 subplot(3,1,2)
 plot(t_hw, xc_hw, 'k', 'LineWidth', 1.0)
 grid on
-xlabel('Time (s)')
-ylabel('Position x (m)')
+ylabel('Position $x_c$ [m]', 'Interpreter','latex')
 title('Measured Position')
 
 subplot(3,1,3)
@@ -184,8 +182,8 @@ hold on
 plot(tdot_hw(pos_move_sustain), xcdot_hw(pos_move_sustain), 'r.', 'MarkerSize', 8)
 plot(tdot_hw(neg_move_sustain), xcdot_hw(neg_move_sustain), 'm.', 'MarkerSize', 8)
 grid on
-xlabel('Time (s)')
-ylabel('Velocity (m/s)')
+xlabel('Time [s]')
+ylabel('Velocity $\dot{x}_c$ [m/s]', 'Interpreter', 'latex')
 title('Estimated Velocity and Sustained-Motion Points')
 legend('$\dot{x}_c$', 'Positive motion', 'Negative motion', 'Location', 'best')
 

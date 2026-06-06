@@ -178,143 +178,122 @@ Bobs_d = [Bd, Ld];
 Cobs_d = eye(4);
 Dobs_d = zeros(4, 3);
 
-%% 6. TRAJECTORY TRACKING (tension feedforward)
+%% 6. SIMULATIONS AND PLOTS
+% =========================================================================
+% Setup Time and Conditions
+% =========================================================================
+t_sim = 0:0.002:5;
+theta0_deg = 1.0;
+x0_4 = [0; deg2rad(theta0_deg); 0; 0];
 
-% Parameterized trajectory references for Simulink
-% Use these variables directly in Sine Wave blocks.
-% Example block settings:
-%   theta_ref:     Amp = theta_ref_amp,     Bias = theta_ref_bias,
-%                  Freq = theta_ref_freq,   Phase = theta_ref_phase
-%   thetadot_ref:  Amp = thetadot_ref_amp,  Bias = thetadot_ref_bias,
-%                  Freq = thetadot_ref_freq, Phase = thetadot_ref_phase
-%   thetaddot_ref: Amp = thetaddot_ref_amp, Bias = thetaddot_ref_bias,
-%                  Freq = thetaddot_ref_freq, Phase = thetaddot_ref_phase
-%   xc_ref:        Amp = xc_ref_amp,        Bias = xc_ref_bias,
-%                  Freq = xc_ref_freq,      Phase = xc_ref_phase
-%   xcdot_ref:     Amp = xcdot_ref_amp,     Bias = xcdot_ref_bias,
-%                  Freq = xcdot_ref_freq,   Phase = xcdot_ref_phase
-%   xcddot_ref:    Amp = xcddot_ref_amp,    Bias = xcddot_ref_bias,
-%                  Freq = xcddot_ref_freq,  Phase = xcddot_ref_phase
+% =========================================================================
+% TEST 1: 1° Initial Condition Response (LQR)
+% =========================================================================
+disp('Running Test 1: 1° initial condition (LQR)...');
 
-% Body-angle reference
-Aref = 8/180*pi;               % about 3 deg in rad
-fref = 0.1;                 % reference frequency in Hz
-wref = 2*pi*fref;           % reference frequency in rad/s
+[t_yf, yf_x, uf_v, mf] = sim_lqr(A_sw, B_sw, K4, x0_4, t_sim);
 
-theta_ref_amp   = Aref;
-theta_ref_bias  = 0;
-theta_ref_freq  = wref;
-theta_ref_phase = 0;
+figure('Name', 'Test 1: LQR IC Response');
+subplot(3,1,1); plot(t_yf, rad2deg(yf_x(:,3)), 'LineWidth', 1.2); grid on
+ylabel('Angle $\theta$ [$^\circ$]')
+title(sprintf('LQR IC Response (%.1f°)', theta0_deg))
+subplot(3,1,2); plot(t_yf, yf_x(:,1), 'LineWidth', 1.2); grid on
+ylabel('Position $x_c$ [m]')
+subplot(3,1,3); plot(t_yf, uf_v, 'LineWidth', 1.2); grid on
+ylabel('Voltage $v_{cmd}$ [V]'); xlabel('Time [s]')
 
-thetadot_ref_amp   = theta_ref_amp * theta_ref_freq;
-thetadot_ref_bias  = 0;
-thetadot_ref_freq  = theta_ref_freq;
-thetadot_ref_phase = theta_ref_phase + pi/2;
+% =========================================================================
+% TEST 2: 100g Load Bias Comparison (LQR vs LQI)
+% =========================================================================
+disp('Running Test 2: 100g Load Bias Comparison...');
 
-thetaddot_ref_amp   = theta_ref_amp * theta_ref_freq^2;
-thetaddot_ref_bias  = 0;
-thetaddot_ref_freq  = theta_ref_freq;
-thetaddot_ref_phase = theta_ref_phase + pi;
+% Simulating the bias offset. (M_inv is assumed loaded via seesaw_params.m)
+[t_bias4, x_bias4, u_bias4, ~] = sim_bias_load(A_sw - B_sw*K4, K4, M_inv);
+[t_bias5, x_bias5, u_bias5, ~] = sim_bias_load_aug(A5 - B5*K5, K5, M_inv);
 
-% Dynamically consistent cart reference associated with theta_ref
-% For a sinusoidal theta_ref, solve for a harmonic xc_ref that satisfies
-% the coupled plant dynamics together with a single-input feedforward.
-% This avoids the inconsistent choice xc_ref = 0 for a nonzero theta_ref.
+figure('Name', 'Test 2: 100g Load Bias Comparison');
+subplot(3,1,1); hold on; grid on;
+plot(t_bias4, rad2deg(x_bias4(:,3)), 'b', 'LineWidth', 1.5);
+plot(t_bias5, rad2deg(x_bias5(:,3)), 'r--', 'LineWidth', 1.5);
+ylabel('Angle $\theta$ [$^\circ$]');
+title('100g Load Bias Response Comparison');
+legend('LQR (No Integral)', 'LQI (With Integral)', 'Location', 'Best');
 
-a31 = A_sw(3,1); a32 = A_sw(3,2); a33 = A_sw(3,3); a34 = A_sw(3,4);
-a41 = A_sw(4,1); a42 = A_sw(4,2); a43 = A_sw(4,3); a44 = A_sw(4,4);
-b3  = B_sw(3,1); b4  = B_sw(4,1);
+subplot(3,1,2); hold on; grid on;
+plot(t_bias4, x_bias4(:,1)*100, 'b', 'LineWidth', 1.5);
+plot(t_bias5, x_bias5(:,1)*100, 'r--', 'LineWidth', 1.5);
+ylabel('Position $x_c$ [cm]');
 
-r34 = b3 / b4;
-c1 = a31 - r34*a41;
-c2 = a32 - r34*a42;
-c3 = a33 - r34*a43;
-c4 = a34 - r34*a44;
+subplot(3,1,3); hold on; grid on;
+plot(t_bias4, u_bias4, 'b', 'LineWidth', 1.5);
+plot(t_bias5, u_bias5, 'r--', 'LineWidth', 1.5);
+ylabel('Voltage $v_{cmd}$ [V]');
+xlabel('Time [s]');
 
-Theta_ref_phasor = theta_ref_amp * exp(1j * theta_ref_phase);
-Hxc_theta = (c2 + 1j*c4*theta_ref_freq - r34*theta_ref_freq^2) ...
-          / (-theta_ref_freq^2 - 1j*c3*theta_ref_freq - c1);
-Xc_ref_phasor = Hxc_theta * Theta_ref_phasor;
+% =========================================================================
+% TEST 3: Kalman Observer vs Full-State LQR Response
+% =========================================================================
+disp('Running Test 3: Kalman Observer vs Controller...');
 
-xc_ref_amp   = abs(Xc_ref_phasor);
-xc_ref_bias  = 0;
-xc_ref_freq  = theta_ref_freq;
-xc_ref_phase = angle(Xc_ref_phasor);
+% Combine the physical plant dynamics with the Kalman filter error dynamics
+A_combined = [A_sw - B_sw*K4,   B_sw*K4;
+              zeros(4,4),       A_sw - L*C_sw];
 
-xcdot_ref_amp   = xc_ref_amp * xc_ref_freq;
-xcdot_ref_bias  = 0;
-xcdot_ref_freq  = xc_ref_freq;
-xcdot_ref_phase = xc_ref_phase + pi/2;
+% Initialize observer using only measured positions (zero initial velocities)
+xhat0  = [x0_4(1); x0_4(2); 0; 0]; 
+sys_combined = ss(A_combined, zeros(8,1), eye(8), zeros(8,1));
+z = initial(sys_combined, [x0_4; x0_4-xhat0], t_sim);
 
-xcddot_ref_amp   = xc_ref_amp * xc_ref_freq^2;
-xcddot_ref_bias  = 0;
-xcddot_ref_freq  = xc_ref_freq;
-xcddot_ref_phase = xc_ref_phase + pi;
+x_hist = z(:, 1:4);
+e_hist = z(:, 5:8);
+u_hist = -(K4 * (x_hist - e_hist)')';
 
-% Full-state feedforward for trajectory tracking
-% Use the full dynamically consistent reference state to build:
-%
-%   u_ff = uff_xc_gain*xc_ref + uff_theta_gain*theta_ref ...
-%        + uff_xcdot_gain*xcdot_ref + uff_thetadot_gain*thetadot_ref ...
-%        + uff_thetaddot_gain*thetaddot_ref
-%
-uff_xc_gain        =  g * M_total / D_T;
-uff_theta_gain     = -g * M_SW * D_C / D_T;
-uff_xcdot_gain     =  B_eq;
-uff_thetadot_gain  =  B_SW / D_T;
-uff_thetaddot_gain =  J_pivot / D_T;
+figure('Name', 'Test 3: Observer vs Controller IC');
+subplot(3,1,1); plot(t_sim, rad2deg(x_hist(:,3)), 'b-', 'LineWidth', 1.2); hold on;
+plot(t_yf, rad2deg(yf_x(:,3)), 'k--', 'LineWidth', 1.2); grid on;
+ylabel('Angle $\theta$ [$^\circ$]');
+legend('Kalman Observer', 'Full-State LQR', 'Location', 'Best')
+title(sprintf('Observer vs LQR IC Response (%.1f°)', theta0_deg))
 
-% Consistency check for the chosen tracking reference and full feedforward
-% This check evaluates whether the chosen reference trajectory xref(t) and
-% the model-based feedforward uff(t) satisfy the plant dynamics exactly:
-%
-%   xref_dot = A*xref + B*uff
-%
-% A small residual indicates that the selected reference is dynamically
-% feasible for the single-input plant.
+subplot(3,1,2); plot(t_sim, x_hist(:,1), 'b-', 'LineWidth', 1.2); hold on;
+plot(t_yf, yf_x(:,1), 'k--', 'LineWidth', 1.2); grid on;
+ylabel('Position $x_c$ [m]')
 
-t_check = linspace(0, 2/fref, 1000);
-xc_ref_check        = xc_ref_amp * sin(xc_ref_freq * t_check + xc_ref_phase) + xc_ref_bias;
-theta_ref_check     = theta_ref_amp * sin(theta_ref_freq * t_check + theta_ref_phase) + theta_ref_bias;
-xcdot_ref_check     = xcdot_ref_amp * sin(xcdot_ref_freq * t_check + xcdot_ref_phase) + xcdot_ref_bias;
-thetadot_ref_check  = thetadot_ref_amp * sin(thetadot_ref_freq * t_check + thetadot_ref_phase) + thetadot_ref_bias;
-xcddot_ref_check    = xcddot_ref_amp * sin(xcddot_ref_freq * t_check + xcddot_ref_phase) + xcddot_ref_bias;
-thetaddot_ref_check = thetaddot_ref_amp * sin(thetaddot_ref_freq * t_check + thetaddot_ref_phase) + thetaddot_ref_bias;
+subplot(3,1,3); plot(t_sim, u_hist, 'b-', 'LineWidth', 1.2); hold on;
+plot(t_yf, uf_v, 'k--', 'LineWidth', 1.2); grid on;
+ylabel('Voltage $v_{cmd}$ [V]'); xlabel('Time [s]')
 
-uff_nominal_check = uff_xc_gain * xc_ref_check ...
-                  + uff_theta_gain * theta_ref_check ...
-                  + uff_xcdot_gain * xcdot_ref_check ...
-                  + uff_thetadot_gain * thetadot_ref_check ...
-                  + uff_thetaddot_gain * thetaddot_ref_check;
+%% Helpers
 
-uff_check = uff_nominal_check;
-
-xref_check     = [xc_ref_check; theta_ref_check; xcdot_ref_check; thetadot_ref_check];
-xrefdot_check  = [xcdot_ref_check; thetadot_ref_check; xcddot_ref_check; thetaddot_ref_check];
-residual_check = zeros(4, numel(t_check));
-
-for k = 1:numel(t_check)
-    residual_check(:,k) = xrefdot_check(:,k) - (A_sw * xref_check(:,k) + B_sw * uff_nominal_check(k));
+function [t_out, y_out, v_out, m] = sim_lqr(A, B, K, x0, t)
+    Acl = A - B*K;
+    sys = ss(Acl, zeros(size(A,1), 1), eye(size(A,1)), zeros(size(A,1), 1));
+    [y_out, t_out] = initial(sys, x0, t);
+    voltage = -K * y_out';
+    m.peak_v = max(abs(voltage));
+    m.peak_y = max(abs(y_out));
+    v_out = voltage';
 end
 
-residual_max_abs = max(abs(residual_check), [], 2);
-residual_rms = sqrt(mean(residual_check.^2, 2));
-
-%% 7. LIFT-UP
-
-% Re-use the tuned position-control PID from freq based technique to move
-% the cart up to 0.0568 because we know from the quasi-static test that
-% this is the point at which it starts to lift.
-% After that, use the flip-flop to switch from lift to stabilization only
-% the first time it crosses 5°.
-
-% Load the voltage non-linearities
-inner_pid_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
-if exist(inner_pid_file, 'file')
-    load(inner_pid_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
-else
-    error('Inner-loop PID not found. Run pid_cart first.');
+function [t, x, v, m] = sim_bias_load(Acl, K, M_inv)
+    t = 0:0.001:5;
+    % Bias torque constant 0.123 Nm maps to accelerations
+    accel_bias = M_inv * [0; 0.123];
+    B_bias = [0; 0; accel_bias(1); accel_bias(2)];
+    sys = ss(Acl, B_bias, eye(4), zeros(4,1));
+    [x, t] = step(sys, t);
+    v = -K * x';
+    v = v';
+    m = 0;
 end
 
-init_cond_lift = [-0.407, deg2rad(11.66), 0, 0];
-init_cond_switch = [0.057, deg2rad(5), 0, -0.1];
+function [t, x, v, m] = sim_bias_load_aug(Acl, K, M_inv)
+    t = 0:0.001:5;
+    accel_bias = M_inv * [0; 0.123];
+    B_bias = [0; 0; accel_bias(1); accel_bias(2); 0];
+    sys = ss(Acl, B_bias, eye(5), zeros(5,1));
+    [x, t] = step(sys, t);
+    v = -K * x';
+    v = v';
+    m = 0;
+end

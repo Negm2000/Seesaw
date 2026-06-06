@@ -111,7 +111,7 @@ disp('>>> Extraction Complete. Plotting...');
 % --- Generate Theoretical Bode Lines ---
 % We create a continuous frequency array spanning slightly past our bounds
 w_theo = logspace(log10(min(w_vals)*0.5), log10(max(w_vals)*1.5), 1000);
-[mag_theo, phase_theo, ~] = bode(Gx_discrete, w_theo);
+[mag_theo, phase_theo, ~] = bode(Gx, w_theo);
 mag_theo = squeeze(mag_theo);
 phase_theo = squeeze(phase_theo);
 mag_theo_dB = 20 * log10(mag_theo);

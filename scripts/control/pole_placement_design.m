@@ -72,7 +72,7 @@ saveas(gcf, fullfile(figdir, 'OL-Poles.png'))
 %% Pole selection
 %
 % Constraints:
-%   p_OL  ~ +2.24 rad/s   (unstable pole)
+%   p_OL  ~ +2.21 rad/s   (unstable pole)
 %   q_th  ~ 5e-4 rad      (encoder resolution)
 %   V_sat = 6 V           (saturation)
 %   T_c/2 = 0.407 m       (rail limit)
@@ -102,10 +102,10 @@ wn_th = sigma_th / zeta_th;
 p_dom = -sigma_th + 1j*wn_th*sqrt(1-zeta_th^2);
 p_des = make_placeable_poles([p_dom; conj(p_dom); p3; p4]);
 
-theta0_deg = 2.0;
-t = 0:0.002:10;
+theta0_deg = 1.0;
+t = 0:0.002:5;
 [K4, pcl_f, yf, uf, mf] = sim_regulator(A_sw, B_sw, p_des, ...
-    [0; 0; deg2rad(theta0_deg); 0], t);
+    [0; deg2rad(theta0_deg); 0; 0], t);
 A_cl = A_sw - B_sw*K4;
 
 % Values obtained after running SS_RoA_analysis with Q_lyap = eye(4);
@@ -160,9 +160,6 @@ N4 = 25*abs(dom_pole4);
 H4 = N4*s / (s + N4);
 H4d = c2d(H4, Ts, 'tustin');
 
-% initial conditions
-init_cond4 = [0, deg2rad(1), 0, 0];
-
 %% Print summary
 fprintf('Pole selection (vs |p_OL| = %.2f rad/s):\n', abs(p_unstable))
 fprintf('  p1,2 (theta pair):   sigma_th=%.2f, zeta_th=%.2f -> %.2f +/- %.2fj\n', ...
@@ -183,14 +180,19 @@ fprintf('  Phase margin:   %.2f deg\n', Pm)
 fprintf('  Crossover:      %.2f rad/s\n', wgc)
 
 %% Figures
+% =========================================================================
+% TEST 1: 1° initial condition
+% =========================================================================
+disp('Running Test 1: 1° initial condition...');
+
 figure
-subplot(3,1,1); plot(yf.t, yf.x(:,1)*100, 'LineWidth', 1.2); grid on
-ylabel('Cart [cm]')
-title(sprintf('Regulator IC Response (%.1f deg)', theta0_deg))
-subplot(3,1,2); plot(yf.t, rad2deg(yf.x(:,3)), 'LineWidth', 1.2); grid on
-ylabel('\theta [deg]')
+subplot(3,1,1);plot(yf.t, rad2deg(yf.x(:,3)), 'LineWidth', 1.2); grid on
+ylabel('Angle $\theta$ [$^\circ$]')
+title(sprintf('Regulator IC Response (%.1f°)', theta0_deg))
+subplot(3,1,2);  plot(yf.t, yf.x(:,1), 'LineWidth', 1.2); grid on
+ylabel('Position $x_c$ [m]') 
 subplot(3,1,3); plot(yf.t, uf.v, 'LineWidth', 1.2); grid on
-ylabel('V_m [V]'); xlabel('Time [s]')
+ylabel('Voltage $v_{cmd}$ [V]'); xlabel('Time [s]')
 saveas(gcf, fullfile(figdir, 'IC-Response-Final.png'))
 
 figure; hold on; grid on
@@ -201,19 +203,38 @@ legend('Closed-loop poles', 'Open-loop poles')
 title('Pole Constellation - Dominant Theta Pair')
 saveas(gcf, fullfile(figdir, 'CL-Poles-Final.png'))
 
-figure; 
-subplot(2,1,1); plot(t_bias, rad2deg(x_bias(:,3)), 'LineWidth', 1.2); grid on
-ylabel('\theta [deg]'); title('Bias load response WITHOUT integral action')
-subplot(2,1,2); plot(t_bias, u_bias, 'LineWidth', 1.2); grid on
-ylabel('V_m [V]'); xlabel('Time [s]')
-saveas(gcf, fullfile(figdir, 'repeated_disturbance.png'))
+% =========================================================================
+% TEST 2: 100g Load Bias Simulation Comparison
+% =========================================================================
+disp('Running Test 2: 100g Load Bias Comparison...');
 
-figure; 
-subplot(2,1,1); plot(t_bi, rad2deg(x_bi(:,3)), 'LineWidth', 1.2); grid on
-ylabel('\theta [deg]'); title('Bias load response WITH integral action (xi\_dot = theta)')
-subplot(2,1,2); plot(t_bi, u_bi, 'LineWidth', 1.2); grid on
-ylabel('V_m [V]'); xlabel('Time [s]')
-saveas(gcf, fullfile(figdir, 'bias_with_integral.png'))
+% Simulate bias responses using the helper functions already in the script
+[t_bias4, x_bias4, u_bias4, ~] = sim_bias_load(A_sw - B_sw*K4, K4, M_inv);
+[t_bias5, x_bias5, u_bias5, ~] = sim_bias_load_aug(A5 - B5*K5, K5, M_inv);
+
+% Plot comparison
+figure('Name', 'Test 2: 100g Load Bias Comparison');
+subplot(3,1,1);
+hold on; grid on;
+plot(t_bias4, rad2deg(x_bias4(:,3)), 'b', 'LineWidth', 1.5);
+plot(t_bias5, rad2deg(x_bias5(:,3)), 'r--', 'LineWidth', 1.5);
+ylabel('\theta [deg]');
+title('100g Load Bias Response Comparison');
+legend('Without Integral Action', 'With Integral Action', 'Location', 'Best');
+
+subplot(3,1,2);
+hold on; grid on;
+plot(t_bias4, x_bias4(:,1)*100, 'b', 'LineWidth', 1.5);
+plot(t_bias5, x_bias5(:,1)*100, 'r--', 'LineWidth', 1.5);
+ylabel('Cart Position [cm]');
+
+subplot(3,1,3);
+hold on; grid on;
+plot(t_bias4, u_bias4, 'b', 'LineWidth', 1.5);
+plot(t_bias5, u_bias5, 'r--', 'LineWidth', 1.5);
+ylabel('V_m [V]');
+xlabel('Time [s]');
+saveas(gcf, fullfile(figdir, 'Test2_Bias_Load_Comparison.png'));
 
 figure
 [~] = loop_analysis(A_sw, B_sw, K4, figdir);
@@ -293,12 +314,11 @@ Bobs_d = [Bd Ld];
 Cobs_d = eye(4);
 Dobs_d = zeros(4, 3);
 %% Simulation
-x0     = [0; 0; deg2rad(theta0_deg); 0];
+x0     = [0; deg2rad(theta0_deg); 0; 0];
 % In hardware, only positions are measured at startup. Initialize the
 % observer with measured positions and zero velocities to avoid an
 % unrealistic cold-start transient in the linear, unsaturated simulation.
-xhat0  = [x0(1); 0; x0(3); 0];
-t = (0:Ts:3)';
+xhat0  = [x0(1); x0(2); 0; 0];
 sys_combined = ss(A_combined, zeros(8,1), eye(8), zeros(8,1));
 z = initial(sys_combined, [x0; x0-xhat0], t);
 x_hist = z(:, 1:4); e_hist = z(:, 5:8);
@@ -319,38 +339,38 @@ title('Observer vs Controller Poles')
 saveas(gcf, fullfile(figdir, 'Observer-Poles.png'))
 
 figure
-subplot(3,1,1); plot(t, x_hist(:,1)*100, 'LineWidth', 1.2); grid on
-ylabel('Cart [cm]'); title('Observer IC Response (Position-Initialized)')
-subplot(3,1,2); plot(t, rad2deg(x_hist(:,3)), 'LineWidth', 1.2); grid on
-ylabel('\theta [deg]')
+subplot(3,1,1); plot(t, rad2deg(x_hist(:,3)), 'LineWidth', 1.2); grid on
+ylabel('Angle $\theta$ [$^\circ$]'); title('Observer IC Response (1.0°)')
+subplot(3,1,2); plot(t, x_hist(:,1), 'LineWidth', 1.2); grid on
+ylabel('Position $x_c$ [m]');
 subplot(3,1,3); plot(t, u_hist, 'LineWidth', 1.2); grid on
-ylabel('V_m [V]'); xlabel('Time [s]')
+ylabel('Voltage $v_{cmd}$ [V]'); xlabel('Time [s]');
 saveas(gcf, fullfile(figdir, 'Observer-IC-Response.png'))
+
+% =========================================================================
+% TEST 1: 1° initial condition
+% =========================================================================
+disp('Running Test 3: Observer 1° initial condition...');
+
+figure
+subplot(3,1,1); plot(t, rad2deg(x_hist(:,3)), 'b-', 'LineWidth', 1.2); hold on;
+plot(yf.t, rad2deg(yf.x(:,3)), 'k--', 'LineWidth', 1.2); grid on;
+ylabel('Angle $\theta$ [$^\circ$]');
+legend('Observer', 'Controller')
+title(sprintf('Observer vs Regulator IC Response (%.1f°)', theta0_deg))
+subplot(3,1,2); plot(t, x_hist(:,1), 'b-', 'LineWidth', 1.2); hold on;
+plot(yf.t, yf.x(:,1), 'k--', 'LineWidth', 1.2); grid on;
+ylabel('Position $x_c$ [m]') 
+subplot(3,1,3); plot(t, u_hist, 'b-', 'LineWidth', 1.2); hold on;
+plot(yf.t, uf.v, 'k--', 'LineWidth', 1.2); grid on;
+ylabel('Voltage $v_{cmd}$ [V]'); xlabel('Time [s]')
+saveas(gcf, fullfile(figdir, 'Obs-IC-Response-Final.png'))
 
 %% Save
 save(fullfile(SEESAW_ROOT, 'data', 'observer.mat'), ...
      'L', 'p_obs', 'k_obs', 'A_sw', 'B_sw', 'K4', ...
      'Aobs', 'Bobs', 'Cobs', 'Dobs');
 fprintf('Saved data/observer.mat\n')
-
-%% LIFT-UP
-
-% Re-use the tuned position-control PID from freq based technique to move
-% the cart up to 0.0568 because we know from the quasi-static test that
-% this is the point at which it starts to lift.
-% After that, use the flip-flop to switch from lift to stabilization only
-% the first time it crosses 5°.
-
-% Load the voltage non-linearities
-inner_pid_file = fullfile(SEESAW_ROOT, 'data', 'controller_inner_pid.mat');
-if exist(inner_pid_file, 'file')
-    load(inner_pid_file, 'Kp_in', 'Ki_in', 'Kd_in', 'N_in', 'antiwindup_in');
-else
-    error('Inner-loop PID not found. Run pid_cart first.');
-end
-
-init_cond_lift = [-0.407, deg2rad(11.66), 0, 0];
-init_cond_switch = [0.057, deg2rad(5), 0, -0.1];
 
 %% Helpers
 function [K, poles_cl, x, v, m] = sim_regulator(A, B, p, x0, t)
@@ -411,3 +431,4 @@ function margins = loop_analysis(A, B, K, figdir)
     title('Loop Transfer Function Margin Analysis')
     saveas(gcf, fullfile(figdir, 'loop_analysis.png'))
 end
+

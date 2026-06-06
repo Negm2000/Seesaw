@@ -9,7 +9,7 @@ theta_max = deg2rad(11.66);
 xc_max    = 0.432;
 u_start   = 3;
 u_max     = 6;
-slew_max  = 30;
+slew_max  = 60;
 max_T1    = 5;
 max_T2    = 2;
 
@@ -21,10 +21,8 @@ weight_smooth = 50;
 
 % Tuning for the backward gain computation:
 
-% Depending on the final controller : 
-% keep the P4 or take the submatrix of P5
-P_end = P5(1:4, 1:4);
-K_end = K5(1:4);
+P_end = P4;
+K_end = K4;
 
 P_inv = inv(P_end);
 

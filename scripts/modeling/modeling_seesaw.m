@@ -90,13 +90,13 @@ figure('Name', 'Seesaw Lift-Off Verification', 'Color', 'w', 'Position', [100, 1
 % Plot Cart Position
 yyaxis left;
 plot(t_hw, xc_hw, 'b', 'LineWidth', 1.5);
-ylabel('Cart Position, $x_c$ (m)');
+ylabel('Cart Position, $x_c$ [m]');
 hold on;
 
 % Plot Seesaw Angle
 yyaxis right;
 plot(t_hw, theta_hw, 'r', 'LineWidth', 1.5);
-ylabel('Seesaw Angle, $\theta$ (rad)');
+ylabel('Seesaw Angle, $\theta$ [rad]');
 
 % Mark the lift-off point
 xline(t_lift, '--k', 'Lift-Off Detected', 'LabelOrientation', 'horizontal', 'LabelHorizontalAlignment', 'left');
@@ -105,7 +105,7 @@ plot(t_lift, xc_lift, 'bo', 'MarkerSize', 8, 'MarkerFaceColor', 'b');
 
 grid on;
 title('Quasi-Static Balance Test: Identifying $D_C$');
-xlabel('Time (s)');
+xlabel('Time [s]');
 xlim([0, t_hw(end)]);
 
 %% 7. APPLY TUNED PARAMETERS & REBUILD MODEL

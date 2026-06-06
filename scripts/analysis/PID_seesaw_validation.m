@@ -1,7 +1,6 @@
-%% Closed-Loop Cascade Controller Validation (Seesaw Outer Loop)
-% This script loads recorded hardware data for both step and multi-sine 
-% responses, compares them against the theoretical outer closed-loop model (T_theta), 
-% and generates time-domain and frequency-domain (Bode) validation plots.
+%% Time Evolution Comparison of Multiple Controllers
+% This script loads recorded hardware data for four specific test files
+% and generates time-domain plots comparing their performance side-by-side.
 
 clear all; close all; clc;
 
@@ -10,8 +9,7 @@ set(groot, 'defaultAxesTickLabelInterpreter', 'latex');
 set(groot, 'defaultLegendInterpreter', 'latex');
 set(groot, 'defaultTextInterpreter', 'latex');
 
-%% 1. FILE MANAGEMENT & THEORETICAL MODEL LOADING
-
+%% 1. FILE MANAGEMENT
 % Define project root dynamically
 if ~exist('SEESAW_ROOT', 'var')
     SEESAW_ROOT = fileparts(mfilename('fullpath')); 
@@ -20,158 +18,103 @@ end
 
 data_dir = fullfile(SEESAW_ROOT, 'data', 'seesawControl');
 
-% --- Load Theoretical Closed-Loop Model ---
-tf_file = fullfile(SEESAW_ROOT, 'data', 'controller_outer_pid.mat');
-if exist(tf_file, 'file')
-    load(tf_file, 'T_theta'); % Loads the theoretical cascade system T_theta(s)
+% Define the target files and their plot labels
+target_file = 'pid_stable.mat'
+
+%% 2. TIME-DOMAIN VISUALIZATION & ANALYSIS
+disp('--- Generating Time Evolution Comparison ---');
+
+figure('Name', 'Controller Time Evolution Comparison', 'Position', [100 100 1000 800]);
+
+file_path = fullfile(data_dir, target_file);
+if ~exist(file_path, 'file')
+    warning('File %s not found. Skipping...', target_file);
+end
+    
+% Load Data
+loaded_data = load(file_path);
+vars = fieldnames(loaded_data);
+    
+% Handle variable naming differences
+if ismember('ip02_freq_data', vars)
+    raw_data = loaded_data.ip02_freq_data;
+elseif ismember('data', vars)
+    raw_data = loaded_data.data;
 else
-    error('Theoretical model (controller_outer_pid.mat) not found. Run Outer PID design first.');
+    warning('Expected variable in %s not found.', target_file);
 end
 
-%% ========================================================================
-%  PART 1: TIME-DOMAIN VALIDATION (STEP RESPONSE)
-%  ========================================================================
-disp('--- Validating Time-Domain (Step Response) ---');
+% Extract Rows: [time; theta_ref(rad); theta_hw(rad); xc_hw(m); vm_hw]
+t      = raw_data(1, :)';
+th_ref = raw_data(2, :)';
+th_hw  = raw_data(3, :)' - deg2rad(11.66);
+x_hw   = raw_data(4, :)';
+v_hw   = raw_data(5, :)';
 
-step_file = fullfile(data_dir, 'step_output.mat');
-if ~exist(step_file, 'file')
-    warning('Step output data not found. Skipping Time-Domain validation.');
+% --- Determine ON / OFF / Steady State Regions ---
+% 1. Find Switch On (First massive voltage spike)
+idx_on = find(abs(v_hw) >= 5.5, 1, 'first');
+t_on = t(idx_on);
+
+% 2. Find Switch Off (Last point where voltage is actively doing work)
+% Using 0.05V threshold to account for potential sensor/ADC noise
+idx_off = find(abs(v_hw) > 0.05, 1, 'last');
+t_off = t(idx_off);
+
+% 3. Isolate the Steady State Data
+idx_ss = idx_on:idx_off;
+t_ss = t(idx_ss);
+th_hw_ss_deg = rad2deg(th_hw(idx_ss));
+
+% --- Computations (No Plotting for these) ---
+mean_angle = mean(th_hw_ss_deg);
+min_angle = min(th_hw_ss_deg);
+max_angle = max(th_hw_ss_deg);
+
+% Calculate Time Cycle using Peak-to-Peak distance
+[~, peak_locs] = findpeaks(-th_hw_ss_deg);
+if length(peak_locs) > 1
+    time_cycle = mean(diff(t_ss(peak_locs)));
 else
-    % Load Data
-    loaded_step = load(step_file);
-    vars = fieldnames(loaded_step);
-    if ismember('ip02_freq_data', vars), raw_step = loaded_step.ip02_freq_data;
-    elseif ismember('data', vars), raw_step = loaded_step.data;
-    else, error('Expected variable in step_output.mat not found.'); end
-
-    % Extract columns (Adjust indices if your Simulink routing differs!)
-    % Assuming: [time; theta_ref(rad); theta_hw(rad); x_cart(m); V_cmd]
-    t_step        = raw_step(1, :)';
-    th_ref_step   = raw_step(2, :)';
-    th_hw_step    = raw_step(3, :)';
-    
-    if size(raw_step, 1) >= 4
-        x_hw_step = raw_step(4, :)';
-    else
-        x_hw_step = zeros(size(t_step)); % Fallback
-    end
-
-    % Simulate Theoretical Response
-    [th_sim_step, ~] = lsim(T_theta, th_ref_step, t_step);
-
-    % Metrics Calculation (in degrees for readability)
-    rmse_step_deg = sqrt(mean((rad2deg(th_hw_step) - rad2deg(th_sim_step)).^2));
-    fprintf('Step RMSE (Hardware vs Model): %.4f degrees\n', rmse_step_deg);
-
-    % Visualization
-    figure('Name', 'Time-Domain Validation (Outer Loop)', 'Position', [100 100 1000 600]);
-    
-    subplot(2,1,1);
-    plot(t_step, rad2deg(th_ref_step), 'b-', 'LineWidth', 1.5, 'DisplayName', 'Reference ($\theta_{ref}$)'); hold on;
-    plot(t_step, rad2deg(th_sim_step), 'g--', 'LineWidth', 2, 'DisplayName', 'Theoretical Model');
-    plot(t_step, rad2deg(th_hw_step), 'r-', 'LineWidth', 1.2, 'DisplayName', 'Hardware Response');
-    ylabel('Angle [deg]'); title('Cascade Control Step Response Validation');
-    legend('Location', 'northeast'); grid on;
-
-    subplot(2,1,2);
-    plot(t_step, x_hw_step * 100, 'k-', 'LineWidth', 1);
-    ylabel('Cart Position [cm]'); xlabel('Time [s]'); title('Cart Kinematic Trajectory ($x_c$)');
-    grid on;
+    time_cycle = NaN;
 end
 
-%% ========================================================================
-%  PART 2: FREQUENCY-DOMAIN VALIDATION (MULTI-SINE)
-%  ========================================================================
-disp('--- Validating Frequency-Domain (Multi-Sine FRF) ---');
+% Print the computed metrics
+fprintf('\n--- Steady State Analysis ---\n');
+fprintf('Switch ON Time:   %.2f s\n', t_on);
+fprintf('Switch OFF Time:  %.2f s\n', t_off);
+fprintf('Mean Angle:       %.2f deg\n', mean_angle);
+fprintf('Min Angle:        %.2f deg\n', min_angle);
+fprintf('Max Angle:        %.2f deg\n', max_angle);
+fprintf('Time Cycle:       %.2f s\n', time_cycle);
+disp('-----------------------------');
 
-ms_file = fullfile(data_dir, 'multisine_output.mat');
-params_file = fullfile(data_dir, 'multisine_params.mat');
-
-if ~exist(ms_file, 'file') || ~exist(params_file, 'file')
-    warning('Multi-sine data or params not found. Skipping Frequency validation.');
-else
-    % Load Parameters and Data
-    load(params_file, 'w_vals', 'N_freq');
-    loaded_ms = load(ms_file);
-    vars = fieldnames(loaded_ms);
-    if ismember('ip02_freq_data', vars), raw_ms = loaded_ms.ip02_freq_data;
-    elseif ismember('data', vars), raw_ms = loaded_ms.data;
-    else, error('Expected variable in multisine_output.mat not found.'); end
-
-    % Extract columns
-    t_hw        = raw_ms(1, :)';
-    th_ref_hw   = raw_ms(2, :)'; % Input to the closed-loop system
-    th_hw_ms    = raw_ms(3, :)'; % Output of the closed-loop system
-
-    % 1. Apply Zero-Phase Hardware Noise Filter
-    dt = mean(diff(t_hw));
-    Fs = 1/dt;
-    cutoff = 50; % [Hz]
-    [b, a] = butter(2, cutoff / (Fs/2));
+% --- Plotting --- 
+% 1. Angle Tracking 
+subplot(3,1,1); hold on;
+plot(t, rad2deg(th_ref), 'r--', 'LineWidth', 1, 'HandleVisibility', 'off');
+plot(t, rad2deg(th_hw), 'b-', 'LineWidth', 1.5);
+xline(t_on, 'k--', 'Switch ON', 'LabelVerticalAlignment', 'bottom', 'HandleVisibility', 'off');
+xline(t_off, 'k--', 'Switch OFF', 'LabelVerticalAlignment', 'bottom', 'HandleVisibility', 'off');
+yline(mean_angle, 'g--', sprintf('Mean: %.2f°', mean_angle), 'HandleVisibility', 'off');
+ylabel('Angle [$^\circ$]'); title('Pendulum Angle ($\theta_{hw}$) vs Reference ($\theta_{ref}$)');
+ylim([-15 5]); % Lock y-limits for consistency
+grid on;
     
-    ref_clean = filtfilt(b, a, th_ref_hw);
-    th_clean  = filtfilt(b, a, th_hw_ms);
-
-    % 2. Detrend instead of Derivative
-    % Taking the derivative of a 3-tick signal creates infinite noise spikes.
-    % Instead, we simply remove the static DC offset so tfestimate is centered.
-    v_ref_clean = detrend(ref_clean, 'constant');
-    v_hw_clean  = detrend(th_clean, 'constant');
-
-    % 3. Trim startup transient
-    T_test = max(20, 3 * (2*pi/w_vals(1)));
-    T_settle = 3.0; 
-    valid_idx = find(t_hw >= T_settle & t_hw < T_test);
+% 2. Cart Position
+subplot(3,1,2); hold on;
+plot(t, x_hw, 'b-', 'LineWidth', 1.5);
+xline(t_on, 'k--', 'HandleVisibility', 'off');
+xline(t_off, 'k--', 'HandleVisibility', 'off');
+ylabel('Position [m]'); title('Cart Position ($x_c$)');
+grid on;
     
-    v_ref_ss = detrend(v_ref_clean(valid_idx));
-    v_hw_ss  = detrend(v_hw_clean(valid_idx));
+% 3. Motor Voltage (Control Effort)
+subplot(3,1,3); hold on;
+plot(t, v_hw, 'b-', 'LineWidth', 1.5);
+xline(t_on, 'k--', 'HandleVisibility', 'off');
+xline(t_off, 'k--', 'HandleVisibility', 'off');
+ylabel('Voltage [V]'); xlabel('Time [s]'); title('Motor Control Effort ($V_m$)');
+grid on;
 
-    % 4. tfestimate via Welch's Method
-    f_target = w_vals / (2*pi);
-    window = hanning(length(v_ref_ss));
-    [Txy_CL, ~] = tfestimate(v_ref_ss, v_hw_ss, window, 0, f_target, Fs);
-
-    % 5. Extract Magnitude and Phase
-    mag_exp = 20 * log10(abs(Txy_CL));
-    phase_exp = unwrap(angle(Txy_CL)) * 180 / pi;
-
-    % --- Generate Theoretical Bode Lines ---
-    w_theo = logspace(log10(min(w_vals)*0.5), log10(max(w_vals)*1.5), 1000);
-    [mag_theo, phase_theo, ~] = bode(T_theta, w_theo);
-    mag_theo = squeeze(mag_theo);
-    phase_theo = squeeze(phase_theo);
-    mag_theo_dB = 20 * log10(mag_theo);
-
-    % --- DYNAMIC PHASE ALIGNMENT ---
-    % Find the closest 360-degree difference between the start of both plots
-    % and shift the experimental data up/down to match the theoretical branch.
-    offset_laps = round((phase_theo(1) - phase_exp(1)) / 360);
-    phase_exp = phase_exp + (offset_laps * 360);
-
-    % --- Plotting ---
-    figure('Name', 'Cascade Frequency Validation', 'Position', [150 150 900 700]);
-
-    % Magnitude Plot
-    subplot(2,1,1);
-    semilogx(w_theo, mag_theo_dB, 'b-', 'LineWidth', 1.5, 'DisplayName', 'Theoretical Model ($T_{\theta}$)');
-    hold on;
-    semilogx(w_vals, mag_exp, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'DisplayName', 'Hardware FRF');
-    grid on;
-    ylabel('Magnitude [dB]');
-    title('Bode Diagram: Closed-Loop Cascade Controller ($\theta / \theta_{ref}$)');
-    legend('Location', 'southwest');
-    xlim([min(w_theo) max(w_theo)]);
-
-    % Phase Plot
-    subplot(2,1,2);
-    semilogx(w_theo, phase_theo, 'b-', 'LineWidth', 1.5);
-    hold on;
-    semilogx(w_vals, phase_exp, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
-    grid on;
-    ylabel('Phase [deg]');
-    xlabel('Frequency [rad/s]');
-    xlim([min(w_theo) max(w_theo)]);
-    
-    disp('>>> Multi-Sine spectral analysis complete.');
-end
-disp('========================================================================');
+disp('>>> evolution plot generated successfully.');
