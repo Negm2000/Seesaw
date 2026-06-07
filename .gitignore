@@ -22,6 +22,16 @@ slprj/
 build/
 *.bak*
 indent.log
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+*.synctex(busy)
+*.synctex.gz
+*-eps-converted-to.pdf
+test.tex
 
 # Project logs and temporary files
 *.txt
