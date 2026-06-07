@@ -195,11 +195,11 @@ end
 %% 6. TIME DOMAIN VISUALIZATION (Tracking)
 figure('Name', 'Outer Loop Tracking Analysis', 'Position', [850 200 800 600]);
 
-% 1. Pendulum Angle Tracking
-subplot(2,2,1); 
+% 1. Seesaw Angle Tracking
+subplot(2,2,1);
 plot(t, rad2deg(theta_rad), 'b', 'LineWidth', 1.5); hold on;
 plot(t, rad2deg(theta_ref), 'k--', 'LineWidth', 1); grid on;
-title('Pendulum Angle ($\theta$)'); ylabel('Degrees');
+title('Seesaw Angle ($\theta$)'); ylabel('Degrees');
 legend('Simulated Angle', 'Reference ($\theta_{ref}$)');
 yline(0, 'k:', 'HandleVisibility', 'off');
 yline(THETA_LIMIT_DEG, 'r--', 'HandleVisibility', 'off'); yline(-THETA_LIMIT_DEG, 'r--', 'HandleVisibility', 'off');
@@ -334,7 +334,7 @@ figure('Name', 'Outer Loop Multi-Sine', 'Position', [150 150 900 600]);
 subplot(2,1,1);
 plot(t_ms, rad2deg(theta_ref_safe), 'b', 'LineWidth', 1.2); hold on;
 plot(t_ms, rad2deg(theta_rad_ms), 'r--', 'LineWidth', 1);
-ylabel('Angle [deg]'); title('Command vs Predicted Pendulum Angle');
+ylabel('Angle [deg]'); title('Command vs Predicted Seesaw Angle');
 legend('Reference ($\theta_{ref}$)', 'Predicted Output ($\theta$)'); grid on;
 
 subplot(2,1,2);
