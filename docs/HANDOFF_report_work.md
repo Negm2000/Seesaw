@@ -8,6 +8,12 @@ branch `lab-tracking-analysis` @ commit `8ea9e82`.
 
 ## 0. Mission
 
+**Correction 2026-06-07:** the old LQR hardware-loader / `controller_lqr.mat` notes in this
+handoff are stale and should not be used as deployed-design evidence. For LQR/LQI weights,
+state ordering, and synthesis, use `scripts/control/lqr_design.m`: state order
+`[x_c, theta, dot{x_c}, dot{theta}, xi]`, Bryson limits `0.05 m`, `1 deg`, `0.1 m/s`,
+`4 deg*s`, `3 V`, and continuous/discrete `lqr(A5,B5,Q5,R5)` / `dlqr(A5d,B5d,Q5,R5)`.
+
 Finish the lab report at `docs/reports/synced_report/Thesis.tex`. The report documents a
 Quanser IP02 + Seesaw-E project: model the cart, model the coupled cart-seesaw, then
 design/validate four controllers (cascaded frequency-domain PID, state-space pole

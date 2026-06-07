@@ -1,6 +1,11 @@
 % Configuration package
 \usepackage[bottom=2.0cm,top=2.0cm,left=2.0cm,right=2.0cm]{geometry}
 \raggedbottom 
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{0pt}
 
 % Create color bluePoli (-> manuale grafica coordinata:  https://www.polimi.it/fileadmin/user_upload/il_Politecnico/grafica-coordinata/2015_05_11_46xy_manuale_grafica_coordinata.pdf)
 \definecolor{bluePoli}{cmyk}{0.4,0.1,0,0.4}
@@ -14,6 +19,7 @@
 \captionsetup[figure]{labelfont={color=bluePoli}} % Set colour of the captions
 \captionsetup[table]{labelfont={color=bluePoli}} % Set colour of the captions
 \captionsetup[algorithm]{labelfont={color=bluePoli}} % Set colour of the captions
+\captionsetup[subfloat]{captionskip=25pt} % Fix subfloat caption overlaps
 
 \theoremstyle{colored}
 \newtheorem{theorem}{Theorem}[section]
@@ -64,25 +70,25 @@
 {\color{bluePoli}\normalfont\Large\bfseries}
 {\color{bluePoli}\thesection.}{1em}{}
 \titlespacing*{\section}
-{0pt}{3.3ex}{3.3ex}
+{0pt}{2.2ex}{1.8ex}
 
 \titleformat{\subsection}
 {\color{bluePoli}\normalfont\large\bfseries}
 {\color{bluePoli}\thesubsection.}{1em}{}
 \titlespacing*{\subsection}
-{0pt}{3.3ex}{3.3ex}
+{0pt}{2.0ex}{1.5ex}
 
 \titleformat{\subsubsection}
 {\color{bluePoli}\normalfont\large\bfseries}
 {\color{bluePoli}\thesubsubsection.}{1em}{}
 \titlespacing*{\subsubsection}
-{0pt}{3.3ex}{3.3ex}
+{0pt}{1.8ex}{1.2ex}
 
 \titleformat{\paragraph}
 {\color{bluePoli}\normalfont\normalsize\bfseries}
 {\color{bluePoli}\theparagraph.}{1em}{}
 \titlespacing*{\paragraph}
-{0pt}{3.3ex}{3.3ex}
+{0pt}{1.6ex}{1.0ex}
 
 % Custom headers and footers
 \pagestyle{fancy}
