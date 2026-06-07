@@ -185,7 +185,7 @@ out_dir = fullfile(seesaw_root, 'validation', 'data');
 if ~exist(out_dir, 'dir'); mkdir(out_dir); end
 out_path = fullfile(out_dir, 'tracking_protocol.mat');
 
-seg_table = seg_table_cells; %#ok<NASGU>
+seg_table = seg_table_cells;
 save(out_path, 'r_theta_ts', 'segment_id_ts', 'seg_table', ...
     'sine_freqs_Hz', 'r_step_deg', 'r_pulse_deg', 'r_sine_deg', ...
     'exp_fs_Hz', 'total_duration_s');

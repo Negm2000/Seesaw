@@ -8,13 +8,13 @@ function results = analyze_tracking(files, outdir)
 %
 %   results = ANALYZE_TRACKING(files, outdir) overrides the inputs.
 %
-%   Analyses (reference-tracking adaptation of the original HVP):
+%   Analyses:
 %     1. Per-file tracking dashboard (steps, pulse, sines, control effort)
 %     2. Stepped-sine tracking FRF  T(jw)=theta/r_theta  (quality-gated)
 %     3. Step/pulse time-domain tracking metrics (the reliable 1-deg evidence)
 %     4. Bounded-oscillation / dead-zone fingerprint on recovery segments
 %     5. Three-way controller comparison (PID vs PP+DD vs LQR+DD)
-%     6. Observer benchmark: dirty-deriv vs Luenberger vs numerical (15-ch)
+%     6. Estimator benchmark: dirty derivative vs logged estimator vs numerical derivative (15-ch)
 %     7. Model-vs-hardware tracking FRF overlay (linear closed loop)
 %
 %   Requires load_lab_capture.m on the path and scripts/config/seesaw_params.m.
@@ -135,14 +135,16 @@ catch ME
 end
 for i = 1:numel(caps)
     if caps{i}.has_states
-        try, local_phase_portrait(caps{i}, outdir); catch ME
+        try
+            local_phase_portrait(caps{i}, outdir);
+        catch ME
             fprintf('[warn] phase portrait (%s) failed: %s\n', caps{i}.name, ME.message);
         end
     end
 end
 
 % =====================================================================
-% Observer benchmark (15-ch captures)
+% Estimator benchmark (15-ch captures)
 % =====================================================================
 for i = 1:numel(caps)
     if caps{i}.has_obs
@@ -317,7 +319,7 @@ if ~isempty(m.frf)
     h_hi = semilogx(g.f(g.ok),  mdb(g.ok), 'bo-','LineWidth',1.4,'MarkerFaceColor','b');
     r_amp = median(g.r_amp_deg(g.r_amp_deg>0));
     floor_db = 20*log10(m.osc.rms_deg / r_amp);
-    yline(floor_db,'r--','limit-cycle floor','LabelHorizontalAlignment','left','Color',[.85 .2 .2]);
+    yline(floor_db,'r--','Color',[.85 .2 .2]);
     grid on; yline(0,'k:'); xlim([0.09 11]); ylim([-40 25]);
     xlabel('Frequency [Hz]'); ylabel('|\theta/\theta_{ref}| [dB]');
     if ~isempty(h_lo)
@@ -363,7 +365,7 @@ subplot(2,2,1);
 hmag = gobjects(1,numel(per));
 for i=1:numel(per)
     g=per(i).frf; ok=g.ok; mdb=20*log10(g.mag);
-    semilogx(g.f, mdb, '-','Color',[cols(i,:) 0.30],'HandleVisibility','off'); hold on; % all freqs faded
+    semilogx(g.f, mdb, '-','Color',0.65*cols(i,:) + 0.35*[1 1 1],'HandleVisibility','off'); hold on;
     semilogx(g.f(~ok), mdb(~ok),'o','MarkerEdgeColor',cols(i,:),'MarkerFaceColor','w', ...
         'HandleVisibility','off');                                                       % below floor (hollow)
     hmag(i)=semilogx(g.f(ok), mdb(ok),'o-','Color',cols(i,:),'LineWidth',1.7, ...
@@ -393,7 +395,7 @@ for i=1:numel(per)
         'MarkerFaceColor',cols(i,:)); hold on;
 end
 for i=1:numel(per)
-    yline(per(i).step_pos.track_rms_deg, '--','Color',cols(i,:),'Alpha',0.5,'HandleVisibility','off');
+    yline(per(i).step_pos.track_rms_deg, '--','Color',cols(i,:),'HandleVisibility','off');
 end
 grid on; xlim([0.09 11]); xlabel('Frequency [Hz]'); ylabel('RMS angle error [deg]');
 title('Tracking error vs frequency  (dashed = 1{\circ}-step error)');
@@ -418,14 +420,15 @@ end
 text(0.0, 0.98, tx, 'FontName','FixedWidth','FontSize',10,'VerticalAlignment','top','Interpreter','tex');
 title('Performance summary');
 
-sgtitle('Controller comparison — identical reference protocol','FontWeight','bold');
+sgtitle('Controller comparison - identical reference protocol','FontWeight','bold');
 saveas(f, fullfile(outdir,'Compare-Controllers.png')); close(f);
 fprintf('  saved Compare-Controllers.png\n');
 end
 
 function ob = local_observer_benchmark(c, P, outdir)
-% Dirty-derivative (in-loop) vs Luenberger observer vs filtered numerical diff.
+% Dirty-derivative velocity vs logged model-based estimator vs filtered numerical derivative.
 dt = 1/c.fs; ob = struct();
+est_label = local_estimator_label(c.name);
 % filtered numerical derivative of measured angle (zero-phase LPF @ 30 Hz)
 fc = 30;
 th_f = local_lpf(c.theta, fc, c.fs);
@@ -459,14 +462,14 @@ plot(c.t(zoom), c.theta_dot(zoom),'-','Color',[.85 .3 .1],'LineWidth',0.6); hold
 plot(c.t(zoom), c.theta_dot_hat(zoom),'b-','LineWidth',1.0);
 plot(c.t(zoom), thd_num(zoom),'k:','LineWidth',0.8); grid on;
 ylabel('Angular rate $\dot\theta$ [rad/s]','Interpreter','latex');
-legend({'dirty derivative (used in loop)','Luenberger observer','filtered finite difference'},'Location','best');
+legend({'dirty derivative (used in loop)',est_label,'filtered finite difference'},'Location','best');
 title('Angular-rate estimates (45–55 s detail)');
 
 subplot(3,1,2);
 loglog(fp,Pdd,'-','Color',[.85 .3 .1],'LineWidth',1.0); hold on;
 loglog(fp,Pob,'b-','LineWidth',1.3); loglog(fp,Pnum,'k:','LineWidth',1.0);
 grid on; xlim([0.1 250]); xlabel('Frequency [Hz]'); ylabel('PSD [(rad/s)^2/Hz]');
-legend({'dirty derivative','Luenberger observer','filtered difference'},'Location','best');
+legend({'dirty derivative',est_label,'filtered difference'},'Location','best');
 title(sprintf('Angular-rate spectrum, level segments  (rms: %.3f / %.3f / %.3f rad/s)', ...
     ob.dd_rms, ob.obs_rms, ob.num_rms));
 
@@ -479,6 +482,20 @@ title(sprintf('Observer estimation error  (rms %.3f{\\circ}, bias %+.3f{\\circ},
 sgtitle(sprintf('Angular-rate estimation — %s', c.controller),'FontWeight','bold');
 saveas(f, fullfile(outdir, sprintf('Observer-%s.png', c.name))); close(f);
 fprintf('  saved Observer-%s.png\n', c.name);
+end
+
+function label = local_estimator_label(name)
+% The same 15-channel layout is used for pole-placement and LQR runs. In
+% PPDDTEST the estimator channels are the Luenberger observer; in LQRDDTEST
+% they are the Kalman/LQE estimate.
+b = upper(name);
+if contains(b,'LQR')
+    label = 'Kalman estimate';
+elseif contains(b,'PP')
+    label = 'Luenberger observer';
+else
+    label = 'logged estimator';
+end
 end
 
 function md = local_step_validation(caps, per, P, root, outdir)
@@ -511,15 +528,15 @@ if exist(lqrf,'file')
             if isfinite(g0) && abs(g0) > 1e-6
                 tt = linspace(0,12,3000)';
                 y = step(sysT, tt) / g0;        % normalised: settles to 1
-                h(end+1) = plot(tt, y,'k--','LineWidth',2); %#ok<AGROW>
-                leg{end+1} = 'linear model (LQR servo, normalised)'; %#ok<AGROW>
+                h(end+1) = plot(tt, y,'k--','LineWidth',2);
+                leg{end+1} = 'linear model (LQR servo, normalised)';
                 src = 'controller_lqr.mat (A_cl)';
             end
         end
     end
 end
 
-yline(1,'k:','reference','LabelHorizontalAlignment','left');
+yline(1,'k:');
 grid on; xlim([0 12]); ylim([-0.5 4]);
 xlabel('Time from step [s]'); ylabel('Seesaw angle \theta [deg]');
 legend(h, leg, 'Location','northeast','Interpreter','none');
@@ -618,7 +635,7 @@ cols = lines(numel(per)); hold on;
 for i=1:numel(per)
     x = per(i).angle_rms_deg; y = per(i).V_rms;
     sz = 200 + 60*per(i).xc_pp_cm;
-    scatter(x, y, sz, cols(i,:), 'filled', 'MarkerFaceAlpha',0.6, 'MarkerEdgeColor','k');
+    scatter(x, y, sz, cols(i,:), 'filled', 'MarkerEdgeColor','k');
     text(x, y, ['  ' per(i).controller], 'FontSize',10,'Interpreter','none');
 end
 grid on; xlabel('Angle tracking error (rms) [deg]'); ylabel('Motor voltage (rms) [V]');
@@ -638,8 +655,8 @@ f = local_newfig([60 60 900 760]);
 thd = c.theta_dot_hat;
 [xr,yr] = local_break(rad2deg(c.theta), thd, c.segmask([1 3 5 7 30]));
 [xs,ys] = local_break(rad2deg(c.theta), thd, c.segmask([2 4]));
-h2 = plot(xs, ys, '-', 'Color',[.85 .3 .1 0.8],'LineWidth',0.7); hold on;
-h1 = plot(xr, yr, '-', 'Color',[.2 .4 .9 0.6],'LineWidth',0.6);
+h2 = plot(xs, ys, '-', 'Color',[.85 .3 .1],'LineWidth',0.7); hold on;
+h1 = plot(xr, yr, '-', 'Color',[.2 .4 .9],'LineWidth',0.6);
 grid on; xlabel('Seesaw angle \theta [deg]');
 ylabel('Angular rate $\dot\theta$ (observer) [rad/s]','Interpreter','latex');
 legend([h1 h2],{'reference held at 0 (rocking)','\pm1{\circ} steps'},'Location','northeast');
@@ -677,7 +694,6 @@ end
 
 function f = local_newfig(pos)
 f = figure('Position',pos,'Visible','off','Color','w');
-try, theme(f,'light'); catch, end   %#ok<CTCH>  (R2025a+; harmless if absent)
 end
 
 function w = local_hann(n)

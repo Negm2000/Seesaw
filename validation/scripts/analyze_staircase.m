@@ -61,7 +61,7 @@ plot(t, th,'r-','LineWidth',0.7);
 ylabel('Seesaw angle \theta [deg]'); ylim([-2 12]);
 yline(11.5,'--','Color',[.5 .5 .5]); yline(-11.5,'--','Color',[.5 .5 .5]);
 yyaxis right;
-plot(t, c.V,'Color',[0 .55 0 .5],'LineWidth',0.4);
+plot(t, c.V,'Color',[0 .55 0],'LineWidth',0.4);
 ylabel('Motor voltage [V]'); ylim([-12 12]);
 ax=gca; ax.YAxis(1).Color='k'; ax.YAxis(2).Color=[0 .45 0];
 grid on; xlabel('Time [s]'); xlim([0 t(end)]);
@@ -119,5 +119,4 @@ end
 
 function f = local_fig(pos)
 f = figure('Position',pos,'Visible','off','Color','w');
-try, theme(f,'light'); catch, end %#ok<CTCH>
 end

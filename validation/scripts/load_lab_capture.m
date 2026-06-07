@@ -6,8 +6,7 @@ function cap = load_lab_capture(file)
 %   [channels x samples], and returns a struct with named, unit-consistent
 %   signals plus protocol-segment slicing.
 %
-%   Three logging layouts are auto-detected by channel count (see
-%   memory/lab_data_may26_formats.md for the decode and its provenance):
+%   Three logging layouts are auto-detected by channel count:
 %
 %     5-ch  (older cascaded-PID export):
 %        [t, r_theta, theta, xc, V_m]
@@ -16,7 +15,7 @@ function cap = load_lab_capture(file)
 %     15-ch (state-space integral tracking, SSi_tracking.slx):
 %        [t, r_xc, r_theta, r_xcdot, r_thetadot, ...
 %         xc, theta, xc_dot, theta_dot, ...            (states; vel = dirty-deriv used in loop)
-%         xc_hat, theta_hat, xc_dot_hat, theta_dot_hat,...(parallel Luenberger observer, logged only)
+%         xc_hat, theta_hat, xc_dot_hat, theta_dot_hat,...(parallel estimator channels)
 %         seg_id, V_cmd]
 %
 %   Output struct fields (SI units, rad for angles):
