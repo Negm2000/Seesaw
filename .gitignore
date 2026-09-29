@@ -29,8 +29,13 @@ indent.log
 !qsg.txt
 !requirements.txt
 
-# Generated figures
+# Generated figures (figures used by the README are kept)
 *.png
+!docs/figures/*.png
+!docs/results/*.png
+
+# Third-party toolboxes installed locally (see README)
+casadi-*/
 
 # QUARC build directories
 *_quarc_win64/

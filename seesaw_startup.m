@@ -14,7 +14,14 @@ set(groot, 'defaultTextInterpreter', 'latex');
 root_dir = fileparts(mfilename('fullpath'));
 
 % Define subdirectories
-subfolders = {'data', 'docs', 'models', 'scripts', 'src', 'validation', 'casadi-3.7.2-windows64-matlab2018b'};
+subfolders = {'data', 'docs', 'models', 'scripts', 'src', 'validation'};
+
+% CasADi (only needed for scripts/control/liftup_TVLQR.m) is not tracked in git.
+% Unzip a CasADi MATLAB release into the project root and it is picked up here.
+casadi_dirs = dir(fullfile(root_dir, 'casadi-*'));
+if ~isempty(casadi_dirs)
+    subfolders{end+1} = casadi_dirs(1).name;
+end
 
 % Add all subdirectories to the MATLAB path
 for i = 1:length(subfolders)
