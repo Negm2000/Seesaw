@@ -6,6 +6,10 @@ The plant is hard to balance on purpose: one motor drives the cart, and the cart
 
 **Full report:** [docs/Seesaw_report.pdf](docs/Seesaw_report.pdf)
 
+![The rig balancing in the lab](docs/figures/seesaw_hardware.gif)
+
+The rig in the lab under closed-loop control: the cart shifts along the beam to keep the seesaw level.
+
 ![Cart and seesaw schematic](docs/figures/system_schematic.png)
 
 ## Results on hardware
